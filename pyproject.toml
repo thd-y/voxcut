@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voxcut"
+version = "0.0.0"
+description = "Cut the owner's speech from long microphone recordings with measured recall (Silero VAD)"
+requires-python = ">=3.12"
+# torch: CPU-сборку ставит `make setup` через --index-url до установки пакета (C6).
+dependencies = [
+    "torch==2.14.1",
+    "silero-vad==6.2.3",
+    "numpy",
+    "soundfile",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools]
+packages = ["voxcut"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: требует ffmpeg/torch; не входит в make check"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

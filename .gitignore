@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Аудио и артефакты прогонов владельца — никогда в git
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.ogg
+*.opus
+*.rf64
+*.npy
+out/
+runs/
+data/
+recordings/
+tests/fixtures/private/
