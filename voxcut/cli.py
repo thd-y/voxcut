@@ -1,4 +1,4 @@
-"""voxcut commands: probs, segment, detect, evaluate, sweep (D19, D24)."""
+"""voxcut commands: probs, segment, detect, export, evaluate, sweep (D19, D24)."""
 
 import argparse
 import hashlib
@@ -18,6 +18,7 @@ from voxcut.audio import (
     check_env,
     clean_orphans,
     compute_probs,
+    export_clips,
     load_json,
 )
 from voxcut.intervals import (
@@ -221,6 +222,10 @@ def cmd_sweep(a) -> None:
     print(f"{FW_NAME}: {FW_NOTE}")
 
 
+def cmd_export(a) -> None:
+    print(export_clips(a.seg_dir))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="voxcut")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -238,6 +243,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--config", required=True)
     s.add_argument("--out", required=True)
     s.set_defaults(func=cmd_detect)
+    s = sub.add_parser("export", help="нарезать клипы из источника в seg-каталог/clips")
+    s.add_argument("seg_dir")
+    s.set_defaults(func=cmd_export)
     s = sub.add_parser("evaluate", help="метрики seg-каталога по разметке")
     s.add_argument("seg_dir")
     s.add_argument("labels")

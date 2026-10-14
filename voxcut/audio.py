@@ -339,3 +339,52 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
     (tmp / "probs.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))  # last
     os.replace(tmp, dst)
     return dst
+
+
+EXPORT_BLOCK = 1 << 20  # frames per block (C7)
+_DTYPES = {"PCM_16": "int16", "PCM_24": "int32", "PCM_32": "int32", "FLOAT": "float32",
+           "DOUBLE": "float64"}
+
+
+def export_clips(seg_dir: str) -> Path:
+    """`export`: cut final intervals from the source into seg-dir/clips/ (D18, C7, D19).
+
+    Blocks in the source's native dtype, so RSS does not grow with the clip length; clips keep
+    the container, subtype and all channels of the source.
+    """
+    seg_dir = Path(seg_dir)
+    run = load_json(seg_dir / "run.json")
+    rows = [json.loads(line) for line in (seg_dir / "manifest.jsonl").read_text().splitlines()
+            if line]
+    src = run["source"]["path"]
+    if sha256_file(src) != run["source"]["sha256"]:
+        raise RunError(f"{src}: sha256 не совпадает с манифестом {seg_dir}, источник изменился")
+    clean_orphans(seg_dir)
+    dst = seg_dir / "clips"
+    if dst.exists():
+        raise RunError(f"{dst} уже существует: клипы не перезаписываются (D19)")
+    info = sf.info(src)
+    dtype = _DTYPES.get(info.subtype, "int16")  # 8-bit PCM is exact through int16
+    ext = "flac" if info.format == "FLAC" else "wav"
+    tmp = seg_dir / "clips.tmp"
+    tmp.mkdir()
+    out_rows = []
+    with sf.SoundFile(src) as f:
+        for i, row in enumerate(rows):
+            start, end = row["start_sample"], min(row["end_sample"], info.frames)  # D5: clamp
+            name = f"{i:04d}_{start}_{end}.{ext}"
+            f.seek(start)
+            with sf.SoundFile(tmp / name, "w", info.samplerate, info.channels,
+                              subtype=info.subtype, format=info.format) as out:
+                left = end - start
+                while left > 0:
+                    block = f.read(min(EXPORT_BLOCK, left), dtype=dtype, always_2d=True)
+                    if not len(block):
+                        break
+                    out.write(block)
+                    left -= len(block)
+            out_rows.append(row | {"end_sample": end, "audio_path": f"clips/{name}"})
+    (tmp / "manifest.jsonl").write_text(  # last
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in out_rows))
+    os.replace(tmp, dst)
+    return dst
