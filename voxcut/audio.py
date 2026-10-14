@@ -64,14 +64,14 @@ def ffmpeg_stream(args: list[str]):
             )
 
 
-def ffprobe_audio(src: str) -> dict:
-    """codec_name, sample_rate, channels of the first audio stream, same refusal rules as above."""
+def probe_codec(src: str) -> str:
+    """codec_name of the first audio stream, same refusal rules as above."""
     find_ffmpeg()
     path = shutil.which("ffprobe")
     if path is None:
         raise FFmpegError("ffprobe не найден, установите: sudo apt install ffmpeg")
     cmd = [path, "-v", "error", "-select_streams", "a:0",
-           "-show_entries", "stream=codec_name,sample_rate,channels", "-of", "json", src]
+           "-show_entries", "stream=codec_name", "-of", "json", src]
     r = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if r.returncode != 0 or r.stderr.strip():
         raise FFmpegError(f"ffprobe завершился с кодом {r.returncode}: {r.stderr.strip()}"
@@ -79,9 +79,7 @@ def ffprobe_audio(src: str) -> dict:
     streams = json.loads(r.stdout)["streams"]
     if not streams:
         raise SourceError(f"{src}: нет аудиодорожки")
-    st = streams[0]
-    return {"codec_name": st["codec_name"], "sample_rate": int(st["sample_rate"]),
-            "channels": int(st["channels"])}
+    return streams[0]["codec_name"]
 
 
 class SourceError(RuntimeError):
@@ -90,7 +88,6 @@ class SourceError(RuntimeError):
 
 @dataclass(frozen=True)
 class SourceInfo:
-    path: str
     sr: int
     channels: int
     n_samples: int  # counted by ffmpeg decode (D5), equals sf.info frames (D18)
@@ -181,8 +178,8 @@ def check_source(src: str) -> SourceInfo:
     with open(src, "rb") as f:
         if f.read(4) in (b"RIFF", b"RF64"):
             check_wav_structure(src)
-    probe = ffprobe_audio(src)
-    fix = convert_command(src, probe["codec_name"])
+    codec = probe_codec(src)
+    fix = convert_command(src, codec)
     try:
         info = sf.info(src)
     except Exception as e:
@@ -190,7 +187,6 @@ def check_source(src: str) -> SourceInfo:
     if info.format not in ("WAV", "WAVEX", "RF64", "FLAC"):
         raise SourceError(f"{src}: формат {info.format}, в v1 только WAV или FLAC."
                           f"\nКонвертируйте: {fix}")
-    codec = probe["codec_name"]
     if not (codec.startswith("pcm_") or codec == "flac"):
         raise SourceError(f"{src}: кодек {codec}, сэмпл-точность не гарантирована."
                           f"\nКонвертируйте: {fix}")
@@ -198,7 +194,7 @@ def check_source(src: str) -> SourceInfo:
     if n != info.frames:
         raise SourceError(f"{src}: soundfile видит {info.frames} сэмплов, ffmpeg декодирует {n}."
                           f"\nКонвертируйте: {fix}")
-    return SourceInfo(src, info.samplerate, info.channels, n, codec, info.format, info.subtype)
+    return SourceInfo(info.samplerate, info.channels, n, codec, info.format, info.subtype)
 
 
 def vad_filter(channel: str | int | None, channels: int) -> str:
