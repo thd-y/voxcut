@@ -1,5 +1,4 @@
 import json
-import resource
 import subprocess
 
 import numpy as np
@@ -94,7 +93,7 @@ def test_cli_export(tmp_path, capsys):
 
 
 @pytest.mark.slow
-def test_whole_file_interval_rss_bounded(tmp_path):
+def test_whole_file_interval_rss_bounded(tmp_path, peak_growth_mb):
     """C7: a clip as long as the source must not be read into memory at once."""
     src = str(tmp_path / "long.wav")
     seconds = 300  # 48k стерео FLOAT: 115 МБ на диске, 230 МБ в float64 при read() целиком
@@ -102,9 +101,9 @@ def test_whole_file_interval_rss_bounded(tmp_path):
                     f"anoisesrc=d={seconds}:r={SR}:a=0.3", "-ac", "2", "-c:a", "pcm_f32le", src],
                    check=True)
     seg = make_seg_dir(tmp_path, src, [(0, SR * seconds)])
-    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    clips = export_clips(seg)
-    grew_mb = (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before) / 1024
+    grew_mb = peak_growth_mb("from voxcut.audio import export_clips",
+                             f"export_clips({str(seg)!r})")
+    clips = seg / "clips"
     row = json.loads((clips / "manifest.jsonl").read_text())
     assert sf.info(clips.parent / row["audio_path"]).frames == SR * seconds
     assert grew_mb < 50, f"RSS вырос на {grew_mb:.0f} МБ"

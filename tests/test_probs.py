@@ -1,5 +1,4 @@
 import json
-import resource
 import subprocess
 
 import numpy as np
@@ -118,17 +117,16 @@ def test_ffmpeg_failure_publishes_nothing(tmp_path, monkeypatch):
 
 
 @pytest.mark.slow
-def test_rss_bounded_over_50k_frames(tmp_path, model):
+def test_rss_bounded_over_50k_frames(tmp_path, peak_growth_mb):
     """C1: without inference_mode RSS grows ~21 KB/frame (~1 GB here)."""
-    af = vad_filter(None, 1)
-    vad_probs(noise_wav(tmp_path / "warm.wav", 2), af, model)
-    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    # файл генерирует ffmpeg: массив на 25.6 млн сэмплов в этом процессе сам дал бы +200 МБ
+    warm = noise_wav(tmp_path / "warm.wav", 2)
     src = str(tmp_path / "long.wav")
     subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
                     f"anoisesrc=d={50_000 * 512 / SR}:r={SR}:a=0.3", "-c:a", "pcm_s16le", src],
                    check=True)
-    probs, _ = vad_probs(src, af, model)
-    grew_mb = (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before) / 1024
-    assert len(probs) == 50_000
+    grew_mb = peak_growth_mb(
+        "from silero_vad import load_silero_vad\n"
+        "from voxcut.audio import vad_filter, vad_probs\n"
+        f"m, af = load_silero_vad(), vad_filter(None, 1)\nvad_probs({warm!r}, af, m)",
+        f"assert len(vad_probs({src!r}, af, m)[0]) == 50_000")
     assert grew_mb < 50, f"RSS вырос на {grew_mb:.0f} МБ"
