@@ -152,6 +152,8 @@ def parse_labels(text: str, duration_s: float | None = None) -> dict[str, list]:
         try:
             s, e = float(fields[0]), float(fields[1])
         except ValueError:
+            s = e = math.nan
+        if not (math.isfinite(s) and math.isfinite(e)):  # float() also accepts nan and inf
             errors.append(f"строка {no}: start/end не числа: {fields[0]!r}, {fields[1]!r}")
             continue
         label = fields[2].strip().lower()

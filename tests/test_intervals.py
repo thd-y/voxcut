@@ -130,6 +130,8 @@ def test_labels_ok_normalizes_skips_and_merges():
     (lab((0, 10, "scored")) + "1 2 me\n", "3 поля"),
     (lab((0, 10, "scored"), (2, 2, "me")), "start 2.0 ≥ end 2.0"),
     (lab((0, 10, "scored"), ("x", 2, "me")), "не числа"),
+    (lab((0, 10, "scored"), ("nan", 2, "me")), "не числа"),
+    (lab(("-inf", 10, "scored")), "не числа"),
     (lab((0, 10, "scored"), (9, 11, "me")), "выходит за scored"),
     (lab((0, 10, "scored"), (5, 6, "me"), (20, 30, "scored")), "длительности источника"),
 ])
