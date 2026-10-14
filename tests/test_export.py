@@ -80,8 +80,10 @@ def test_orphan_tmp_removed_and_zero_intervals(tmp_path):
     seg = make_seg_dir(tmp_path, src, [])
     (seg / "clips.tmp").mkdir()
     (seg / "clips.tmp" / "junk.wav").write_text("x")
+    (seg / "other.tmp").mkdir()
     clips = export_clips(seg)
     assert [p.name for p in clips.iterdir()] == ["manifest.jsonl"]
+    assert (seg / "other.tmp").exists()
 
 
 def test_cli_export(tmp_path, capsys):

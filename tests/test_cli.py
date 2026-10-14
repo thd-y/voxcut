@@ -92,11 +92,15 @@ def test_incomplete_probs_dir_refused(tmp_path, damage, needle):
         segment(d, cfg())
 
 
-def test_orphan_tmp_removed_on_start(tmp_path):
+def test_only_own_orphan_tmp_removed(tmp_path):
     d = make_probs_dir(tmp_path, SPEECH)
-    (d / "seg-deadbeef.tmp").mkdir()
-    segment(d, cfg())
-    assert not (d / "seg-deadbeef.tmp").exists()
+    own = d / f"seg-{cfg().sha256()[:8]}.tmp"
+    own.mkdir()
+    (own / "junk").write_text("x")
+    (d / "seg-deadbeef.tmp").mkdir()  # параллельный прогон другого конфига
+    seg = segment(d, cfg())
+    assert not own.exists() and not (seg / "junk").exists()
+    assert (d / "seg-deadbeef.tmp").exists()
 
 
 def test_channel_mismatch_refused(tmp_path):

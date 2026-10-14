@@ -95,8 +95,10 @@ def test_existing_dir_reused_and_orphan_tmp_removed(tmp_path):
     out = tmp_path / "o"
     orphan = out / (probs_dir_name(src, sha256_file(src), None) + ".tmp")
     orphan.mkdir(parents=True)
+    (out / "backup.tmp").mkdir()  # чужая папка владельца в --out
     (orphan / "junk").write_text("x")
     dst = compute_probs(src, str(out))
+    assert (out / "backup.tmp").exists()
     assert not orphan.exists() and sorted(p.name for p in dst.iterdir()) == ["probs.json",
                                                                               "probs.npy"]
     stamp = (dst / "probs.npy").stat().st_mtime_ns

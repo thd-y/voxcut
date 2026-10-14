@@ -16,9 +16,9 @@ from voxcut.audio import (
     RunError,
     SourceError,
     check_env,
-    clean_orphans,
     compute_probs,
     export_clips,
+    fresh_tmp,
     load_json,
 )
 from voxcut.intervals import (
@@ -78,7 +78,6 @@ def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Pat
     if cfg.channel is not None and _mono(cfg.channel) != _mono(pj["channel"]):
         raise RunError(f"конфиг: channel={cfg.channel!r}, а probs посчитаны для "
                        f"channel={pj['channel']!r} ({probs_dir})")
-    clean_orphans(probs_dir)
     probs_sha = hashlib.sha256((probs_dir / "probs.npy").read_bytes()).hexdigest()
     env = {k: pj[k] for k in ENV_KEYS}
     dst = probs_dir / f"seg-{cfg.sha256()[:8]}"
@@ -110,8 +109,7 @@ def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Pat
                               "end_s": e / sr, "duration_s": (e - s) / sr, "branch": "raw",
                               "p_max": p_max, "p_mean": p_mean} | params
                     | {"model_version": pj["model_version"], "audio_path": None})
-    tmp = dst.with_name(dst.name + ".tmp")
-    tmp.mkdir()
+    tmp = fresh_tmp(dst)
     write_jsonl(tmp / "raw.jsonl", raw_rows)
     write_jsonl(tmp / "manifest.jsonl", rows)
     run = {

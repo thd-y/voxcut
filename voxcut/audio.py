@@ -266,11 +266,16 @@ class RunError(RuntimeError):
     """A published run dir does not match what this run would produce (D19)."""
 
 
-def clean_orphans(parent: Path) -> None:
-    """D19: <dir>.tmp left by an interrupted run is removed before any command starts."""
-    for tmp in Path(parent).glob("*.tmp"):
-        if tmp.is_dir():
-            shutil.rmtree(tmp)
+def fresh_tmp(dst: Path) -> Path:
+    """Empty <dst>.tmp to publish from; an orphan of an interrupted run is removed (D19).
+
+    Only our own name: other *.tmp dirs may be the owner's or a parallel run's.
+    """
+    tmp = dst.with_name(dst.name + ".tmp")
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir(parents=True)
+    return tmp
 
 
 def current_env(af: str) -> dict:
@@ -300,19 +305,15 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
 
     An existing dir for the same source and channel is reused after the env check.
     """
-    out = Path(out_dir)
-    if out.exists():
-        clean_orphans(out)
     sha = sha256_file(src)
-    dst = out / probs_dir_name(src, sha, channel)
+    dst = Path(out_dir) / probs_dir_name(src, sha, channel)
     if dst.exists():
         meta = load_json(dst / "probs.json")
         check_env(meta, current_env(vad_filter(channel, meta["channels"])), dst)
         return dst
     info = check_source(src)
     af = vad_filter(channel, info.channels)
-    tmp = dst.with_name(dst.name + ".tmp")
-    tmp.mkdir(parents=True)
+    tmp = fresh_tmp(dst)
     probs, n16k = vad_probs(src, af)
     if len(probs) != n_frames(n16k):
         raise RuntimeError(f"кадров {len(probs)}, ожидалось n_frames({n16k}) = {n_frames(n16k)}")
@@ -359,15 +360,13 @@ def export_clips(seg_dir: str) -> Path:
     src = run["source"]["path"]
     if sha256_file(src) != run["source"]["sha256"]:
         raise RunError(f"{src}: sha256 не совпадает с манифестом {seg_dir}, источник изменился")
-    clean_orphans(seg_dir)
     dst = seg_dir / "clips"
     if dst.exists():
         raise RunError(f"{dst} уже существует: клипы не перезаписываются (D19)")
     info = sf.info(src)
     dtype = _DTYPES.get(info.subtype, "int16")  # 8-bit PCM is exact through int16
     ext = "flac" if info.format == "FLAC" else "wav"
-    tmp = seg_dir / "clips.tmp"
-    tmp.mkdir()
+    tmp = fresh_tmp(dst)
     out_rows = []
     with sf.SoundFile(src) as f:
         for i, row in enumerate(rows):
