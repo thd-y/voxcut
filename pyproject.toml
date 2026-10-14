@@ -15,6 +15,9 @@ dependencies = [
     "soundfile",
 ]
 
+[project.scripts]
+voxcut = "voxcut.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
 

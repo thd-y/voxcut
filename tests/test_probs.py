@@ -90,7 +90,7 @@ def test_two_runs_identical_npy(tmp_path):
 
 
 @pytest.mark.slow
-def test_existing_dir_refused_and_orphan_tmp_removed(tmp_path):
+def test_existing_dir_reused_and_orphan_tmp_removed(tmp_path):
     src = noise_wav(tmp_path / "a.wav", 1)
     out = tmp_path / "o"
     orphan = out / (probs_dir_name(src, sha256_file(src), None) + ".tmp")
@@ -99,8 +99,9 @@ def test_existing_dir_refused_and_orphan_tmp_removed(tmp_path):
     dst = compute_probs(src, str(out))
     assert not orphan.exists() and sorted(p.name for p in dst.iterdir()) == ["probs.json",
                                                                               "probs.npy"]
-    with pytest.raises(FileExistsError):
-        compute_probs(src, str(out))
+    stamp = (dst / "probs.npy").stat().st_mtime_ns
+    assert compute_probs(src, str(out)) == dst  # переиспользование (D19), без пересчёта
+    assert (dst / "probs.npy").stat().st_mtime_ns == stamp
 
 
 @pytest.mark.slow

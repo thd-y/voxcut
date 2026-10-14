@@ -225,7 +225,7 @@ def vad_probs(src: str, af: str, model=None) -> tuple[np.ndarray, int]:
     """
     import torch
 
-    torch.set_num_threads(1)  # C3: reproducible probs
+    torch.set_num_threads(TORCH_THREADS)  # C3: reproducible probs
     if model is None:
         from silero_vad import load_silero_vad
 
@@ -257,17 +257,61 @@ def probs_dir_name(src: str, sha: str, channel: str | int | None) -> str:
     return f"{Path(src).stem}.{sha[:8]}{tag}.raw"
 
 
+TORCH_THREADS = 1
+ENV_KEYS = ("silero_vad_version", "model_version", "ffmpeg_version", "ffmpeg_filter",
+            "torch_threads")
+
+
+class RunError(RuntimeError):
+    """A published run dir does not match what this run would produce (D19)."""
+
+
+def clean_orphans(parent: Path) -> None:
+    """D19: <dir>.tmp left by an interrupted run is removed before any command starts."""
+    for tmp in Path(parent).glob("*.tmp"):
+        if tmp.is_dir():
+            shutil.rmtree(tmp)
+
+
+def current_env(af: str) -> dict:
+    return {"silero_vad_version": version("silero-vad"), "model_version": version("silero-vad"),
+            "ffmpeg_version": find_ffmpeg()[1], "ffmpeg_filter": af,
+            "torch_threads": TORCH_THREADS}
+
+
+def check_env(stored: dict, current: dict, run_dir: Path) -> None:
+    diff = [f"{k}: было {stored.get(k)!r}, сейчас {v!r}" for k, v in current.items()
+            if stored.get(k) != v]
+    if diff:
+        raise RunError(f"{run_dir}: окружение изменилось ({'; '.join(diff)}).\n"
+                       f"Результат не переиспользуется. Удалите каталог и запустите заново: "
+                       f"rm -rf {shlex.quote(str(run_dir))}")
+
+
+def load_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        raise RunError(f"нет {path}: каталог неполный или не тот") from None
+
+
 def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> Path:
-    """`probs`: check the source, run Silero, publish <dir>.tmp -> os.replace (D6, D19)."""
+    """`probs`: check the source, run Silero, publish <dir>.tmp -> os.replace (D6, D19).
+
+    An existing dir for the same source and channel is reused after the env check.
+    """
+    out = Path(out_dir)
+    if out.exists():
+        clean_orphans(out)
+    sha = sha256_file(src)
+    dst = out / probs_dir_name(src, sha, channel)
+    if dst.exists():
+        meta = load_json(dst / "probs.json")
+        check_env(meta, current_env(vad_filter(channel, meta["channels"])), dst)
+        return dst
     info = check_source(src)
     af = vad_filter(channel, info.channels)
-    sha = sha256_file(src)
-    dst = Path(out_dir) / probs_dir_name(src, sha, channel)
-    if dst.exists():
-        raise FileExistsError(f"{dst} уже существует")
     tmp = dst.with_name(dst.name + ".tmp")
-    if tmp.exists():
-        shutil.rmtree(tmp)  # orphan of an interrupted run (D19)
     tmp.mkdir(parents=True)
     probs, n16k = vad_probs(src, af)
     if len(probs) != n_frames(n16k):
@@ -275,7 +319,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
     np.save(tmp / "probs.npy", probs)
     import torch
 
-    meta = {
+    meta = current_env(af) | {
         "source_path": str(Path(src).resolve()),
         "source_sha256": sha,
         "source_sr": info.sr,
@@ -285,17 +329,12 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
         "codec_name": info.codec_name,
         "format": info.format,
         "subtype": info.subtype,
-        "ffmpeg_filter": af,
-        "ffmpeg_version": find_ffmpeg()[1],
         "vad_sr": VAD_SR,
         "frame_samples": FRAME_SAMPLES,
         "n16k": n16k,
         "n_frames": len(probs),
         "model_name": "silero_vad.jit",
-        "model_version": version("silero-vad"),
-        "silero_vad_version": version("silero-vad"),
         "torch_version": torch.__version__,
-        "torch_threads": torch.get_num_threads(),
     }
     (tmp / "probs.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))  # last
     os.replace(tmp, dst)
