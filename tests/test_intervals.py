@@ -1,3 +1,4 @@
+import math
 import subprocess
 import sys
 
@@ -5,7 +6,17 @@ import numpy as np
 import pytest
 
 from voxcut.intervals import FRAME_SAMPLES as F
-from voxcut.intervals import default_neg_threshold, postprocess, segment_raw
+from voxcut.intervals import (
+    ConfigError,
+    LabelsError,
+    Metrics,
+    default_neg_threshold,
+    evaluate_session,
+    parse_config,
+    parse_labels,
+    postprocess,
+    segment_raw,
+)
 
 S, Q = 0.9, 0.1  # речь, тишина
 
@@ -98,3 +109,123 @@ def test_intervals_imports_no_torch():
     code = ("import sys, voxcut.intervals; "
             "assert not {'torch', 'silero_vad'} & set(sys.modules), sys.modules.keys()")
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+# --- T5: labels (D7) ---
+
+def lab(*rows):
+    return "\n".join("\t".join(map(str, r)) for r in rows) + "\n"
+
+
+def test_labels_ok_normalizes_skips_and_merges():
+    text = lab((0, 100, "scored"), (10, 12, "Me "), (11, 13, "me"), (20, 21, "OTHER_SPEECH")) \
+        + "\\\t1000.0\t2000.0\n"  # строка спектрального выделения Audacity
+    got = parse_labels(text)
+    assert got["me"] == [(10, 13)] and got["other_speech"] == [(20, 21)]
+    assert got["scored"] == [(0, 100)] and got["vocals_music"] == []
+
+
+@pytest.mark.parametrize("text, needle", [
+    (lab((0, 10, "scored"), (1, 2, "noise")), "неизвестная метка 'noise'"),
+    (lab((0, 10, "scored")) + "1 2 me\n", "3 поля"),
+    (lab((0, 10, "scored"), (2, 2, "me")), "start 2.0 ≥ end 2.0"),
+    (lab((0, 10, "scored"), ("x", 2, "me")), "не числа"),
+    (lab((0, 10, "scored"), (9, 11, "me")), "выходит за scored"),
+    (lab((0, 10, "scored"), (5, 6, "me"), (20, 30, "scored")), "длительности источника"),
+])
+def test_labels_errors(text, needle):
+    with pytest.raises(LabelsError, match=needle):
+        parse_labels(text, duration_s=25)
+
+
+def test_labels_all_errors_in_one_list():
+    text = lab((0, 10, "scored"), (1, 2, "noise"), (3, 3, "me"), (9, 12, "me"))
+    with pytest.raises(LabelsError) as e:
+        parse_labels(text)
+    assert [ln.split(":")[0] for ln in str(e.value).splitlines()[1:]] == \
+        ["строка 2", "строка 3", "строка 4"]
+    assert "scored, me, other_speech, vocals_music" in str(e.value)
+
+
+# --- T5: config (D10) ---
+
+BASE = "threshold = 0.35\npad_ms = 250\nmerge_gap_ms = 300\n"
+
+
+def test_config_defaults_and_meta():
+    cfg, meta = parse_config(BASE + '[meta]\nname = "a"\nnote = "x"\n')
+    assert meta == {"name": "a", "note": "x"}
+    assert cfg.effective() == {"threshold": 0.35, "neg_threshold": pytest.approx(0.2),
+                               "pad_ms": 250, "merge_gap_ms": 300, "min_speech_ms": 0,
+                               "min_silence_ms": 100}
+
+
+@pytest.mark.parametrize("text, needle", [
+    (BASE + "treshold = 0.2\n", "неизвестный ключ 'treshold', возможно 'threshold'"),
+    ("threshold = 1.5\npad_ms = 250\nmerge_gap_ms = 300\n", r"threshold: ожидается число в \(0, 1\]"),
+    ("threshold = 0.5\npad_ms = 250.5\nmerge_gap_ms = 300\n", "pad_ms: ожидается целое"),
+    ("threshold = 0.5\npad_ms = -1\nmerge_gap_ms = 300\n", "pad_ms: ожидается целое"),
+    ("threshold = true\npad_ms = 1\nmerge_gap_ms = 300\n", "threshold"),
+    ("threshold = 0.5\npad_ms = 250\n", "нет обязательного ключа 'merge_gap_ms'"),
+    (BASE + "neg_threshold = 0.5\n", "neg_threshold 0.5 больше threshold"),
+    (BASE + 'channel = "left"\n', "channel"),
+    ("threshold = \n", "не TOML"),
+])
+def test_config_errors(text, needle):
+    with pytest.raises(ConfigError, match=needle):
+        parse_config(text)
+
+
+def test_config_sha_ignores_key_order_meta_and_channel():
+    a, _ = parse_config(BASE)
+    b, _ = parse_config('merge_gap_ms = 300\npad_ms = 250\nthreshold = 0.35\nchannel = 0\n'
+                        '[meta]\nname = "b"\n')
+    c, _ = parse_config(BASE.replace("0.35", "0.36"))
+    assert a.sha256() == b.sha256() != c.sha256()
+
+
+# --- T5: metrics (D8, D20) ---
+
+def L(scored, me=(), other=(), vocals=()):
+    return {"scored": list(scored), "me": list(me), "other_speech": list(other),
+            "vocals_music": list(vocals)}
+
+
+def test_metrics_formulas():
+    # scored 0–100 с; me 10–20 и 50–52; чужая речь 70–80
+    labels = L([(0, 100)], me=[(10, 20), (50, 52)], other=[(70, 80)])
+    final = [(9.95, 15), (60, 61), (75, 76), (150, 160)]  # последний вне scored (C5)
+    m = evaluate_session(final, labels, raw_s=[(10, 12)])
+    assert m.recall_sec == pytest.approx(5 / 12)
+    assert m.raw_recall_sec == pytest.approx(2 / 12)
+    assert m.recall_events == pytest.approx(0.5)  # 10–20 покрыто ровно на 0.5, 50–52 — 0
+    assert m.fully_missed == [(50, 52)] and m.truncated == [(10, 20, 0.5)]
+    unl = 100 - 12 - 10
+    assert m.fa_asr_min_h == pytest.approx((0.05 + 1) / unl * 60)
+    # воротник ±0.1 с вокруг me: 9.95 попадает в воротник, FA_bound его не считает
+    assert m.fa_bound_min_h == pytest.approx(1 / (unl - 0.4) * 60)
+    assert m.neutral_min_h == pytest.approx(1 / 100 * 60)
+    assert m.clip_min_h == pytest.approx((5.05 + 1 + 1) / 100 * 60)
+    assert m.clips_per_h == pytest.approx(3 / 100 * 3600)
+    assert m.coverage == pytest.approx(7.05 / 100) and not m.whole_file
+
+
+@pytest.mark.parametrize("cov_end, covered", [(10 + 4.9, 0), (10 + 5.0, 1)])
+def test_event_cov_boundary(cov_end, covered):
+    m = evaluate_session([(10, cov_end)], L([(0, 100)], me=[(10, 20)]))
+    assert m.events_covered == covered
+
+
+def test_na_and_all_is_sum_over_sum():
+    silent = evaluate_session([(1, 2)], L([(0, 3600)]))
+    speech = evaluate_session([(10, 15)], L([(0, 100)], me=[(10, 20)]))
+    assert math.isnan(silent.recall_sec) and math.isnan(silent.recall_events)
+    assert math.isnan(Metrics().fa_asr_min_h)
+    total = silent + speech
+    assert total.recall_sec == speech.recall_sec == 0.5
+    assert total.fa_asr_min_h == pytest.approx(1 / (3600 + 90) * 60)
+    assert total.fully_missed == [] and total.events == 1
+
+
+def test_whole_file_flag():
+    assert evaluate_session([(0, 95)], L([(0, 100)])).whole_file
