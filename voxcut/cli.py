@@ -20,6 +20,8 @@ from voxcut.audio import (
     export_clips,
     fresh_tmp,
     load_json,
+    read_jsonl,
+    write_jsonl,
 )
 from voxcut.intervals import (
     FRAME_SAMPLES,
@@ -41,14 +43,6 @@ FW_NOTE = "параметры FW, постобработка VoxCut"
 # D4: faster-whisper 1.2.1 VadOptions() run through the VoxCut pipeline on the same probs
 FW_CONFIG = SegmentConfig(threshold=0.5, neg_threshold=0.35, min_speech_ms=0,
                           min_silence_ms=2000, pad_ms=400, merge_gap_ms=0)
-
-
-def write_jsonl(path: Path, rows: list[dict]) -> None:
-    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
-
-
-def read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line]
 
 
 def load_probs(probs_dir: Path) -> tuple[dict, np.ndarray]:

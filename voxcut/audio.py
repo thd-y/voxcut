@@ -300,6 +300,14 @@ def load_json(path: Path) -> dict:
         raise RunError(f"нет {path}: каталог неполный или не тот") from None
 
 
+def write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
 def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> Path:
     """`probs`: check the source, run Silero, publish <dir>.tmp -> os.replace (D6, D19).
 
@@ -355,8 +363,7 @@ def export_clips(seg_dir: str) -> Path:
     """
     seg_dir = Path(seg_dir)
     run = load_json(seg_dir / "run.json")
-    rows = [json.loads(line) for line in (seg_dir / "manifest.jsonl").read_text().splitlines()
-            if line]
+    rows = read_jsonl(seg_dir / "manifest.jsonl")
     src = run["source"]["path"]
     if sha256_file(src) != run["source"]["sha256"]:
         raise RunError(f"{src}: sha256 не совпадает с манифестом {seg_dir}, источник изменился")
@@ -383,7 +390,6 @@ def export_clips(seg_dir: str) -> Path:
                     out.write(block)
                     left -= len(block)
             out_rows.append(row | {"end_sample": end, "audio_path": f"clips/{name}"})
-    (tmp / "manifest.jsonl").write_text(  # last
-        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in out_rows))
+    write_jsonl(tmp / "manifest.jsonl", out_rows)  # last
     os.replace(tmp, dst)
     return dst
