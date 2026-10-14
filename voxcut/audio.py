@@ -1,5 +1,6 @@
 """Everything that touches ffmpeg, soundfile or the model (D1)."""
 
+import hashlib
 import json
 import os
 import shlex
@@ -9,8 +10,13 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib.metadata import version
+from pathlib import Path
 
+import numpy as np
 import soundfile as sf
+
+from voxcut.intervals import FRAME_SAMPLES, VAD_SR, n_frames
 
 
 class FFmpegError(RuntimeError):
@@ -210,3 +216,87 @@ def vad_filter(channel: str | int | None, channels: int) -> str:
     if isinstance(channel, int) and not isinstance(channel, bool) and 0 <= channel < channels:
         return f"pan=mono|c0=c{channel},{resample}"
     raise SourceError(f'channel = {channel!r}: ожидается "mono", "mix" или индекс 0..{channels - 1}')
+
+
+def vad_probs(src: str, af: str, model=None) -> tuple[np.ndarray, int]:
+    """Stream the 16 kHz copy through Silero frame by frame: (probs float32, n16k).
+
+    inference_mode is mandatory: without it autograd keeps ~21 KB per frame (C1).
+    """
+    import torch
+
+    torch.set_num_threads(1)  # C3: reproducible probs
+    if model is None:
+        from silero_vad import load_silero_vad
+
+        model = load_silero_vad()
+    model.reset_states()
+    probs, n16k = [], 0
+    args = ["-i", src, "-map", "0:a:0", "-af", af, "-f", "f32le", "-"]
+    with torch.inference_mode(), ffmpeg_stream(args) as out:
+        while buf := out.read(FRAME_SAMPLES * 4):
+            x = np.frombuffer(buf, dtype=np.float32)
+            n16k += len(x)
+            if len(x) < FRAME_SAMPLES:
+                x = np.pad(x, (0, FRAME_SAMPLES - len(x)))
+            probs.append(model(torch.from_numpy(x.copy()), VAD_SR).item())
+    return np.asarray(probs, dtype=np.float32), n16k
+
+
+def sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def probs_dir_name(src: str, sha: str, channel: str | int | None) -> str:
+    """<stem>.<sha8>[.c<i>|.mix].raw: channel changes the probs, so it is part of the key (D21)."""
+    tag = "" if channel in (None, "mono") else (".mix" if channel == "mix" else f".c{channel}")
+    return f"{Path(src).stem}.{sha[:8]}{tag}.raw"
+
+
+def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> Path:
+    """`probs`: check the source, run Silero, publish <dir>.tmp -> os.replace (D6, D19)."""
+    info = check_source(src)
+    af = vad_filter(channel, info.channels)
+    sha = sha256_file(src)
+    dst = Path(out_dir) / probs_dir_name(src, sha, channel)
+    if dst.exists():
+        raise FileExistsError(f"{dst} уже существует")
+    tmp = dst.with_name(dst.name + ".tmp")
+    if tmp.exists():
+        shutil.rmtree(tmp)  # orphan of an interrupted run (D19)
+    tmp.mkdir(parents=True)
+    probs, n16k = vad_probs(src, af)
+    if len(probs) != n_frames(n16k):
+        raise RuntimeError(f"кадров {len(probs)}, ожидалось n_frames({n16k}) = {n_frames(n16k)}")
+    np.save(tmp / "probs.npy", probs)
+    import torch
+
+    meta = {
+        "source_path": str(Path(src).resolve()),
+        "source_sha256": sha,
+        "source_sr": info.sr,
+        "source_n_samples": info.n_samples,
+        "channels": info.channels,
+        "channel": channel,
+        "codec_name": info.codec_name,
+        "format": info.format,
+        "subtype": info.subtype,
+        "ffmpeg_filter": af,
+        "ffmpeg_version": find_ffmpeg()[1],
+        "vad_sr": VAD_SR,
+        "frame_samples": FRAME_SAMPLES,
+        "n16k": n16k,
+        "n_frames": len(probs),
+        "model_name": "silero_vad.jit",
+        "model_version": version("silero-vad"),
+        "silero_vad_version": version("silero-vad"),
+        "torch_version": torch.__version__,
+        "torch_threads": torch.get_num_threads(),
+    }
+    (tmp / "probs.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))  # last
+    os.replace(tmp, dst)
+    return dst
