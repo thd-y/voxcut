@@ -1,11 +1,14 @@
 """Pure interval logic: no torch or silero imports here (D1)."""
 
+import bisect
 import difflib
 import hashlib
 import json
 import math
+import re
 import tomllib
 from dataclasses import dataclass, field, fields
+from datetime import datetime, timedelta
 
 FRAME_SAMPLES = 512  # Silero frame at 16 kHz, 32 ms
 VAD_SR = 16000
@@ -359,3 +362,129 @@ def evaluate_session(final_s, labels: dict, raw_s=None, event_cov: float = EVENT
         elif cov < TRUNCATED_BELOW:
             m.truncated.append((s, e, cov))
     return m
+
+
+# --- session (D25–D27) ---
+
+GAP_MIN_S = -2.0  # D26: covers the 1 s name step, not a real overlap
+GAP_MAX_S = 5.0
+PAUSE_MAX_S = 1800.0  # a longer gap starts a separate chain; a shorter one is refused for now
+SEAM_TOL_S = 1.0
+MTIME_TOL_S = 5.0  # D25 (X7): mtime − name start vs duration
+RIFF_MAX = 0xFFFFFFFF
+WAV_HEADER = 44
+START_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S")
+_START_EXAMPLE = '"2025-03-01 09:00" или "2025-03-01 09:00:05"'
+
+
+class SessionError(ValueError):
+    pass
+
+
+def file_start(name: str) -> datetime | None:
+    """The only place a file name is parsed. Recorder: YYYYMMDDHHMMSS.wav = start time."""
+    m = re.fullmatch(r"(\d{14})\.wav", name, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m[1], "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+
+
+def parse_start(text: str) -> datetime:
+    for f in START_FORMATS:
+        try:
+            return datetime.strptime(text, f)
+        except ValueError:
+            pass
+    raise SessionError(f"--start {text!r}: ожидается локальное время, например {_START_EXAMPLE}")
+
+
+def session_name(start: datetime, n_samples: int, sr: int) -> str:
+    """<YYYY-MM-DD>_<HH-MM>_<H>h<MM>m; minutes rounded half up, not to even (D25)."""
+    minutes = math.floor(n_samples / sr / 60 + 0.5)
+    return f"{start:%Y-%m-%d_%H-%M}_{minutes // 60}h{minutes % 60:02d}m"
+
+
+def split_chains(parts: list[tuple[str, datetime, int]], sr: int) -> list[list[int]]:
+    """(name, start, n_samples) -> chains of indices in start order. Names are only for messages."""
+    order = sorted(range(len(parts)), key=lambda i: parts[i][1])
+    chains: list[list[int]] = []
+    for i in order:
+        if chains:
+            prev = parts[chains[-1][-1]]
+            gap = (parts[i][1] - prev[1]).total_seconds() - prev[2] / sr
+            if gap < GAP_MIN_S:
+                raise SessionError(f"файлы {prev[0]} и {parts[i][0]} перекрываются по времени "
+                                   f"на {-gap:.2f} с (допуск {-GAP_MIN_S:g} с)")
+            if GAP_MAX_S < gap <= PAUSE_MAX_S:
+                raise SessionError(f"между частями пауза {gap / 60:.1f} мин "
+                                   f"({prev[0]} → {parts[i][0]}); "
+                                   "склейка пауз пока не поддерживается")
+            if gap <= GAP_MAX_S:
+                chains[-1].append(i)
+                continue
+        chains.append([i])
+    return chains
+
+
+def pick_chain(chains: list[list[int]], n: int | None, names: list[str]) -> list[int]:
+    """One chain, or the N-th (1-based) by --chain; otherwise refuse with a numbered list."""
+    listing = "\n".join(f"  {k}: {', '.join(names[i] for i in c)}"
+                        for k, c in enumerate(chains, 1))
+    if n is None:
+        if len(chains) == 1:
+            return chains[0]
+        raise SessionError(f"в папке {len(chains)} цепочки файлов, выберите одну через "
+                           f"--chain N:\n{listing}")
+    if not 1 <= n <= len(chains):
+        raise SessionError(f"--chain {n} вне диапазона 1..{len(chains)}:\n{listing}")
+    return chains[n - 1]
+
+
+def meta_key(files: list[tuple[str, int, int]], start: str | None) -> str:
+    """sha8 of ordered (name, size_bytes, frames) + --start: found again without reading data."""
+    blob = json.dumps({"files": [list(f) for f in files], "start": start}).encode()
+    return hashlib.sha256(blob).hexdigest()[:8]
+
+
+def data_bytes_ok(n_samples: int, channels: int, bytes_per_sample: int) -> bool:
+    return n_samples * channels * bytes_per_sample + WAV_HEADER <= RIFF_MAX
+
+
+def locate(sample: int, offsets: list[int]) -> tuple[int, int]:
+    """Session sample -> (file index, sample within that file); offsets start at 0."""
+    i = bisect.bisect_right(offsets, sample) - 1
+    return i, sample - offsets[i]
+
+
+def start_local(file_start_time: datetime, sample: int, sr: int, clock_offset_s: float) -> str:
+    """Local time without a zone, ±1 s (name step)."""
+    t = file_start_time + timedelta(seconds=clock_offset_s + sample / sr)
+    return t.isoformat(timespec="seconds")
+
+
+def at_seam(start: int, end: int, seams: list[int], tol: int) -> bool:
+    """[start, end) overlaps [seam − tol, seam + tol) of any seam."""
+    return any(start < s + tol and end > s - tol for s in seams)
+
+
+def seam_windows(seams: list[int], tol: int, n_samples: int) -> list[tuple[int, int]]:
+    return [(max(0, s - tol), min(n_samples, s + tol)) for s in seams]
+
+
+def mtime_warnings(parts: list[tuple[str, datetime, int]], mtime_ends: list[datetime],
+                   sr: int) -> list[str]:
+    """Warnings, not refusals (D25, X7): a clock reset backwards hides behind name order."""
+    out = []
+    by_name = sorted(range(len(parts)), key=lambda i: parts[i][1])
+    if by_name != sorted(range(len(parts)), key=lambda i: mtime_ends[i]):
+        out.append("порядок файлов по mtime не совпадает с порядком по имени: "
+                   "возможно, часы диктофона сбрасывались")
+    for (name, start, n), end in zip(parts, mtime_ends, strict=True):
+        drift = (end - start).total_seconds() - n / sr
+        if abs(drift) > MTIME_TOL_S:
+            out.append(f"{name}: mtime − время из имени расходится с длительностью "
+                       f"на {drift:+.1f} с")
+    return out
