@@ -17,7 +17,7 @@ from voxcut.audio import (
     export_clips,
     sha256_file,
 )
-from voxcut.cli import segment
+from voxcut.cli import main, segment
 from voxcut.intervals import (
     RIFF_MAX,
     SEAM_TOL_S,
@@ -467,3 +467,29 @@ def test_two_starts_same_minute_refused_on_reuse(tmp_path):
     compute_probs(str(a / sa["wav"]), str(tmp_path / "probs"))
     with pytest.raises(RunError, match="(?s)блок session.*rm -rf"):
         compute_probs(str(b / sb["wav"]), str(tmp_path / "probs"))
+
+
+# --- cli ---
+
+
+
+def test_cli_session_refusal_exit_2(tmp_path, capsys, no_decode):
+    make_folder(tmp_path / "in", chain_starts(1) + chain_starts(1, T0 + timedelta(hours=2)))
+    assert main(["session", str(tmp_path / "in"), "--out", str(tmp_path / "out")]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("voxcut: ") and "--chain N" in err and "Traceback" not in err
+    assert main(["session", str(tmp_path / "in"), "--out", str(tmp_path / "out"),
+                 "--start", "вчера"]) == 2
+    assert "2025-03-01 09:00" in capsys.readouterr().err
+    assert main(["session", str(tmp_path / "nope"), "--out", str(tmp_path / "out")]) == 2
+
+
+@pytest.mark.slow
+def test_cli_session_prints_dir(tmp_path, capsys):
+    make_folder(tmp_path / "in", chain_starts(1) + chain_starts(2, T0 + timedelta(hours=2)))
+    assert main(["session", str(tmp_path / "in"), "--out", str(tmp_path / "out"),
+                 "--chain", "2", "--start", "2026-10-20 11:30"]) == 0
+    out, err = capsys.readouterr()
+    dst = tmp_path / "out" / out.strip().split("/")[-1]
+    assert dst.name.startswith("2026-10-20_11-30_0h00m.") and (dst / "session.json").exists()
+    assert "инвентарь" in err

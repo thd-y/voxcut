@@ -1,4 +1,4 @@
-"""voxcut commands: probs, segment, detect, export, evaluate, sweep (D19, D24)."""
+"""voxcut commands: probs, segment, detect, export, evaluate, sweep, session (D19, D24, D25)."""
 
 import argparse
 import hashlib
@@ -17,6 +17,7 @@ from voxcut.audio import (
     FFmpegError,
     RunError,
     SourceError,
+    assemble_session,
     check_env,
     compute_probs,
     export_clips,
@@ -33,6 +34,7 @@ from voxcut.intervals import (
     LabelsError,
     Metrics,
     SegmentConfig,
+    SessionError,
     at_seam,
     evaluate_session,
     locate,
@@ -258,6 +260,10 @@ def cmd_export(a) -> None:
     print(export_clips(a.seg_dir))
 
 
+def cmd_session(a) -> None:
+    print(assemble_session(a.dir, a.out, a.chain, a.start))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="voxcut")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -287,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--session", nargs=2, action="append", required=True,
                    metavar=("PROBS_DIR", "LABELS"))
     s.set_defaults(func=cmd_sweep)
+    s = sub.add_parser("session", help="склеить часовые файлы диктофона в один WAV (D25)")
+    s.add_argument("dir")
+    s.add_argument("--out", required=True)
+    s.add_argument("--chain", type=int, help="номер цепочки, если в папке их несколько")
+    s.add_argument("--start", help='настоящее начало первого файла, "YYYY-MM-DD HH:MM[:SS]"')
+    s.set_defaults(func=cmd_session)
     return p
 
 
@@ -294,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
     try:
         a.func(a)
-    except (SourceError, FFmpegError, RunError, ConfigError, LabelsError,
+    except (SourceError, FFmpegError, RunError, ConfigError, LabelsError, SessionError,
             FileNotFoundError) as e:
         print(f"voxcut: {e}", file=sys.stderr)
         return 2

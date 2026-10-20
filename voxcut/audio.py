@@ -476,6 +476,7 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
     <name>.wav is a bit-exact block copy; the originals are only read. Refusals come before
     any decode: names, RIFF structure, sf.info, chains, the 4 GiB RIFF limit.
     """
+    real_start = parse_start(start) if start is not None else None
     wavs = sorted(p for p in Path(src_dir).iterdir() if p.is_file() and p.suffix.lower() == ".wav")
     if not wavs:
         raise SessionError(f"{src_dir}: нет WAV-файлов")
@@ -508,7 +509,7 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         offsets.append(offsets[-1] + n)
     n_total = offsets.pop()
     rec_start = parts[0][1]
-    real_start = parse_start(start) if start is not None else rec_start
+    real_start = real_start or rec_start
     clock_offset_s = (real_start - rec_start).total_seconds()
     seams = []
     for k in range(1, len(parts)):
