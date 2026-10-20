@@ -1,7 +1,14 @@
+import json
+import os
+import struct
 from datetime import datetime, timedelta
 
+import numpy as np
 import pytest
+import soundfile as sf
 
+from voxcut import audio
+from voxcut.audio import RunError, SourceError, assemble_session, sha256_file
 from voxcut.intervals import (
     RIFF_MAX,
     SEAM_TOL_S,
@@ -186,3 +193,199 @@ def test_mtime_warnings():
     assert any("порядок" in x for x in w)
     w = mtime_warnings(p, [ends[0], ends[1] + timedelta(seconds=5.1), ends[2]], SR)
     assert len(w) == 1 and "f1" in w[0]
+
+
+# --- assemble_session (audio.py) ---
+
+
+
+def make_folder(d, starts, seconds=2.0, channels=2, data=None, seed=0):
+    """Recorder files: name = start, mtime = end. data(i, n) -> int16 array overrides noise."""
+    d.mkdir(exist_ok=True)
+    rng = np.random.default_rng(seed)
+    paths = []
+    for i, t in enumerate(starts):
+        n = int(seconds * SR)
+        x = data(i, n) if data else rng.integers(-20000, 20000, (n, channels), dtype=np.int16)
+        p = d / f"{t:%Y%m%d%H%M%S}.WAV"
+        sf.write(p, x, SR, subtype="PCM_16")
+        end = (t + timedelta(seconds=n / SR)).timestamp()
+        os.utime(p, (end, end))
+        paths.append(p)
+    return paths
+
+
+def chain_starts(k, t=T0, seconds=2.0, gap=1.0):
+    return [t + timedelta(seconds=i * (seconds + gap)) for i in range(k)]
+
+
+@pytest.fixture
+def no_decode(monkeypatch):
+    def fail(*a, **k):
+        raise AssertionError("декод ffmpeg не должен вызываться")
+    monkeypatch.setattr(audio, "count_samples", fail)
+
+
+def test_foreign_name_refused(tmp_path, no_decode):
+    make_folder(tmp_path / "in", chain_starts(2))
+    sf.write(tmp_path / "in" / "REC001.WAV", np.zeros((10, 2), np.int16), SR)
+    with pytest.raises(SessionError, match="YYYYMMDDHHMMSS.wav.*REC001.WAV"):
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert not (tmp_path / "out").exists()
+
+
+def test_broken_wav_refused_before_chains(tmp_path, no_decode):
+    paths = make_folder(tmp_path / "in", chain_starts(2) + [T0 + timedelta(hours=5)])
+    raw = bytearray(paths[1].read_bytes())
+    pos = raw.index(b"data")
+    raw[pos + 4:pos + 8] = struct.pack("<I", 0)
+    paths[1].write_bytes(raw)
+    with pytest.raises(SourceError, match=f"{paths[1].name}.*битая структура"):
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+
+
+def test_two_chains_refused_with_numbers(tmp_path, no_decode):
+    make_folder(tmp_path / "in", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    with pytest.raises(SessionError, match="--chain N") as e:
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert "1: 20250301082921.WAV, 20250301082924.WAV" in str(e.value)
+    assert "2: 20250301102921.WAV" in str(e.value)
+    with pytest.raises(SessionError, match="вне диапазона"):
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), chain=3,
+                         log=lambda m: None)
+
+
+def test_pause_refused_in_folder(tmp_path, no_decode):
+    make_folder(tmp_path / "in", chain_starts(2, gap=60))
+    with pytest.raises(SessionError, match="склейка пауз"):
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+
+
+def test_riff_limit_refused_before_copy(tmp_path, no_decode, monkeypatch):
+    make_folder(tmp_path / "in", chain_starts(2))
+    monkeypatch.setattr(audio, "data_bytes_ok", lambda *a: False)
+    with pytest.raises(SessionError, match="4 ГиБ"):
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert not any((tmp_path / "out").glob("*")) if (tmp_path / "out").exists() else True
+
+
+def run_session(tmp_path, **kw):
+    logs = []
+    dst = assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=logs.append, **kw)
+    return dst, json.loads((dst / "session.json").read_text()), "\n".join(logs)
+
+
+@pytest.mark.slow
+def test_session_bit_exact(tmp_path):
+    paths = make_folder(tmp_path / "in", chain_starts(3))
+    before = [sha256_file(str(p)) for p in paths]
+    dst, s, logs = run_session(tmp_path)
+    assert dst.name == f"2025-03-01_08-29_0h00m.{s['session_id'].split('.')[1]}.session"
+    assert s["session_id"] == dst.name.removesuffix(".session")
+    got, _ = sf.read(dst / s["wav"], dtype="int16")
+    want = np.concatenate([sf.read(p, dtype="int16")[0] for p in paths])
+    assert np.array_equal(got, want) and sf.info(dst / s["wav"]).subtype == "PCM_16"
+    assert [sha256_file(str(p)) for p in paths] == before == [f["sha256"] for f in s["files"]]
+    assert s["session_sha256"] == sha256_file(str(dst / s["wav"]))
+    assert s["n_samples"] == 3 * 2 * SR
+    assert [f["offset_samples"] for f in s["files"]] == [0, 2 * SR, 4 * SR]
+    assert [x["offset_samples"] for x in s["seams"]] == [2 * SR, 4 * SR]
+    assert {x["kind"] for x in s["seams"]} == {"split"}
+    assert s["seams"][0]["gap_est_s"] == pytest.approx(1.0)
+    assert s["wallclock_source"] == "filename" and s["clock_offset_s"] == 0
+    assert "--start" in logs and "ВНИМАНИЕ" not in logs.replace("ВНИМАНИЕ: каналы", "")
+    run = json.loads((dst / "run.json").read_text())
+    assert set(run["env"]) == set(audio.SESSION_ENV_KEYS) and "ffmpeg_version" in run
+    assert not dst.with_name(dst.name + ".tmp").exists()
+
+
+@pytest.mark.slow
+def test_session_chain_2(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(1) + chain_starts(2, T0 + timedelta(hours=2)))
+    _, s, _ = run_session(tmp_path, chain=2)
+    assert [f["name"] for f in s["files"]] == ["20250301102921.WAV", "20250301102924.WAV"]
+    assert s["name"].startswith("2025-03-01_10-29")
+
+
+def _stereo(left, right):
+    return np.stack([left, right], axis=1).astype(np.int16)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("channels, data, expected", [
+    (1, lambda i, n: np.arange(n, dtype=np.int16).reshape(-1, 1), None),
+    (2, lambda i, n: _stereo(np.arange(n), np.arange(n)), True),
+    (2, lambda i, n: _stereo(np.arange(n), np.r_[np.arange(n - 1), 7 if i == 1 else n - 1]),
+     False),
+    (3, lambda i, n: np.repeat(np.arange(n, dtype=np.int16).reshape(-1, 1), 3, axis=1), True),
+])
+def test_channels_identical(tmp_path, channels, data, expected):
+    make_folder(tmp_path / "in", chain_starts(2), channels=channels, data=data)
+    _, s, logs = run_session(tmp_path)
+    assert s["channels_identical"] is expected
+    if expected is False:
+        assert "противофазе" in logs and "--channel mix" not in logs
+    if expected is None:
+        assert "канал" not in logs
+
+
+@pytest.mark.slow
+def test_session_reuse_and_env(tmp_path, monkeypatch):
+    make_folder(tmp_path / "in", chain_starts(2))
+    dst, _, _ = run_session(tmp_path)
+    mtime = (dst / "session.json").stat().st_mtime_ns
+    monkeypatch.setattr(audio, "sha256_file", lambda p: pytest.fail("повтор читает данные"))
+    dst2, _, logs = run_session(tmp_path)
+    assert dst2 == dst and (dst / "session.json").stat().st_mtime_ns == mtime
+    assert "каналы различаются" in logs  # совет напечатан заново
+    monkeypatch.undo()
+    run = json.loads((dst / "run.json").read_text())
+    (dst / "run.json").write_text(json.dumps(run | {"ffmpeg_version": "0.0"}))
+    assert run_session(tmp_path)[0] == dst  # ffmpeg только для справки
+    run["env"]["libsndfile_version"] = "0.0"
+    (dst / "run.json").write_text(json.dumps(run))
+    with pytest.raises(RunError, match="rm -rf"):
+        run_session(tmp_path)
+
+
+@pytest.mark.slow
+def test_session_reuse_missing_wav(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(2))
+    dst, s, _ = run_session(tmp_path)
+    (dst / s["wav"]).unlink()
+    with pytest.raises(RunError, match="rm -rf"):
+        run_session(tmp_path)
+
+
+@pytest.mark.slow
+def test_orphan_tmp_removed(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(2))
+    dst, _, _ = run_session(tmp_path)
+    os.replace(dst, dst.with_name(dst.name + ".tmp"))
+    (dst.with_name(dst.name + ".tmp") / "junk").write_text("x")
+    dst2, _, _ = run_session(tmp_path)
+    assert dst2 == dst and not (dst / "junk").exists()
+    assert not dst.with_name(dst.name + ".tmp").exists()
+
+
+@pytest.mark.slow
+def test_session_start_fix(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(2))
+    plain, _, _ = run_session(tmp_path)
+    dst, s, logs = run_session(tmp_path, start="2026-10-20 11:30:21")
+    assert dst != plain and dst.name.startswith("2026-10-20_11-30_0h00m.")
+    assert s["wallclock_source"] == "filename+start"
+    assert s["files"][0]["recorder_time"] == "2025-03-01T08:29:21"
+    assert s["files"][1]["start_local"] == "2026-10-20T11:30:24"
+    assert s["clock_offset_s"] == (datetime(2026, 10, 20, 11, 30, 21) - T0).total_seconds()
+    assert "повторите с --start" not in logs
+    with pytest.raises(SessionError, match="2025-03-01 09:00"):
+        run_session(tmp_path, start="20.10.2026 11:30")
+
+
+@pytest.mark.slow
+def test_mtime_mismatch_warns_and_assembles(tmp_path):
+    paths = make_folder(tmp_path / "in", chain_starts(2))
+    os.utime(paths[0], (paths[1].stat().st_mtime + 100,) * 2)
+    dst, _, logs = run_session(tmp_path)
+    assert "порядок файлов по mtime" in logs and dst.exists()

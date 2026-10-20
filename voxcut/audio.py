@@ -7,16 +7,35 @@ import shlex
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
-from voxcut.intervals import FRAME_SAMPLES, VAD_SR, n_frames
+from voxcut.intervals import (
+    FRAME_SAMPLES,
+    GAP_MAX_S,
+    GAP_MIN_S,
+    PAUSE_MAX_S,
+    VAD_SR,
+    SessionError,
+    data_bytes_ok,
+    file_start,
+    meta_key,
+    mtime_warnings,
+    n_frames,
+    parse_start,
+    pick_chain,
+    session_name,
+    split_chains,
+    start_local,
+)
 
 
 class FFmpegError(RuntimeError):
@@ -388,4 +407,158 @@ def export_clips(seg_dir: str) -> Path:
             out_rows.append(row | {"end_sample": end, "audio_path": f"clips/{name}"})
     write_jsonl(tmp / "manifest.jsonl", out_rows)  # last
     os.replace(tmp, dst)
+    return dst
+
+
+# --- session (D25–D27) ---
+
+_SUBTYPE_BYTES = {"PCM_16": 2, "PCM_24": 3, "PCM_32": 4, "FLOAT": 4, "DOUBLE": 8}
+SESSION_ENV_KEYS = ("voxcut_version", "soundfile_version", "libsndfile_version")  # D25: no ffmpeg
+
+
+def session_env() -> dict:
+    return {"voxcut_version": version("voxcut"), "soundfile_version": sf.__version__,
+            "libsndfile_version": sf.__libsndfile_version__}
+
+
+def channel_advice(identical: bool | None) -> list[str]:
+    """D25, D27: no automatic mix advice, mix cancels speech in antiphase."""
+    if identical is None:
+        return []
+    if identical:
+        return ["каналы совпадают бит в бит: probs возьмёт канал 0 сам (или --channel 0)"]
+    return [("ВНИМАНИЕ: каналы различаются. Выберите --channel 0 | 1 | mix; mix может гасить "
+             "речь при противофазе, проверьте каналы на слух")]
+
+
+def _log(msg: str) -> None:
+    print(msg, file=sys.stderr)
+
+
+def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
+                     start: str | None = None, log=_log) -> Path:
+    """`session`: hourly recorder files -> <out>/<name>.<sha8>.session/ (D25).
+
+    <name>.wav is a bit-exact block copy; the originals are only read. Refusals come before
+    any decode: names, RIFF structure, sf.info, chains, the 4 GiB RIFF limit.
+    """
+    wavs = sorted(p for p in Path(src_dir).iterdir() if p.is_file() and p.suffix.lower() == ".wav")
+    if not wavs:
+        raise SessionError(f"{src_dir}: нет WAV-файлов")
+    foreign = [p.name for p in wavs if file_start(p.name) is None]
+    if foreign:
+        raise SessionError(f"{src_dir}: имена не по правилу диктофона YYYYMMDDHHMMSS.wav: "
+                           f"{', '.join(foreign)}")
+    for p in wavs:
+        check_wav_structure(str(p))
+    infos = [sf.info(str(p)) for p in wavs]
+    parts = [(p.name, file_start(p.name), i.frames) for p, i in zip(wavs, infos, strict=True)]
+    names = [p.name for p in wavs]
+    idx = pick_chain(split_chains(parts, infos[0].samplerate), chain, names)
+    files = [wavs[i] for i in idx]
+    infos = [infos[i] for i in idx]
+    parts = [parts[i] for i in idx]
+    first = infos[0]
+    for p, i in zip(files, infos, strict=True):
+        if (i.samplerate, i.channels, i.subtype) != (first.samplerate, first.channels,
+                                                       first.subtype):
+            raise SessionError(f"{p}: {i.samplerate} Гц, {i.channels} кан., {i.subtype}; "
+                               f"первый файл цепочки: {first.samplerate} Гц, {first.channels} "
+                               f"кан., {first.subtype}")
+    sr, channels, subtype = first.samplerate, first.channels, first.subtype
+    if subtype not in _SUBTYPE_BYTES:
+        raise SessionError(f"{files[0]}: subtype {subtype}, для сессии нужен PCM или FLOAT")
+    mtime_ends = [datetime.fromtimestamp(p.stat().st_mtime) for p in files]
+    offsets = [0]
+    for _, _, n in parts:
+        offsets.append(offsets[-1] + n)
+    n_total = offsets.pop()
+    rec_start = parts[0][1]
+    real_start = parse_start(start) if start is not None else rec_start
+    clock_offset_s = (real_start - rec_start).total_seconds()
+    seams = []
+    for k in range(1, len(parts)):
+        prev = parts[k - 1]
+        gap = (parts[k][1] - prev[1]).total_seconds() - prev[2] / sr
+        seams.append({"offset_samples": offsets[k], "kind": "split", "after": prev[0],
+                      "before": parts[k][0], "gap_est_s": round(gap, 3)})
+    log(f"инвентарь {src_dir}:")
+    for (name, t, n), end, off in zip(parts, mtime_ends, offsets, strict=True):
+        log(f"  {name}: старт по имени {t:%H:%M:%S}, по mtime − длительность "
+            f"{end - timedelta(seconds=n / sr):%H:%M:%S}, {n / sr:.1f} с, смещение {off}")
+    for s in seams:
+        log(f"  стык {s['after']} → {s['before']}: разрыв по оценке {s['gap_est_s']:+.2f} с")
+    log(f"  итого {len(parts)} файлов, {n_total / sr:.1f} с")
+    for w in mtime_warnings(parts, mtime_ends, sr):
+        log(f"ВНИМАНИЕ: {w}")
+    if start is None:
+        log("время сессии по часам диктофона; если часы были сбиты, повторите с --start")
+    name = session_name(real_start, n_total, sr)
+    key = meta_key([(p.name, p.stat().st_size, n) for p, (_, _, n) in zip(files, parts,
+                                                                          strict=True)],
+                   real_start.isoformat() if start is not None else None)
+    dst = Path(out_dir) / f"{name}.{key}.session"
+    wav_name = f"{name}.wav"
+    if dst.exists():
+        run = load_json(dst / "run.json")
+        check_env(run["env"], session_env(), dst)
+        meta = load_json(dst / "session.json")
+        rm = f"rm -rf {shlex.quote(str(dst))}"
+        if not (dst / wav_name).exists() or sf.info(str(dst / wav_name)).frames != n_total:
+            raise RunError(f"{dst}: {wav_name} нет или его длина не {n_total} сэмплов.\n"
+                           f"Удалите каталог и запустите заново: {rm}")
+        for line in channel_advice(meta["channels_identical"]):
+            log(line)
+        return dst
+    if not data_bytes_ok(n_total, channels, _SUBTYPE_BYTES[subtype]):
+        raise SessionError(f"сессия {n_total / sr / 3600:.2f} ч не помещается в WAV "
+                           f"(предел RIFF 4 ГиБ); разбейте папку на части")
+    for p in files:
+        check_source(str(p))  # D18: frames == n_ffmpeg for every file of the chain
+    tmp = fresh_tmp(dst)
+    dtype = _DTYPES[subtype]
+    identical = True if channels > 1 else None
+    file_rows = []
+    with sf.SoundFile(tmp / wav_name, "w", sr, channels, subtype=subtype, format="WAV") as out:
+        for p, (fname, t, n), end, off in zip(files, parts, mtime_ends, offsets, strict=True):
+            sha = sha256_file(str(p))  # the copy below reads the same bytes from page cache
+            with sf.SoundFile(str(p)) as f:
+                while len(block := f.read(EXPORT_BLOCK, dtype=dtype, always_2d=True)):
+                    if identical and not (block == block[:, :1]).all():
+                        identical = False
+                    out.write(block)
+            file_rows.append({"name": fname, "path": str(p.resolve()), "sha256": sha,
+                              "size_bytes": p.stat().st_size, "n_samples": n,
+                              "offset_samples": off, "recorder_time": t.isoformat(),
+                              "start_local": start_local(t, 0, sr, clock_offset_s),
+                              "mtime_end": end.isoformat(timespec="seconds")})
+    info = check_source(str(tmp / wav_name))
+    if info.n_samples != n_total:
+        raise SourceError(f"{tmp / wav_name}: {info.n_samples} сэмплов, ожидалось {n_total}")
+    session = {
+        "session_id": f"{name}.{key}",
+        "name": name,
+        "wav": wav_name,
+        "session_sha256": sha256_file(str(tmp / wav_name)),
+        "n_samples": n_total,
+        "sr": sr,
+        "channels": channels,
+        "subtype": subtype,
+        "channels_identical": identical,
+        "files": file_rows,
+        "seams": seams,
+        "gap_min_s": GAP_MIN_S,
+        "gap_max_s": GAP_MAX_S,
+        "pause_max_s": PAUSE_MAX_S,
+        "wallclock_source": "filename+start" if start is not None else "filename",
+        "wallclock_precision_s": 1,
+        "clock_offset_s": clock_offset_s,
+    }
+    (tmp / "session.json").write_text(json.dumps(session, ensure_ascii=False, indent=1))
+    run = {"env": session_env(), "ffmpeg_version": find_ffmpeg()[1],  # for reference only
+           "args": {"dir": str(Path(src_dir).resolve()), "chain": chain, "start": start}}
+    (tmp / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=1))  # last
+    os.replace(tmp, dst)
+    for line in channel_advice(identical):
+        log(line)
     return dst
