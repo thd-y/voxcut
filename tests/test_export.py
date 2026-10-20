@@ -107,3 +107,25 @@ def test_whole_file_interval_rss_bounded(tmp_path, peak_growth_mb):
     row = json.loads((clips / "manifest.jsonl").read_text())
     assert sf.info(clips.parent / row["audio_path"]).frames == SR * seconds
     assert grew_mb < 50, f"RSS вырос на {grew_mb:.0f} МБ"
+
+
+def test_seam_windows_cut_bit_exact(tmp_path):
+    src = make_source(tmp_path / "s.wav", "PCM_16")
+    seg = make_seg_dir(tmp_path, src, [(100, 200)])
+    seams = [{"offset_samples": SR, "start_sample": SR - 480, "end_sample": SR + 480},
+             {"offset_samples": 2 * SR - 10, "start_sample": 2 * SR - 490, "end_sample": 2 * SR}]
+    (seg / "seams.jsonl").write_text("".join(json.dumps(r) + "\n" for r in seams))
+    clips = export_clips(seg)
+    rows = [json.loads(x) for x in (clips / "seams.jsonl").read_text().splitlines()]
+    whole, _ = sf.read(src, dtype="int16", always_2d=True)
+    assert [r["audio_path"].split("/")[1] for r in rows] == ["seams", "seams"]
+    for r in rows:
+        got, _ = sf.read(clips.parent / r["audio_path"], dtype="int16", always_2d=True)
+        assert np.array_equal(got, whole[r["start_sample"]:r["end_sample"]])
+    assert len((clips / "manifest.jsonl").read_text().splitlines()) == 1
+
+
+def test_no_seams_dir_without_session(tmp_path):
+    src = make_source(tmp_path / "s.wav", "PCM_16")
+    clips = export_clips(make_seg_dir(tmp_path, src, [(100, 200)]))
+    assert not (clips / "seams").exists() and not (clips / "seams.jsonl").exists()

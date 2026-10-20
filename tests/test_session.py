@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import struct
 from datetime import datetime, timedelta
 
@@ -8,7 +9,15 @@ import pytest
 import soundfile as sf
 
 from voxcut import audio
-from voxcut.audio import RunError, SourceError, assemble_session, sha256_file
+from voxcut.audio import (
+    RunError,
+    SourceError,
+    assemble_session,
+    compute_probs,
+    export_clips,
+    sha256_file,
+)
+from voxcut.cli import segment
 from voxcut.intervals import (
     RIFF_MAX,
     SEAM_TOL_S,
@@ -19,6 +28,7 @@ from voxcut.intervals import (
     locate,
     meta_key,
     mtime_warnings,
+    parse_config,
     parse_start,
     pick_chain,
     seam_windows,
@@ -389,3 +399,71 @@ def test_mtime_mismatch_warns_and_assembles(tmp_path):
     os.utime(paths[0], (paths[1].stat().st_mtime + 100,) * 2)
     dst, _, logs = run_session(tmp_path)
     assert "порядок файлов по mtime" in logs and dst.exists()
+
+
+# --- probs / segment / export on a session (D25, D27) ---
+
+
+CFG = parse_config("threshold = 0.5\npad_ms = 0\nmerge_gap_ms = 0\n")[0]
+
+
+def same_channels(i, n):
+    x = np.random.default_rng(i).integers(-20000, 20000, n, dtype=np.int16)
+    return np.stack([x, x], axis=1)
+
+
+@pytest.mark.slow
+def test_session_probs_segment_export(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(3), data=same_channels)
+    sdir, s, _ = run_session(tmp_path)
+    pdir = compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
+    assert pdir.name.endswith(".c0.raw")
+    pj = json.loads((pdir / "probs.json").read_text())
+    assert (pj["channel"], pj["channel_source"]) == (0, "session.channels_identical")
+    assert pj["session"] == s
+    assert compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"), 0) == pdir  # тот же .c0
+    seg = segment(str(pdir), CFG)
+    seams = [json.loads(x) for x in (seg / "seams.jsonl").read_text().splitlines()]
+    assert [x["offset_samples"] for x in seams] == [2 * SR, 4 * SR]
+    assert all(x["session_id"] == s["session_id"] for x in seams)
+    clips = export_clips(str(seg))
+    whole, _ = sf.read(sdir / s["wav"], dtype="int16")
+    for x in [json.loads(r) for r in (clips / "seams.jsonl").read_text().splitlines()]:
+        got, _ = sf.read(seg / x["audio_path"], dtype="int16")
+        assert np.array_equal(got, whole[x["start_sample"]:x["end_sample"]])
+    rows = [json.loads(r) for r in (seg / "manifest.jsonl").read_text().splitlines()]
+    # segment читает только probs.json: без каталога сессии строки те же
+    shutil.rmtree(sdir)
+    shutil.rmtree(seg)
+    again = [json.loads(r) for r in
+             (segment(str(pdir), CFG) / "manifest.jsonl").read_text().splitlines()]
+    assert again == rows
+
+
+@pytest.mark.slow
+def test_session_lr_differ_needs_channel(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(2))
+    sdir, s, _ = run_session(tmp_path)
+    with pytest.raises(SourceError, match="задайте channel"):
+        compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
+
+
+@pytest.mark.slow
+def test_session_sha_mismatch_refused(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(2), data=same_channels)
+    sdir, s, _ = run_session(tmp_path)
+    (sdir / "session.json").write_text(json.dumps(s | {"session_sha256": "0" * 64}))
+    with pytest.raises(RunError, match="session_sha256"):
+        compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
+    assert not (tmp_path / "probs").exists() or not any((tmp_path / "probs").iterdir())
+
+
+@pytest.mark.slow
+def test_two_starts_same_minute_refused_on_reuse(tmp_path):
+    make_folder(tmp_path / "in", chain_starts(2), data=same_channels)
+    a, sa, _ = run_session(tmp_path, start="2026-10-20 11:30:00")
+    b, sb, _ = run_session(tmp_path, start="2026-10-20 11:30:30")
+    assert a != b and sa["name"] == sb["name"]
+    compute_probs(str(a / sa["wav"]), str(tmp_path / "probs"))
+    with pytest.raises(RunError, match="(?s)блок session.*rm -rf"):
+        compute_probs(str(b / sb["wav"]), str(tmp_path / "probs"))

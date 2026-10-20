@@ -323,18 +323,42 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line]
 
 
+def read_session(src: str, sha: str) -> dict | None:
+    path = Path(src).parent / "session.json"
+    if not path.exists():
+        return None
+    session = load_json(path)
+    if session["session_sha256"] != sha:
+        raise RunError(f"{path}: session_sha256 не совпадает с sha256 {src}; "
+                       "сессия не от этого файла")
+    return session
+
+
 def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> Path:
     """`probs`: check the source, run Silero, publish <dir>.tmp -> os.replace (D6, D19).
 
     An existing dir for the same source and channel is reused after the env check.
+    A session.json next to the source (D25) is checked by sha and copied into probs.json, so
+    segment never needs the session dir; with identical channels it picks channel 0 (D27).
     """
     sha = sha256_file(src)
+    session = read_session(src, sha)
+    channel_source = None
+    if channel is None and session and session["channels_identical"]:
+        channel, channel_source = 0, "session.channels_identical"
     dst = Path(out_dir) / probs_dir_name(src, sha, channel)
     if dst.exists():
         meta = load_json(dst / "probs.json")
         check_env(meta, current_env(vad_filter(channel, meta["channels"])), dst)
+        if meta.get("session") != session:
+            raise RunError(f"{dst}: блок session в probs.json не совпадает с session.json "
+                           f"рядом с источником.\nУдалите каталог и запустите заново: "
+                           f"rm -rf {shlex.quote(str(dst))}")
         return dst
     info = check_source(src)
+    if session and session["n_samples"] != info.n_samples:
+        raise RunError(f"{src}: в session.json {session['n_samples']} сэмплов, "
+                       f"в источнике {info.n_samples}")
     af = vad_filter(channel, info.channels)
     tmp = fresh_tmp(dst)
     probs, n16k = vad_probs(src, af)
@@ -360,6 +384,10 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
         "model_name": "silero_vad.jit",
         "torch_version": torch.__version__,
     }
+    if channel_source:
+        meta["channel_source"] = channel_source
+    if session:
+        meta["session"] = session
     (tmp / "probs.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))  # last
     os.replace(tmp, dst)
     return dst
@@ -388,24 +416,30 @@ def export_clips(seg_dir: str) -> Path:
     info = sf.info(src)
     dtype = _DTYPES.get(info.subtype, "int16")  # 8-bit PCM is exact through int16
     ext = "flac" if info.format == "FLAC" else "wav"
+    seams_path = seg_dir / "seams.jsonl"  # D25: windows around seams, only for sessions
+    jobs = [("", rows, "manifest.jsonl")]
+    if seams_path.exists():
+        jobs.insert(0, ("seams/", read_jsonl(seams_path), "seams.jsonl"))
     tmp = fresh_tmp(dst)
-    out_rows = []
     with sf.SoundFile(src) as f:
-        for i, row in enumerate(rows):
-            start, end = row["start_sample"], min(row["end_sample"], info.frames)  # D5: clamp
-            name = f"{i:04d}_{start}_{end}.{ext}"
-            f.seek(start)
-            with sf.SoundFile(tmp / name, "w", info.samplerate, info.channels,
-                              subtype=info.subtype, format=info.format) as out:
-                left = end - start
-                while left > 0:
-                    block = f.read(min(EXPORT_BLOCK, left), dtype=dtype, always_2d=True)
-                    if not len(block):
-                        break
-                    out.write(block)
-                    left -= len(block)
-            out_rows.append(row | {"end_sample": end, "audio_path": f"clips/{name}"})
-    write_jsonl(tmp / "manifest.jsonl", out_rows)  # last
+        for sub, job_rows, manifest in jobs:
+            (tmp / sub).mkdir(exist_ok=True)
+            out_rows = []
+            for i, row in enumerate(job_rows):
+                start, end = row["start_sample"], min(row["end_sample"], info.frames)  # D5
+                name = f"{sub}{i:04d}_{start}_{end}.{ext}"
+                f.seek(start)
+                with sf.SoundFile(tmp / name, "w", info.samplerate, info.channels,
+                                  subtype=info.subtype, format=info.format) as out:
+                    left = end - start
+                    while left > 0:
+                        block = f.read(min(EXPORT_BLOCK, left), dtype=dtype, always_2d=True)
+                        if not len(block):
+                            break
+                        out.write(block)
+                        left -= len(block)
+                out_rows.append(row | {"end_sample": end, "audio_path": f"clips/{name}"})
+            write_jsonl(tmp / manifest, out_rows)  # manifest.jsonl is last
     os.replace(tmp, dst)
     return dst
 

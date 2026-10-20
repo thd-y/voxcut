@@ -184,3 +184,81 @@ def test_detect_and_evaluate_end_to_end(tmp_path, capsys):
     assert main(["evaluate", str(seg), str(tmp_path / "l.txt")]) == 0
     assert "эталон: событий me 0" in capsys.readouterr().out
     shutil.rmtree(tmp_path / "out")
+
+
+# --- session (D25–D27) ---
+
+ROW_KEYS = {"source_path", "source_sha256", "ffmpeg_filter", "ffmpeg_version", "source_sr",
+            "start_sample", "end_sample", "start_s", "end_s", "duration_s", "branch", "p_max",
+            "p_mean", "threshold", "neg_threshold", "pad_ms", "merge_gap_ms", "min_speech_ms",
+            "min_silence_ms", "model_version", "audio_path"}
+RUN_KEYS = {"status", "source", "config", "config_sha256", "meta", "counts", "probs_sha256",
+            "env"}
+SESSION_ROW_KEYS = {"session_id", "file", "file_start_sample", "start_local", "at_seam"}
+
+
+def test_plain_source_keys_unchanged(tmp_path):
+    """Regression contract (D25): no session.json -> the same keys as before."""
+    seg = segment(make_probs_dir(tmp_path, SPEECH), cfg())
+    rows = [json.loads(x) for x in (seg / "manifest.jsonl").read_text().splitlines()]
+    assert all(set(r) == ROW_KEYS for r in rows)
+    assert set(json.loads((seg / "run.json").read_text())) == RUN_KEYS
+    assert not (seg / "seams.jsonl").exists()
+
+
+def session_block(seams_s=(1.9, 8.0), files_s=(0, 1.9, 8.0)):
+    """10 s at SR as three files; seams at 1.9 s (inside speech 1–2 s) and 8.0 s (silence)."""
+    names = [f"2025030108292{i}.WAV" for i in range(len(files_s))]
+    return {
+        "session_id": "2025-03-01_08-29_0h00m.12345678",
+        "files": [{"name": n, "offset_samples": int(t * SR),
+                   "recorder_time": f"2025-03-01T08:29:2{i}"}
+                  for i, (n, t) in enumerate(zip(names, files_s, strict=True))],
+        "seams": [{"offset_samples": int(t * SR), "kind": "split", "after": names[i],
+                   "before": names[i + 1], "gap_est_s": 1.0} for i, t in enumerate(seams_s)],
+        "clock_offset_s": 3600.0,
+    }
+
+
+def make_session_probs(tmp_path):
+    d = make_probs_dir(tmp_path, SPEECH)
+    pj = json.loads((d / "probs.json").read_text())
+    (d / "probs.json").write_text(json.dumps(pj | {"session": session_block()}))
+    return d
+
+
+def test_session_rows_and_seams(tmp_path):
+    seg = segment(make_session_probs(tmp_path), cfg())
+    rows = [json.loads(x) for x in (seg / "manifest.jsonl").read_text().splitlines()]
+    assert all(set(r) == ROW_KEYS | SESSION_ROW_KEYS for r in rows)
+    first, second = rows
+    assert first["session_id"] == "2025-03-01_08-29_0h00m.12345678"
+    assert (first["file"], first["file_start_sample"]) == ("20250301082920.WAV",
+                                                             first["start_sample"])
+    assert first["at_seam"] is True  # речь 1–2 с, стык 1.9 с
+    assert second["at_seam"] is False  # речь 5–6 с, стыки 1.9 и 8.0 с
+    assert second["file"] == "20250301082921.WAV"
+    assert second["file_start_sample"] == second["start_sample"] - int(1.9 * SR)
+    seams = [json.loads(x) for x in (seg / "seams.jsonl").read_text().splitlines()]
+    assert [(x["start_sample"], x["end_sample"]) for x in seams] == \
+        [(int(0.9 * SR), int(2.9 * SR)), (7 * SR, 9 * SR)]  # стык 8.0 с без речи тоже есть
+    assert seams[1]["start_local"] == "2025-03-01T09:29:22"
+    assert json.loads((seg / "run.json").read_text())["seam_tol_s"] == 1.0
+
+
+def test_session_start_local(tmp_path):
+    seg = segment(make_session_probs(tmp_path), cfg())
+    second = json.loads((seg / "manifest.jsonl").read_text().splitlines()[1])
+    within = second["file_start_sample"] / SR  # 156 кадров * 32 мс − 1.9 с = 3.092 с
+    assert within == pytest.approx(156 * F / 16000 - 1.9)
+    assert second["start_local"] == "2025-03-01T09:29:24"  # 08:29:21 + 1 ч + 3.092 с
+
+
+def test_seam_tol_change_refused_on_reuse(tmp_path, monkeypatch):
+    d = make_session_probs(tmp_path)
+    seg = segment(d, cfg())
+    monkeypatch.setattr("voxcut.cli.SEAM_TOL_S", 2.0)
+    with pytest.raises(RunError, match="(?s)seam_tol_s.*rm -rf"):
+        segment(d, cfg())
+    monkeypatch.undo()
+    assert segment(d, cfg()) == seg

@@ -5,7 +5,9 @@ import hashlib
 import json
 import math
 import os
+import shlex
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -25,17 +27,22 @@ from voxcut.audio import (
 )
 from voxcut.intervals import (
     FRAME_SAMPLES,
+    SEAM_TOL_S,
     VAD_SR,
     ConfigError,
     LabelsError,
     Metrics,
     SegmentConfig,
+    at_seam,
     evaluate_session,
+    locate,
     n_frames,
     parse_config,
     parse_labels,
     postprocess,
+    seam_windows,
     segment_raw,
+    start_local,
 )
 
 FW_NAME = "fw_params_voxcut_postproc"
@@ -64,6 +71,29 @@ def _mono(channel):
     return None if channel == "mono" else channel
 
 
+def enrich(rows: list[dict], session: dict, sr: int, n_src: int) -> tuple[list[dict], list[dict]]:
+    """Session fields on manifest rows and one window per seam, regardless of VAD (D25)."""
+    files = session["files"]
+    offsets = [f["offset_samples"] for f in files]
+    starts = [datetime.fromisoformat(f["recorder_time"]) for f in files]
+    seams = [x["offset_samples"] for x in session["seams"]]
+    tol = round(SEAM_TOL_S * sr)
+
+    def where(sample):
+        i, within = locate(sample, offsets)
+        return {"file": files[i]["name"], "file_start_sample": within,
+                "start_local": start_local(starts[i], within, sr, session["clock_offset_s"])}
+
+    out = [r | {"session_id": session["session_id"]} | where(r["start_sample"])
+           | {"at_seam": at_seam(r["start_sample"], r["end_sample"], seams, tol)} for r in rows]
+    seam_rows = [x | {"session_id": session["session_id"], "start_sample": s, "end_sample": e,
+                      "start_local": where(x["offset_samples"])["start_local"],
+                      "audio_path": None}
+                 for x, (s, e) in zip(session["seams"], seam_windows(seams, tol, n_src),
+                                      strict=True)]
+    return out, seam_rows
+
+
 def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Path:
     """seg-<cfg_sha8>/ with run.json (always), raw.jsonl, manifest.jsonl; reused if present."""
     probs_dir = Path(probs_dir)
@@ -81,6 +111,9 @@ def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Pat
             raise RunError(f"{dst}: probs.npy подменён после сегментации. "
                            f"Удалите каталог: rm -rf {dst}")
         check_env(run["env"], env, dst)
+        if "session" in pj and run.get("seam_tol_s") != SEAM_TOL_S:
+            raise RunError(f"{dst}: seam_tol_s было {run.get('seam_tol_s')}, сейчас "
+                           f"{SEAM_TOL_S}.\nУдалите каталог: rm -rf {shlex.quote(str(dst))}")
         return dst
 
     params = cfg.effective()
@@ -103,9 +136,14 @@ def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Pat
                               "end_s": e / sr, "duration_s": (e - s) / sr, "branch": "raw",
                               "p_max": p_max, "p_mean": p_mean} | params
                     | {"model_version": pj["model_version"], "audio_path": None})
+    session = pj.get("session")
+    if session:
+        rows, seam_rows = enrich(rows, session, sr, n_src)
     tmp = fresh_tmp(dst)
     write_jsonl(tmp / "raw.jsonl", raw_rows)
     write_jsonl(tmp / "manifest.jsonl", rows)
+    if session:
+        write_jsonl(tmp / "seams.jsonl", seam_rows)
     run = {
         "status": "ok",
         "source": {"path": pj["source_path"], "sha256": pj["source_sha256"],
@@ -118,6 +156,8 @@ def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Pat
         "probs_sha256": probs_sha,
         "env": env,
     }
+    if session:
+        run["seam_tol_s"] = SEAM_TOL_S
     (tmp / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=1))  # last
     os.replace(tmp, dst)
     return dst

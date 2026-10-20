@@ -6,6 +6,7 @@ import pytest
 import soundfile as sf
 
 from voxcut.audio import (
+    ENV_KEYS,
     FFmpegError,
     compute_probs,
     ffmpeg_stream,
@@ -86,6 +87,11 @@ def test_two_runs_identical_npy(tmp_path):
     assert meta["source_n_samples"] == 5 * SR and meta["torch_threads"] == 1
     assert meta["ffmpeg_filter"] == "aresample=16000:resampler=swr"
     assert not (tmp_path / "o1" / (a.name + ".tmp")).exists()
+    # регрессия D25: без session.json ни session, ни channel_source в probs.json
+    assert set(meta) == {*ENV_KEYS, "source_path", "source_sha256", "source_sr",
+                         "source_n_samples", "channels", "channel", "codec_name", "format",
+                         "subtype", "vad_sr", "frame_samples", "n16k", "n_frames", "model_name",
+                         "torch_version"}
 
 
 @pytest.mark.slow
