@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import BinaryIO
 from urllib.parse import parse_qs, urlsplit
 
 from voxcut import journal as jr
@@ -57,7 +58,7 @@ class HttpError(Exception):
 @dataclass
 class Response:
     status: int = 200
-    body: bytes | Path = b""  # a Path is streamed from disk
+    body: bytes | BinaryIO = b""  # an open file is streamed and closed by _send
     ctype: str = JSON_TYPE
     headers: dict = field(default_factory=dict)
 
@@ -170,11 +171,15 @@ class App:
             raise HttpError(405, "только GET")
         with self._lock:
             known = self.clips.get(req.params["clip_id"])
-        if known is None or known[3] is None or not known[3].is_file():
+        if known is None or known[3] is None:
             raise HttpError(404, "нет такого клипа")
         path = known[3]
+        try:
+            f = open(path, "rb")  # noqa: SIM115 - _send streams and closes it
+        except OSError:
+            raise HttpError(404, "нет такого клипа") from None  # no path in the reply or log
         ctype = "audio/flac" if path.suffix.lower() == ".flac" else "audio/wav"
-        return Response(200, path, ctype)  # Range is ignored: always the whole file (S3)
+        return Response(200, f, ctype)  # Range is ignored: always the whole file (S3)
 
     def _journal_post(self, req: Request) -> dict:
         b = req.body
@@ -278,20 +283,23 @@ class Handler(BaseHTTPRequestHandler):
         self.app.log(f"{self.command} {getattr(self, '_template', '-')} {int(code)}")
 
     def _send(self, resp: Response) -> None:
-        is_file = isinstance(resp.body, Path)
-        with open(resp.body, "rb") if is_file else contextlib.nullcontext() as f:
-            self.send_response(resp.status)
-            self.send_header("Content-Type", resp.ctype)
-            self.send_header("Content-Length",
-                             str(os.fstat(f.fileno()).st_size if is_file else len(resp.body)))
-            for k, v in resp.headers.items():
-                self.send_header(k, v)
-            self.end_headers()
-            if self.command != "HEAD":
-                if is_file:
-                    shutil.copyfileobj(f, self.wfile, 1 << 20)
-                else:
-                    self.wfile.write(resp.body)
+        is_file = not isinstance(resp.body, bytes)
+        with resp.body if is_file else contextlib.nullcontext() as f:
+            try:
+                self.send_response(resp.status)
+                self.send_header("Content-Type", resp.ctype)
+                self.send_header("Content-Length",
+                                 str(os.fstat(f.fileno()).st_size if is_file else len(resp.body)))
+                for k, v in resp.headers.items():
+                    self.send_header(k, v)
+                self.end_headers()
+                if self.command != "HEAD":
+                    if is_file:
+                        shutil.copyfileobj(f, self.wfile, 1 << 20)
+                    else:
+                        self.wfile.write(resp.body)
+            except (BrokenPipeError, ConnectionResetError):
+                self.close_connection = True  # the page aborted the fetch (←/→): not an error
 
     def _json(self, status: int, obj) -> Response:
         return Response(status, json.dumps(obj, ensure_ascii=False).encode())
@@ -369,13 +377,22 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_HEAD = do_POST = do_OPTIONS = do_PUT = do_DELETE = do_PATCH = _dispatch
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        """The stock handler prints a traceback with paths and data to stderr (S8)."""
+        exc = sys.exc_info()[1]
+        self.RequestHandlerClass.app.log(f"connection error {type(exc).__name__}")
+
+
 def make_server(lay: Layout, host: str = HOST, port: int = 0, jobs=None,
                 journal: Journal | None = None) -> tuple[ThreadingHTTPServer, App]:
     """S1: loopback only; a busy port raises OSError before any launch code exists."""
     if host != HOST:
         raise ValueError(f"сервер слушает только {HOST}")
     handler = type("BoundHandler", (Handler,), {})
-    server = ThreadingHTTPServer((host, port), handler)
+    server = Server((host, port), handler)
     server.daemon_threads = True
     app = App(lay, server.server_address[1], jobs, journal)
     if jobs is not None:

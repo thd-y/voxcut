@@ -346,3 +346,70 @@ def test_two_clients_concurrent_marks(wapi):
         t.join()
     events, warnings = journal_mod.load(wapi.lay.journal)
     assert errors == [] and len(events) == 100 and warnings == []
+
+
+def test_aborted_clip_download_logs_template_only(api, capfd):
+    """AbortController on ←/→ drops the connection mid-body: no traceback, no path (S8)."""
+    import socket as socket_mod
+    import time
+
+    seg = api.seg
+    sf.write(seg / "clips" / "0000.wav", np.zeros((16000 * 120, 2), np.int16), 16000)
+    clip = session(api)["clips"][0]
+    logs = []
+    api.app.log = logs.append
+    s = socket_mod.create_connection(("127.0.0.1", api.port))
+    s.sendall((f"GET /api/clip/{clip['clip_id']} HTTP/1.1\r\nHost: 127.0.0.1:{api.port}\r\n"
+               f"Authorization: Bearer {api.k}\r\n\r\n").encode())
+    s.recv(4096)
+    s.setsockopt(socket_mod.SOL_SOCKET, socket_mod.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+    s.close()  # RST mid-body
+    time.sleep(0.5)
+    err = capfd.readouterr().err
+    assert "Traceback" not in err and str(seg) not in err
+    assert all(line.startswith("GET /api/clip/{clip_id} ") for line in logs), logs
+
+
+def test_clip_vanished_404_without_path(api, monkeypatch):
+    clip = session(api)["clips"][0]
+    logs = []
+    api.app.log = logs.append
+    (api.seg / "clips" / "0000.wav").unlink()
+    status, _, body = get(api, f"/api/clip/{clip['clip_id']}")
+    assert status == 404 and str(api.seg).encode() not in body
+    assert "0000" not in "\n".join(logs)
+
+
+def test_stream_error_logged_by_type_only(api, capfd, tmp_path):
+    p = tmp_path / "secret-dir" / "x.wav"
+    p.parent.mkdir()
+    p.write_bytes(b"x" * 100)
+
+    class BadFile:
+        def __init__(self):
+            self.f = open(p, "rb")  # noqa: SIM115 - closed in __exit__
+
+        def fileno(self):
+            return self.f.fileno()
+
+        def read(self, n=-1):
+            raise OSError(f"I/O error reading {p}")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.f.close()
+
+    api.app.route("GET", "/api/boom")(lambda req: server_mod.Response(200, BadFile()))
+    logs = []
+    api.app.log = logs.append
+    try:
+        get(api, "/api/boom")
+    except Exception:  # noqa: BLE001, S110 - the connection may be cut; only the log matters
+        pass
+    import time
+    time.sleep(0.3)
+    err = capfd.readouterr().err
+    assert "secret-dir" not in err and "Traceback" not in err
+    assert "secret-dir" not in "\n".join(logs) and any("OSError" in x for x in logs)
