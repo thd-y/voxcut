@@ -345,6 +345,9 @@ def test_process_end_to_end(lay):
     assert row["state"] == "clips" and row["n_clips"] == len(
         (clips / "manifest.jsonl").read_text().splitlines())
     assert json.loads((clips.parent / "run.json").read_text())["meta"]["name"] == "v1"
+    # D6, D19: run dirs hold only what segment/export wrote; marks go to the journal
+    assert {p.name for p in clips.parent.iterdir()} <= {
+        "run.json", "raw.jsonl", "manifest.jsonl", "seams.jsonl", "clips"}
 
 
 @pytest.mark.slow
@@ -353,9 +356,24 @@ def test_process_idempotent(lay):
 
     sid = _import(lay, data=same_channels)
     clips = process_session(lay, sid, lambda s: None, _quiet)
-    dirs = [p for p in (lay.sessions / sid).rglob("*") if p.is_dir()]
-    before = {p: p.stat().st_mtime_ns for p in dirs}
+    before = {p: p.stat().st_mtime_ns for p in (lay.sessions / sid).rglob("*")}
     stages = []
     assert process_session(lay, sid, stages.append, _quiet) == clips
     assert "export" not in stages and "assemble" not in stages
-    assert {p: p.stat().st_mtime_ns for p in dirs} == before
+    assert {p: p.stat().st_mtime_ns for p in (lay.sessions / sid).rglob("*")} == before
+
+
+def test_import_never_copies_across_filesystems(lay, no_check, monkeypatch):
+    """D39: only a rename; across filesystems it refuses instead of copy + delete."""
+    import errno
+
+    paths = make_folder(lay.inbox, chain_starts(2))
+
+    def exdev(src, dst):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(os, "rename", exdev)
+    with pytest.raises(OSError):
+        import_originals(lay, "", 1, None, _quiet)
+    assert sorted(p.name for p in lay.inbox.iterdir()) == sorted(p.name for p in paths)
+    assert not list(lay.sessions.glob("*/originals/*"))
