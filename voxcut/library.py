@@ -10,6 +10,7 @@ from pathlib import Path
 
 from voxcut import audio
 from voxcut.audio import RunError, SourceError, load_json, read_jsonl
+from voxcut.cli import read_config, segment
 from voxcut.intervals import SessionError
 
 SESSION_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_\d+h\d{2}m\.[0-9a-f]{8}")
@@ -236,3 +237,32 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
     })
     log(f"импортировано {len(moved)} файлов: сессия {plan.session_id}")
     return {"session_id": plan.session_id, "existing": False}
+
+
+V1_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "v1.toml"  # U8: the only config
+
+
+def process_session(lay: Layout, sid: str, stage, log) -> Path:
+    """U8: the missing steps assemble -> probs -> segment -> export; resumes after a failure."""
+    sdir = lay.sessions / sid
+    if not SESSION_ID_RE.fullmatch(sid) or not (sdir / "import.json").is_file():
+        raise RunError(f"нет сессии {sid}")
+    sess = sdir / f"{sid}.session"
+    meta = load_json(sess / "session.json") if (sess / "session.json").is_file() else None
+    if meta is None or not (sess / meta["wav"]).is_file():
+        if not (sdir / "originals").is_dir():
+            raise RunError("сессия из light-бэкапа: модель не прогнать, нужен full-бэкап")
+        stage("assemble")
+        got = audio.assemble_session(str(sdir / "originals"), str(sdir), None,
+                                     load_json(sdir / "import.json")["start"], log)
+        if got != sess:
+            raise RunError(f"сборка дала {got.name}, ожидалась {sess.name}")
+        meta = load_json(sess / "session.json")
+    stage("probs")
+    pdir = audio.compute_probs(str(sess / meta["wav"]), str(sdir))
+    stage("segment")
+    seg = segment(str(pdir), *read_config(str(V1_CONFIG)))
+    if not (seg / "clips").exists():
+        stage("export")
+        audio.export_clips(str(seg))
+    return seg / "clips"

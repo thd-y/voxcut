@@ -6,7 +6,7 @@ import pytest
 from test_session import T0, chain_starts, make_folder
 
 from voxcut import audio
-from voxcut.audio import SourceError, sha256_file
+from voxcut.audio import RunError, SourceError, sha256_file
 from voxcut.intervals import SessionError
 from voxcut.library import (
     Layout,
@@ -14,6 +14,7 @@ from voxcut.library import (
     import_originals,
     inbox_inventory,
     list_sessions,
+    process_session,
     resolve_clip,
     session_runs,
 )
@@ -308,3 +309,53 @@ def test_import_real_check_source(lay):
     before = _shas(paths)
     res = import_originals(lay, "", 1, None, _quiet)
     assert _shas(sorted((lay.sessions / res["session_id"] / "originals").iterdir())) == before
+
+
+# --- processing (UI task 6, U8) ---
+
+def _import(lay, start="2026-08-11 21:30", **kw):
+    make_folder(lay.inbox, chain_starts(3), **kw)
+    return import_originals(lay, "", 1, start, _quiet)["session_id"]
+
+
+def test_process_light_refused(lay):
+    sid = "2026-08-11_21-30_0h00m.12345678"
+    (lay.sessions / sid).mkdir()
+    (lay.sessions / sid / "import.json").write_text(json.dumps({"start": None}))
+    with pytest.raises(RunError, match="light"):
+        process_session(lay, sid, lambda s: None, _quiet)
+
+
+@pytest.mark.parametrize("sid", ["../x", "2026-08-11_21-30_0h00m.00000000"])
+def test_process_unknown_session_refused(lay, sid):
+    with pytest.raises(RunError, match="нет сессии"):
+        process_session(lay, sid, lambda s: None, _quiet)
+
+
+@pytest.mark.slow
+def test_process_end_to_end(lay):
+    from test_session import same_channels
+
+    sid = _import(lay, data=same_channels)
+    stages = []
+    clips = process_session(lay, sid, stages.append, _quiet)
+    assert stages == ["assemble", "probs", "segment", "export"]
+    assert (clips / "manifest.jsonl").is_file()
+    row = list_sessions(lay)[0]
+    assert row["state"] == "clips" and row["n_clips"] == len(
+        (clips / "manifest.jsonl").read_text().splitlines())
+    assert json.loads((clips.parent / "run.json").read_text())["meta"]["name"] == "v1"
+
+
+@pytest.mark.slow
+def test_process_idempotent(lay):
+    from test_session import same_channels
+
+    sid = _import(lay, data=same_channels)
+    clips = process_session(lay, sid, lambda s: None, _quiet)
+    dirs = [p for p in (lay.sessions / sid).rglob("*") if p.is_dir()]
+    before = {p: p.stat().st_mtime_ns for p in dirs}
+    stages = []
+    assert process_session(lay, sid, stages.append, _quiet) == clips
+    assert "export" not in stages and "assemble" not in stages
+    assert {p: p.stat().st_mtime_ns for p in dirs} == before
