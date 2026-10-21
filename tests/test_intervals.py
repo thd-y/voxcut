@@ -175,6 +175,7 @@ def test_config_defaults_and_meta():
     (BASE + "neg_threshold = 0.5\n", "neg_threshold 0.5 больше threshold"),
     (BASE + 'channel = "left"\n', "channel"),
     ("threshold = \n", "не TOML"),
+    (BASE + 'meta = "x"\n', r"\[meta\]: ожидается таблица"),
 ])
 def test_config_errors(text, needle):
     with pytest.raises(ConfigError, match=needle):

@@ -234,7 +234,7 @@ def parse_config(text: str) -> tuple[SegmentConfig, dict]:
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"конфиг не TOML: {e}") from e
     meta = raw.pop("meta", {})
-    errors = []
+    errors = [] if isinstance(meta, dict) else [f"[meta]: ожидается таблица, получено {meta!r}"]
     for key, value in raw.items():
         if key not in _KINDS:
             hint = difflib.get_close_matches(key, _KINDS, n=1)
