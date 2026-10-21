@@ -280,6 +280,8 @@ class Metrics:
     clip_sec: float = 0.0
     n_clips: int = 0
     scored_sec: float = 0.0
+    session_clip_sec: float = 0.0  # D38: all clips, not cut to scored
+    session_sec: float = 0.0
 
     def __add__(self, other: "Metrics") -> "Metrics":
         return Metrics(**{f.name: getattr(self, f.name) + getattr(other, f.name)
@@ -318,6 +320,14 @@ class Metrics:
         return self._ratio(self.clip_sec, self.scored_sec, 60)
 
     @property
+    def clip_min_h_session(self):
+        return self._ratio(self.session_clip_sec, self.session_sec, 60)
+
+    @property
+    def clip_per_me(self):
+        return self._ratio(self.session_clip_sec, self.me_sec)
+
+    @property
     def clips_per_h(self):
         return self._ratio(self.n_clips, self.scored_sec, 3600)
 
@@ -331,7 +341,7 @@ class Metrics:
 
 
 def evaluate_session(final_s, labels: dict, raw_s=None, event_cov: float = EVENT_COV,
-                     tolerance_s: float = TOLERANCE_S) -> Metrics:
+                     tolerance_s: float = TOLERANCE_S, duration_s: float | None = None) -> Metrics:
     """Metrics for one session; every interval is first cut to `scored` (C5). Seconds."""
     scored = labels["scored"]
     me = labels["me"]
@@ -353,6 +363,8 @@ def evaluate_session(final_s, labels: dict, raw_s=None, event_cov: float = EVENT
         n_clips=sum(1 for seg in union(final_s) if intersect([seg], scored)),
         scored_sec=total(scored),
     )
+    if duration_s is not None:
+        m.session_clip_sec, m.session_sec = total(union(final_s)), duration_s
     if raw_s is not None:
         m.raw_covered_sec = total(intersect(intersect(union(raw_s), scored), me))
     for s, e in me:

@@ -13,7 +13,7 @@ from voxcut.audio import (
     probs_dir_name,
     sha256_file,
 )
-from voxcut.cli import FW_NAME, evaluate, main, segment
+from voxcut.cli import COLUMNS, FW_NAME, evaluate, main, segment
 from voxcut.intervals import FRAME_SAMPLES as F
 from voxcut.intervals import parse_config
 
@@ -273,3 +273,9 @@ def test_seam_tol_change_refused_on_reuse(tmp_path, monkeypatch):
         segment(d, cfg())
     monkeypatch.undo()
     assert segment(d, cfg()) == seg
+
+
+def test_columns_have_session_volume():
+    """D38: whole-session volume and clips per `me` follow the scored-based clip_min_h."""
+    i = COLUMNS.index("clip_min_h")
+    assert COLUMNS[i + 1:i + 3] == ("clip_min_h_session", "clip_per_me")

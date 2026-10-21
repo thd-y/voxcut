@@ -247,3 +247,16 @@ def test_v1_config():
     assert cfg.effective() == {"threshold": 0.1, "neg_threshold": pytest.approx(0.01), "min_speech_ms": 0,
                                "min_silence_ms": 2000, "pad_ms": 3000, "merge_gap_ms": 10000}
     assert meta["name"] == "v1"
+
+
+def test_session_volume():
+    """D38: clip volume over the whole session, not only `scored`; clips per second of `me`."""
+    final, labels = [(1, 3), (50, 54)], L([(0, 10)], me=[(1, 3)])
+    m = evaluate_session(final, labels, duration_s=100)
+    assert m.clip_min_h == pytest.approx(12.0)  # по scored: 2 с из 10
+    assert m.clip_min_h_session == pytest.approx(3.6)  # 6 с из 100
+    assert m.clip_per_me == pytest.approx(3.0)
+    assert math.isnan(evaluate_session(final, labels).clip_min_h_session)
+    both = m + evaluate_session([(0, 10)], L([(0, 10)], me=[(0, 10)]), duration_s=100)
+    assert both.clip_min_h_session == pytest.approx(16 / 200 * 60)
+    assert both.clip_per_me == pytest.approx(16 / 12)

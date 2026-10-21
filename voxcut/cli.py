@@ -184,7 +184,8 @@ def evaluate(seg_dir: str, labels_path: str) -> tuple[Metrics, dict]:
     reference = {"me_events": len(labels["me"]),
                  "me_sec": sum(e - s for s, e in labels["me"]),
                  "scored_sec": sum(e - s for s, e in labels["scored"])}
-    return evaluate_session(final, labels, raw_s=raw), reference
+    return evaluate_session(final, labels, raw_s=raw,
+                            duration_s=run["source"]["n_samples"] / sr), reference
 
 
 def fmt(x: float, digits: int = 3) -> str:
@@ -192,14 +193,16 @@ def fmt(x: float, digits: int = 3) -> str:
 
 
 COLUMNS = ("config", "session", "recall_sec", "recall_events", "fully_missed", "FA_asr_min_h",
-           "FA_bound_min_h", "neutral_min_h", "clip_min_h", "clips_h", "coverage", "raw_recall")
+           "FA_bound_min_h", "neutral_min_h", "clip_min_h", "clip_min_h_session", "clip_per_me",
+           "clips_h", "coverage", "raw_recall")
 
 
 def metrics_row(config: str, session: str, m: Metrics) -> list[str]:
     cov = fmt(m.coverage) + (" ≈весь файл" if m.whole_file else "")
     return [config, session, fmt(m.recall_sec), fmt(m.recall_events), str(len(m.fully_missed)),
             fmt(m.fa_asr_min_h, 2), fmt(m.fa_bound_min_h, 2), fmt(m.neutral_min_h, 2),
-            fmt(m.clip_min_h, 2), fmt(m.clips_per_h, 1), cov, fmt(m.raw_recall_sec)]
+            fmt(m.clip_min_h, 2), fmt(m.clip_min_h_session, 2), fmt(m.clip_per_me, 2),
+            fmt(m.clips_per_h, 1), cov, fmt(m.raw_recall_sec)]
 
 
 def print_table(rows: list[list[str]]) -> None:
