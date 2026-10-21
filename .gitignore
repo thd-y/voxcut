@@ -26,4 +26,5 @@ tests/fixtures/private/
 # Данные продукта (D40): входящие, данные, бэкапы — никогда в git
 inbox/
 backups/
+.run/
 
