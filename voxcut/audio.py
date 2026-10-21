@@ -243,6 +243,7 @@ def vad_probs(src: str, af: str, model=None, reset_at=(), reset_period=0) -> tup
     With reset_period > 0 a second model on the same frames also resets every reset_period
     frames, and the elementwise max of both passes is returned (D31): on long music the
     state goes deaf to whisper, while a fresh state sometimes misses what context caught.
+    Pass B always uses the default JIT model, even when `model` is passed.
     """
     import torch
 

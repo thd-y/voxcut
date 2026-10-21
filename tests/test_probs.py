@@ -102,6 +102,13 @@ def test_two_pass_is_max(tmp_path, model):
 
 
 @pytest.mark.slow
+def test_two_pass_short_source_unchanged(tmp_path, model):
+    """D31: shorter than one period, pass B never resets differently, so the max is pass A."""
+    src, af = noise_wav(tmp_path / "a.wav", 5), vad_filter(None, 1)
+    assert np.array_equal(vad_probs(src, af, model, reset_period=3750)[0], vad_probs(src, af, model)[0])
+
+
+@pytest.mark.slow
 def test_two_pass_respects_seams(tmp_path, model):
     """D31 + D29: pass A resets at seams only, pass B at seams and every period."""
     src, af = noise_wav(tmp_path / "a.wav", 5), vad_filter(None, 1)
@@ -147,12 +154,15 @@ def test_existing_dir_reused_and_orphan_tmp_removed(tmp_path):
 
 
 @pytest.mark.slow
-def test_probs_without_period_refused_on_reuse(tmp_path):
-    """D31: a probs dir from before the second pass is not reused silently."""
+@pytest.mark.parametrize("period", [None, 1875])
+def test_probs_without_period_refused_on_reuse(tmp_path, period):
+    """D31: a probs dir without the second pass, or with another period, is not reused silently."""
     src = noise_wav(tmp_path / "a.wav", 1)
     dst = compute_probs(src, str(tmp_path / "o"))
     meta = json.loads((dst / "probs.json").read_text())
-    del meta["reset_period_frames"]
+    meta["reset_period_frames"] = period
+    if period is None:
+        del meta["reset_period_frames"]
     (dst / "probs.json").write_text(json.dumps(meta))
     with pytest.raises(RunError, match="(?s)D31.*rm -rf"):
         compute_probs(src, str(tmp_path / "o"))

@@ -325,7 +325,7 @@ class Metrics:
 
     @property
     def clip_per_me(self):
-        return self._ratio(self.session_clip_sec, self.me_sec)
+        return self._ratio(self.session_clip_sec, self.me_sec) if self.session_sec > 0 else math.nan
 
     @property
     def clips_per_h(self):

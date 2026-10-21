@@ -257,6 +257,7 @@ def test_session_volume():
     assert m.clip_min_h_session == pytest.approx(3.6)  # 6 с из 100
     assert m.clip_per_me == pytest.approx(3.0)
     assert math.isnan(evaluate_session(final, labels).clip_min_h_session)
+    assert math.isnan(evaluate_session(final, labels).clip_per_me)  # длительность неизвестна: n/a, не 0
     both = m + evaluate_session([(0, 10)], L([(0, 10)], me=[(0, 10)]), duration_s=100)
     assert both.clip_min_h_session == pytest.approx(16 / 200 * 60)
     assert both.clip_per_me == pytest.approx(16 / 12)
