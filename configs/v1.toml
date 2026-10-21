@@ -1,0 +1,10 @@
+# D32: стартовый конфиг v1 (пилот T8); neg_threshold не задан — по D3 это 0.01
+threshold = 0.1
+min_speech_ms = 0
+min_silence_ms = 2000
+pad_ms = 1000
+merge_gap_ms = 10000
+
+[meta]
+name = "v1-start"
+note = "D32, старт sweep"

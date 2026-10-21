@@ -1,6 +1,7 @@
 import math
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -237,3 +238,12 @@ def test_whole_file_flag():
 
 def test_reset_period_is_120_s():
     assert RESET_PERIOD_FRAMES * F == 120 * VAD_SR  # D31
+
+
+def test_v1_config():
+    """D32: the v1 starting config shipped with the repo."""
+    root = Path(__file__).resolve().parent.parent
+    cfg, meta = parse_config((root / "configs" / "v1.toml").read_text())
+    assert cfg.effective() == {"threshold": 0.1, "neg_threshold": pytest.approx(0.01), "min_speech_ms": 0,
+                               "min_silence_ms": 2000, "pad_ms": 1000, "merge_gap_ms": 10000}
+    assert meta["name"] == "v1-start"
