@@ -1,4 +1,5 @@
 import json
+import shlex
 import shutil
 
 import numpy as np
@@ -90,6 +91,16 @@ def test_replaced_probs_refused(tmp_path):
     np.save(d / "probs.npy", np.asarray(SPEECH[::-1], dtype=np.float32))
     with pytest.raises(RunError, match="подменён"):
         segment(d, cfg())
+
+
+def test_rm_hint_quotes_path_with_space(tmp_path):
+    """The printed rm -rf must remove exactly this dir when copied (audit 2026-10-21)."""
+    d = make_probs_dir(tmp_path / "My Recordings", SPEECH, name="my rec.abcdef01.raw")
+    seg = segment(d, cfg())
+    np.save(d / "probs.npy", np.asarray(SPEECH[::-1], dtype=np.float32))
+    with pytest.raises(RunError) as e:
+        segment(d, cfg())
+    assert shlex.split(str(e.value).rsplit("rm -rf ", 1)[1]) == [str(seg)]
 
 
 @pytest.mark.parametrize("damage, needle", [

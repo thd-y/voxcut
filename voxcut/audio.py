@@ -309,6 +309,11 @@ class RunError(RuntimeError):
     """A published run dir does not match what this run would produce (D19)."""
 
 
+def rm_hint(path: Path) -> str:
+    """The one way to print a delete command: quoted, so a copied path with spaces stays whole."""
+    return f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(path))}"
+
+
 def fresh_tmp(dst: Path) -> Path:
     """Empty <dst>.tmp to publish from; an orphan of an interrupted run is removed (D19).
 
@@ -332,8 +337,7 @@ def check_env(stored: dict, current: dict, run_dir: Path) -> None:
             if stored.get(k) != v]
     if diff:
         raise RunError(f"{run_dir}: окружение изменилось ({'; '.join(diff)}).\n"
-                       f"Результат не переиспользуется. Удалите каталог и запустите заново: "
-                       f"rm -rf {shlex.quote(str(run_dir))}")
+                       f"Результат не переиспользуется. {rm_hint(run_dir)}")
 
 
 def load_json(path: Path) -> dict:
@@ -355,7 +359,7 @@ def check_reset_period(meta: dict, probs_dir: Path) -> None:
     """probs from before the second Silero pass (D31) are never reused, by probs or segment."""
     if meta.get("reset_period_frames") != RESET_PERIOD_FRAMES:
         raise RunError(f"{probs_dir}: probs посчитаны без второго прохода Silero (D31).\n"
-                       f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(probs_dir))}")
+                       + rm_hint(probs_dir))
 
 
 def read_session(src: str, sha: str) -> dict | None:
@@ -389,12 +393,11 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
         check_env(meta, current_env(vad_filter(channel, meta["channels"])), dst)
         if meta.get("session") != session:
             raise RunError(f"{dst}: блок session в probs.json не совпадает с session.json "
-                           f"рядом с источником.\nУдалите каталог и запустите заново: "
-                           f"rm -rf {shlex.quote(str(dst))}")
+                           f"рядом с источником.\n{rm_hint(dst)}")
         check_reset_period(meta, dst)
         if meta.get("seam_reset_frames") != resets:
             raise RunError(f"{dst}: probs посчитаны без сброса Silero на стыках (D29).\n"
-                           f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(dst))}")
+                           + rm_hint(dst))
         return dst
     info = check_source(src)
     if session and session["n_samples"] != info.n_samples:
@@ -581,10 +584,9 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         run = load_json(dst / "run.json")
         check_env(run["env"], session_env(), dst)
         meta = load_json(dst / "session.json")
-        rm = f"rm -rf {shlex.quote(str(dst))}"
         if not (dst / wav_name).exists() or sf.info(str(dst / wav_name)).frames != n_total:
             raise RunError(f"{dst}: {wav_name} нет или его длина не {n_total} сэмплов.\n"
-                           f"Удалите каталог и запустите заново: {rm}")
+                           + rm_hint(dst))
         for line in channel_advice(meta["channels_identical"]):
             log(line)
         return dst

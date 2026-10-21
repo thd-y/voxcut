@@ -5,7 +5,6 @@ import hashlib
 import json
 import math
 import os
-import shlex
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +24,7 @@ from voxcut.audio import (
     fresh_tmp,
     load_json,
     read_jsonl,
+    rm_hint,
     write_jsonl,
 )
 from voxcut.intervals import (
@@ -112,12 +112,11 @@ def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Pat
     if dst.exists():
         run = load_json(dst / "run.json")
         if run["probs_sha256"] != probs_sha:
-            raise RunError(f"{dst}: probs.npy подменён после сегментации. "
-                           f"Удалите каталог: rm -rf {dst}")
+            raise RunError(f"{dst}: probs.npy подменён после сегментации.\n" + rm_hint(dst))
         check_env(run["env"], env, dst)
         if "session" in pj and run.get("seam_tol_s") != SEAM_TOL_S:
             raise RunError(f"{dst}: seam_tol_s было {run.get('seam_tol_s')}, сейчас "
-                           f"{SEAM_TOL_S}.\nУдалите каталог: rm -rf {shlex.quote(str(dst))}")
+                           f"{SEAM_TOL_S}.\n" + rm_hint(dst))
         return dst
 
     params = cfg.effective()
