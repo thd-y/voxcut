@@ -533,3 +533,68 @@ def test_cli_session_prints_dir(tmp_path, capsys):
     dst = tmp_path / "out" / out.strip().split("/")[-1]
     assert dst.name.startswith("2026-10-20_11-30_0h00m.") and (dst / "session.json").exists()
     assert "инвентарь" in err
+
+
+# --- plan_session / list_chains (UI task 4): every D25 refusal before anything moves ---
+
+def _refuse_plan(src, match, **kw):
+    before = sorted(p.name for p in src.iterdir())
+    with pytest.raises((SessionError, SourceError), match=match):
+        audio.plan_session(str(src), **kw)
+    assert sorted(p.name for p in src.iterdir()) == before
+
+
+@pytest.mark.parametrize("case, match", [
+    ("foreign", "YYYYMMDDHHMMSS.wav"),
+    ("two_chains", "--chain N"),
+    ("pause", "склейка пауз"),
+    ("riff", "4 ГиБ"),
+    ("sr", "первый файл цепочки"),
+    ("subtype", "PCM или FLOAT"),
+])
+def test_plan_refuses_without_decode(tmp_path, no_decode, monkeypatch, case, match):
+    src = tmp_path / "in"
+    if case == "pause":
+        make_folder(src, chain_starts(2, gap=60))
+    elif case == "two_chains":
+        make_folder(src, chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    else:
+        paths = make_folder(src, chain_starts(2))
+    if case == "foreign":
+        sf.write(src / "REC001.WAV", np.zeros((10, 2), np.int16), SR)
+    elif case == "riff":
+        monkeypatch.setattr(audio, "data_bytes_ok", lambda *a: False)
+    elif case in ("sr", "subtype"):
+        x, _ = sf.read(paths[1], dtype="int16")
+        mtime = paths[1].stat().st_mtime
+        sr, subtype = (8000, "PCM_16") if case == "sr" else (SR, "PCM_U8")
+        for p in paths if case == "subtype" else paths[1:]:
+            sf.write(p, x, sr, subtype=subtype)
+            os.utime(p, (mtime, mtime))
+    _refuse_plan(src, match)
+
+
+def test_list_chains(tmp_path, no_decode):
+    make_folder(tmp_path / "in", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    assert audio.list_chains(str(tmp_path / "in")) == [
+        ["20250301082921.WAV", "20250301082924.WAV"], ["20250301102921.WAV"]]
+
+
+def test_plan_fields(tmp_path, no_decode):
+    make_folder(tmp_path / "in", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    plan = audio.plan_session(str(tmp_path / "in"), chain=2, start="2026-08-11 21:30")
+    assert [p.name for p in plan.files] == ["20250301102921.WAV"]
+    assert plan.name == "2026-08-11_21-30_0h00m"
+    assert plan.session_id.startswith(plan.name + ".")
+    assert (plan.sr, plan.channels, plan.subtype, plan.n_total) == (SR, 2, "PCM_16", 2 * SR)
+    assert plan.start == "2026-08-11 21:30" and plan.real_start == datetime(2026, 8, 11, 21, 30)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("start", [None, "2026-08-11 21:30"])
+def test_plan_matches_assemble(tmp_path, start):
+    make_folder(tmp_path / "in", chain_starts(3))
+    plan = audio.plan_session(str(tmp_path / "in"), start=start)
+    dst = assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), start=start,
+                           log=lambda m: None)
+    assert plan.session_id + ".session" == dst.name

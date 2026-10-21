@@ -515,14 +515,24 @@ def _log(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
-                     start: str | None = None, log=_log) -> Path:
-    """`session`: hourly recorder files -> <out>/<name>.<sha8>.session/ (D25).
+@dataclass
+class SessionPlan:
+    session_id: str
+    name: str
+    files: list[Path]
+    parts: list[tuple[str, datetime, int]]
+    infos: list
+    sr: int
+    channels: int
+    subtype: str
+    n_total: int
+    real_start: datetime
+    clock_offset_s: float
+    start: str | None
 
-    <name>.wav is a bit-exact block copy; the originals are only read. Refusals come before
-    any decode: names, RIFF structure, sf.info, chains, the 4 GiB RIFF limit.
-    """
-    real_start = parse_start(start) if start is not None else None
+
+def _inventory(src_dir: str):
+    """Names, RIFF structure and sf.info of every WAV, then chains; no decode."""
     wavs = sorted(p for p in Path(src_dir).iterdir() if p.is_file() and p.suffix.lower() == ".wav")
     if not wavs:
         raise SessionError(f"{src_dir}: нет WAV-файлов")
@@ -534,8 +544,19 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         check_wav_structure(str(p))
     infos = [sf.info(str(p)) for p in wavs]
     parts = [(p.name, file_start(p.name), i.frames) for p, i in zip(wavs, infos, strict=True)]
-    names = [p.name for p in wavs]
-    idx = pick_chain(split_chains(parts, infos[0].samplerate), chain, names)
+    return wavs, infos, parts, split_chains(parts, infos[0].samplerate)
+
+
+def list_chains(src_dir: str) -> list[list[str]]:
+    wavs, _, _, chains = _inventory(src_dir)
+    return [[wavs[i].name for i in c] for c in chains]
+
+
+def plan_session(src_dir: str, chain: int | None = None, start: str | None = None) -> SessionPlan:
+    """Everything assemble_session refuses before the first decode; reads headers only."""
+    real_start = parse_start(start) if start is not None else None
+    wavs, infos, parts, chains = _inventory(src_dir)
+    idx = pick_chain(chains, chain, [p.name for p in wavs])
     files = [wavs[i] for i in idx]
     infos = [infos[i] for i in idx]
     parts = [parts[i] for i in idx]
@@ -549,14 +570,36 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
     sr, channels, subtype = first.samplerate, first.channels, first.subtype
     if subtype not in _SUBTYPE_BYTES:
         raise SessionError(f"{files[0]}: subtype {subtype}, для сессии нужен PCM или FLOAT")
+    n_total = sum(n for _, _, n in parts)
+    if not data_bytes_ok(n_total, channels, _SUBTYPE_BYTES[subtype]):
+        raise SessionError(f"сессия {n_total / sr / 3600:.2f} ч не помещается в WAV "
+                           f"(предел RIFF 4 ГиБ); разбейте папку на части")
+    rec_start = parts[0][1]
+    real_start = real_start or rec_start
+    name = session_name(real_start, n_total, sr)
+    key = meta_key([(p.name, p.stat().st_size, n) for p, (_, _, n) in zip(files, parts,
+                                                                          strict=True)],
+                   real_start.isoformat() if start is not None else None)
+    return SessionPlan(f"{name}.{key}", name, files, parts, infos, sr, channels, subtype,
+                       n_total, real_start, (real_start - rec_start).total_seconds(), start)
+
+
+def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
+                     start: str | None = None, log=_log) -> Path:
+    """`session`: hourly recorder files -> <out>/<name>.<sha8>.session/ (D25).
+
+    <name>.wav is a bit-exact block copy; the originals are only read. Refusals come before
+    any decode: names, RIFF structure, sf.info, chains, the 4 GiB RIFF limit (plan_session).
+    """
+    plan = plan_session(src_dir, chain, start)
+    files, parts, sr, channels, subtype = (plan.files, plan.parts, plan.sr, plan.channels,
+                                           plan.subtype)
+    n_total, clock_offset_s = plan.n_total, plan.clock_offset_s
     mtime_ends = [datetime.fromtimestamp(p.stat().st_mtime) for p in files]
     offsets = [0]
     for _, _, n in parts:
         offsets.append(offsets[-1] + n)
-    n_total = offsets.pop()
-    rec_start = parts[0][1]
-    real_start = real_start or rec_start
-    clock_offset_s = (real_start - rec_start).total_seconds()
+    offsets.pop()
     seams = []
     for k in range(1, len(parts)):
         prev = parts[k - 1]
@@ -574,11 +617,8 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         log(f"ВНИМАНИЕ: {w}")
     if start is None:
         log("время сессии по часам диктофона; если часы были сбиты, повторите с --start")
-    name = session_name(real_start, n_total, sr)
-    key = meta_key([(p.name, p.stat().st_size, n) for p, (_, _, n) in zip(files, parts,
-                                                                          strict=True)],
-                   real_start.isoformat() if start is not None else None)
-    dst = Path(out_dir) / f"{name}.{key}.session"
+    name = plan.name
+    dst = Path(out_dir) / f"{plan.session_id}.session"
     wav_name = f"{name}.wav"
     if dst.exists():
         run = load_json(dst / "run.json")
@@ -590,9 +630,6 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         for line in channel_advice(meta["channels_identical"]):
             log(line)
         return dst
-    if not data_bytes_ok(n_total, channels, _SUBTYPE_BYTES[subtype]):
-        raise SessionError(f"сессия {n_total / sr / 3600:.2f} ч не помещается в WAV "
-                           f"(предел RIFF 4 ГиБ); разбейте папку на части")
     for p in files:
         check_source(str(p))  # D18: frames == n_ffmpeg for every file of the chain
     tmp = fresh_tmp(dst)
@@ -616,7 +653,7 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
     if info.n_samples != n_total:
         raise SourceError(f"{tmp / wav_name}: {info.n_samples} сэмплов, ожидалось {n_total}")
     session = {
-        "session_id": f"{name}.{key}",
+        "session_id": plan.session_id,
         "name": name,
         "wav": wav_name,
         "session_sha256": sha256_file(str(tmp / wav_name)),
