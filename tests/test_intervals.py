@@ -7,6 +7,8 @@ import pytest
 
 from voxcut.intervals import FRAME_SAMPLES as F
 from voxcut.intervals import (
+    RESET_PERIOD_FRAMES,
+    VAD_SR,
     ConfigError,
     LabelsError,
     Metrics,
@@ -231,3 +233,7 @@ def test_na_and_all_is_sum_over_sum():
 
 def test_whole_file_flag():
     assert evaluate_session([(0, 95)], L([(0, 100)])).whole_file
+
+
+def test_reset_period_is_120_s():
+    assert RESET_PERIOD_FRAMES * F == 120 * VAD_SR  # D31

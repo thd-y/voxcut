@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 FRAME_SAMPLES = 512  # Silero frame at 16 kHz, 32 ms
 VAD_SR = 16000
+RESET_PERIOD_FRAMES = 3750  # D31: second Silero pass resets every 120 s at 16 kHz, frame 512
 
 
 def n_frames(n16k: int) -> int:

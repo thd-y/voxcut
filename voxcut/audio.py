@@ -23,6 +23,7 @@ from voxcut.intervals import (
     GAP_MAX_S,
     GAP_MIN_S,
     PAUSE_MAX_S,
+    RESET_PERIOD_FRAMES,
     VAD_SR,
     SessionError,
     data_bytes_ok,
@@ -234,22 +235,28 @@ def vad_filter(channel: str | int | None, channels: int) -> str:
     raise SourceError(f'channel = {channel!r}: ожидается "mono", "mix" или индекс 0..{channels - 1}')
 
 
-def vad_probs(src: str, af: str, model=None, reset_at=()) -> tuple[np.ndarray, int]:
+def vad_probs(src: str, af: str, model=None, reset_at=(), reset_period=0) -> tuple[np.ndarray, int]:
     """Stream the 16 kHz copy through Silero frame by frame: (probs float32, n16k).
 
     inference_mode is mandatory: without it autograd keeps ~21 KB per frame (C1).
     The model state is reset before each frame in reset_at, i.e. at session seams (D29).
+    With reset_period > 0 a second model on the same frames also resets every reset_period
+    frames, and the elementwise max of both passes is returned (D31): on long music the
+    state goes deaf to whisper, while a fresh state sometimes misses what context caught.
     """
     import torch
 
     torch.set_num_threads(TORCH_THREADS)  # C3: reproducible probs
-    if model is None:
-        from silero_vad import load_silero_vad
+    from silero_vad import load_silero_vad
 
+    if model is None:
         model = load_silero_vad()
     model.reset_states()
+    second = load_silero_vad() if reset_period else None
+    if second is not None:
+        second.reset_states()
     resets = set(reset_at)
-    probs, n16k = [], 0
+    probs, probs_b, n16k = [], [], 0
     args = ["-i", src, "-map", "0:a:0", "-af", af, "-f", "f32le", "-"]
     with torch.inference_mode(), ffmpeg_stream(args) as out:
         while buf := out.read(FRAME_SAMPLES * 4):
@@ -257,10 +264,17 @@ def vad_probs(src: str, af: str, model=None, reset_at=()) -> tuple[np.ndarray, i
             n16k += len(x)
             if len(x) < FRAME_SAMPLES:
                 x = np.pad(x, (0, FRAME_SAMPLES - len(x)))
-            if len(probs) in resets:
+            n, frame = len(probs), torch.from_numpy(x.copy())
+            if n in resets:
                 model.reset_states()
-            probs.append(model(torch.from_numpy(x.copy()), VAD_SR).item())
-    return np.asarray(probs, dtype=np.float32), n16k
+            probs.append(model(frame, VAD_SR).item())
+            if second is not None:
+                if n in resets or (n and n % reset_period == 0):
+                    second.reset_states()
+                probs_b.append(second(frame, VAD_SR).item())
+    probs = np.asarray(probs, dtype=np.float32)
+    return (np.maximum(probs, np.asarray(probs_b, dtype=np.float32)) if second is not None
+            else probs), n16k
 
 
 def sha256_file(path: str) -> str:
@@ -361,6 +375,9 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
             raise RunError(f"{dst}: блок session в probs.json не совпадает с session.json "
                            f"рядом с источником.\nУдалите каталог и запустите заново: "
                            f"rm -rf {shlex.quote(str(dst))}")
+        if meta.get("reset_period_frames") != RESET_PERIOD_FRAMES:
+            raise RunError(f"{dst}: probs посчитаны без второго прохода Silero (D31).\n"
+                           f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(dst))}")
         if meta.get("seam_reset_frames") != resets:
             raise RunError(f"{dst}: probs посчитаны без сброса Silero на стыках (D29).\n"
                            f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(dst))}")
@@ -371,7 +388,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
                        f"в источнике {info.n_samples}")
     af = vad_filter(channel, info.channels)
     tmp = fresh_tmp(dst)
-    probs, n16k = vad_probs(src, af, reset_at=resets or ())
+    probs, n16k = vad_probs(src, af, reset_at=resets or (), reset_period=RESET_PERIOD_FRAMES)
     if len(probs) != n_frames(n16k):
         raise RuntimeError(f"кадров {len(probs)}, ожидалось n_frames({n16k}) = {n_frames(n16k)}")
     np.save(tmp / "probs.npy", probs)
@@ -393,6 +410,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
         "n_frames": len(probs),
         "model_name": "silero_vad.jit",
         "torch_version": torch.__version__,
+        "reset_period_frames": RESET_PERIOD_FRAMES,
     }
     if channel_source:
         meta["channel_source"] = channel_source

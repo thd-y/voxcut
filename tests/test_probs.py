@@ -8,6 +8,7 @@ import soundfile as sf
 from voxcut.audio import (
     ENV_KEYS,
     FFmpegError,
+    RunError,
     compute_probs,
     ffmpeg_stream,
     probs_dir_name,
@@ -90,6 +91,26 @@ def test_reset_at_seam_equals_separate_files(tmp_path, model):
 
 
 @pytest.mark.slow
+def test_two_pass_is_max(tmp_path, model):
+    """D31: the second pass resets every reset_period frames; probs are the elementwise max."""
+    src, af = noise_wav(tmp_path / "a.wav", 5), vad_filter(None, 1)
+    a = vad_probs(src, af, model)[0]
+    two = vad_probs(src, af, model, reset_period=32)[0]
+    assert two.dtype == np.float32 and len(two) == len(a) == 157
+    assert np.array_equal(two, np.maximum(a, vad_probs(src, af, model, reset_at=range(32, 157, 32))[0]))
+    assert not np.array_equal(two, a)  # второй проход что-то добавил
+
+
+@pytest.mark.slow
+def test_two_pass_respects_seams(tmp_path, model):
+    """D31 + D29: pass A resets at seams only, pass B at seams and every period."""
+    src, af = noise_wav(tmp_path / "a.wav", 5), vad_filter(None, 1)
+    two = vad_probs(src, af, model, reset_at=[40], reset_period=32)[0]
+    assert np.array_equal(two, np.maximum(vad_probs(src, af, model, reset_at=[40])[0],
+                                          vad_probs(src, af, model, reset_at=[32, 40, 64, 96, 128])[0]))
+
+
+@pytest.mark.slow
 def test_two_runs_identical_npy(tmp_path):
     src = noise_wav(tmp_path / "a.wav", 5)
     a = compute_probs(src, str(tmp_path / "o1"))
@@ -104,7 +125,8 @@ def test_two_runs_identical_npy(tmp_path):
     assert set(meta) == {*ENV_KEYS, "source_path", "source_sha256", "source_sr",
                          "source_n_samples", "channels", "channel", "codec_name", "format",
                          "subtype", "vad_sr", "frame_samples", "n16k", "n_frames", "model_name",
-                         "torch_version"}
+                         "torch_version", "reset_period_frames"}
+    assert meta["reset_period_frames"] == 3750  # D31
 
 
 @pytest.mark.slow
@@ -122,6 +144,18 @@ def test_existing_dir_reused_and_orphan_tmp_removed(tmp_path):
     stamp = (dst / "probs.npy").stat().st_mtime_ns
     assert compute_probs(src, str(out)) == dst  # переиспользование (D19), без пересчёта
     assert (dst / "probs.npy").stat().st_mtime_ns == stamp
+
+
+@pytest.mark.slow
+def test_probs_without_period_refused_on_reuse(tmp_path):
+    """D31: a probs dir from before the second pass is not reused silently."""
+    src = noise_wav(tmp_path / "a.wav", 1)
+    dst = compute_probs(src, str(tmp_path / "o"))
+    meta = json.loads((dst / "probs.json").read_text())
+    del meta["reset_period_frames"]
+    (dst / "probs.json").write_text(json.dumps(meta))
+    with pytest.raises(RunError, match="(?s)D31.*rm -rf"):
+        compute_probs(src, str(tmp_path / "o"))
 
 
 @pytest.mark.slow
@@ -147,5 +181,5 @@ def test_rss_bounded_over_50k_frames(tmp_path, peak_growth_mb):
         "from silero_vad import load_silero_vad\n"
         "from voxcut.audio import vad_filter, vad_probs\n"
         f"m, af = load_silero_vad(), vad_filter(None, 1)\nvad_probs({warm!r}, af, m)",
-        f"assert len(vad_probs({src!r}, af, m)[0]) == 50_000")
-    assert grew_mb < 50, f"RSS вырос на {grew_mb:.0f} МБ"
+        f"assert len(vad_probs({src!r}, af, m, reset_period=3750)[0]) == 50_000")
+    assert grew_mb < 50, f"RSS вырос на {grew_mb:.0f} МБ"  # D31: и со второй моделью

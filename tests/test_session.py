@@ -432,6 +432,7 @@ def test_session_probs_segment_export(tmp_path):
     pj = json.loads((pdir / "probs.json").read_text())
     assert (pj["channel"], pj["channel_source"]) == (0, "session.channels_identical")
     assert pj["session"] == s and pj["seam_reset_frames"] == [62, 125]  # D29
+    assert pj["reset_period_frames"] == 3750  # D31
     assert compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"), 0) == pdir  # тот же .c0
     seg = segment(str(pdir), CFG)
     seams = [json.loads(x) for x in (seg / "seams.jsonl").read_text().splitlines()]

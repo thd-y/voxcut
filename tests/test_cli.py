@@ -160,7 +160,7 @@ def test_probs_env_drift_refused_with_rm_command(tmp_path):
     d = make_probs_dir(out, [0.0] * 32, name=probs_dir_name(str(src), sha256_file(str(src)),
                                                               None))
     meta = json.loads((d / "probs.json").read_text())
-    meta |= current_env("aresample=16000:resampler=swr")
+    meta |= current_env("aresample=16000:resampler=swr") | {"reset_period_frames": 3750}  # D31
     (d / "probs.json").write_text(json.dumps(meta))
     assert compute_probs(str(src), str(out)) == d  # переиспользован, модель не запускалась
     (d / "probs.json").write_text(json.dumps(meta | {"ffmpeg_version": "ffmpeg 5.0"}))
