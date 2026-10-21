@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 TORCH_CPU := https://download.pytorch.org/whl/cpu
 
-.PHONY: setup check lint test test-slow ui
+.PHONY: setup check lint test test-slow ui ui-envcheck
 
 setup:
 	python3 -m venv .venv
@@ -24,3 +24,7 @@ test:
 # Интерфейс (U1): один сервер на продукт, окно Edge InPrivate; повторный запуск открывает ещё окно.
 ui:
 	$(PY) -m voxcut.ui.launch
+
+# S9: проверки окружения при работающем make ui (вне make check).
+ui-envcheck:
+	$(PY) -m voxcut.ui.envcheck

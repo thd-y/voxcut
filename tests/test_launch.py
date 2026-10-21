@@ -129,3 +129,13 @@ def test_socket_rejects_other_commands(tmp_path, edge):
             assert s.recv(4096) == b""
     finally:
         stop(server, th)
+
+
+def test_envcheck_listeners_parsing():
+    from voxcut.ui.envcheck import listeners
+
+    ss = ("LISTEN 0 5 127.0.0.1:45633 0.0.0.0:* users:((\"python\",pid=173670,fd=3))\n"
+          "LISTEN 0 5 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=1736700,fd=3))\n"
+          "LISTEN 0 5 [::]:45633 [::]:* users:((\"python\",pid=173670,fd=5))\n")
+    assert listeners(ss, 173670) == ["127.0.0.1:45633", "[::]:45633"]
+    assert listeners(ss, 17367) == []
