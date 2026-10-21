@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 TORCH_CPU := https://download.pytorch.org/whl/cpu
 
-.PHONY: setup check lint test test-slow
+.PHONY: setup check lint test test-slow ui
 
 setup:
 	python3 -m venv .venv
@@ -20,3 +20,7 @@ test-slow:
 
 test:
 	$(PY) -m pytest -q; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ]
+
+# Интерфейс (U1): один сервер на продукт, окно Edge InPrivate; повторный запуск открывает ещё окно.
+ui:
+	$(PY) -m voxcut.ui.launch
