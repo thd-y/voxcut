@@ -6,8 +6,11 @@ import uuid
 import numpy as np
 import pytest
 import soundfile as sf
+from test_jobs import FakeRun
 from test_server_security import SECURITY, Client
 
+from voxcut import journal as journal_mod
+from voxcut.jobs import Jobs
 from voxcut.journal import Journal
 from voxcut.library import Layout
 from voxcut.ui import server as server_mod
@@ -158,3 +161,188 @@ def test_range_ignored(api):
                                 headers={"Range": "bytes=0-9"})
     assert status == 200 and len(body) == (api.seg / "clips" / "0000.wav").stat().st_size
     assert "Content-Range" not in headers
+
+
+# --- write API: journal and jobs (UI task 11) ---
+
+@pytest.fixture
+def wapi(tmp_path):
+    lay = Layout(tmp_path)
+    lay.ensure()
+    build_session(lay)
+    run = FakeRun()
+    jobs = Jobs(lay, run=run)
+    server, app = make_server(lay, jobs=jobs)
+    logs = []
+    app.log = logs.append
+    th = threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True)
+    th.start()
+    c = Client(app)
+    c.lay, c.k, c.run, c.jobs, c.logs = lay, c.key(), run, jobs, logs
+    c.clips = session(c)["clips"]
+    yield c
+    server.shutdown()
+    server.server_close()
+
+
+def post(c, path, body, key=None, **kw):
+    status, headers, raw = c.req("POST", path, body, key=key or c.k, **kw)
+    return status, headers, json.loads(raw) if raw else None
+
+
+def mark(c, value="моё", clip=0, **extra):
+    return {"event_id": uuid.uuid4().hex, "kind": "mark", "value": value,
+            "clip_id": c.clips[clip]["clip_id"]} | extra
+
+
+def test_journal_post_saved_after_fsync(wapi, monkeypatch):
+    calls = []
+    real = os.fsync
+    monkeypatch.setattr(journal_mod.os, "fsync", lambda fd: (calls.append(fd), real(fd)))
+    status, _, body = post(wapi, "/api/journal", mark(wapi))
+    assert status == 200 and body["saved"] is True and calls
+    ev = body["event"]
+    assert (ev["session_id"], ev["start_s"], ev["end_s"]) == (SID, 0.0, 5.0)
+    assert session(wapi)["clips"][0]["marks"] == ["моё"]
+
+
+def test_journal_post_idempotent(wapi):
+    e = mark(wapi)
+    first = post(wapi, "/api/journal", e)[2]["event"]
+    assert post(wapi, "/api/journal", e)[2]["event"] == first
+    assert len(wapi.lay.journal.read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("case", ["unknown_clip", "long_mark", "path_key", "heard_value",
+                                  "idea_unknown_session", "backup_kind", "no_clip",
+                                  "bad_event_id", "session_on_mark", "long_note"])
+def test_journal_rejects(wapi, case):
+    e = {
+        "unknown_clip": mark(wapi) | {"clip_id": "0" * 16},
+        "long_mark": mark(wapi, value="x" * 33),
+        "path_key": mark(wapi, path="/etc/passwd"),
+        "heard_value": mark(wapi, value="x") | {"kind": "heard"},
+        "idea_unknown_session": {"event_id": uuid.uuid4().hex, "kind": "idea", "value": "i",
+                                 "session_id": "2026-08-11_21-30_4h16m.00000000"},
+        "backup_kind": {"event_id": uuid.uuid4().hex, "kind": "backup", "value": "x"},
+        "no_clip": {"event_id": uuid.uuid4().hex, "kind": "mark", "value": "моё"},
+        "bad_event_id": mark(wapi) | {"event_id": "../x"},
+        "session_on_mark": mark(wapi, session_id=SID),
+        "long_note": mark(wapi, value="x" * 10_001) | {"kind": "note"},
+    }[case]
+    assert post(wapi, "/api/journal", e)[0] == 400
+    assert not wapi.lay.journal.exists() or wapi.lay.journal.read_text() == ""
+
+
+def test_idea_with_and_without_session(wapi):
+    for sid in (None, SID):
+        e = {"event_id": uuid.uuid4().hex, "kind": "idea", "value": f"идея {sid}"}
+        assert post(wapi, "/api/journal", e | ({"session_id": sid} if sid else {}))[0] == 200
+    st = json.loads(get(wapi, "/api/state")[2])
+    assert [i["value"] for i in st["ideas"]] == ["идея None", f"идея {SID}"]
+
+
+def test_journal_requires_origin(wapi):
+    status, _, _ = wapi.req("POST", "/api/journal", mark(wapi), key=wapi.k, origin=False,
+                            headers={"Sec-Fetch-Site": "same-origin"})
+    assert status == 403
+    status, _, _ = wapi.req("POST", "/api/journal", mark(wapi), key=wapi.k, origin=False,
+                            headers={"Origin": wapi.origin, "Sec-Fetch-Site": "cross-site"})
+    assert status == 403
+    assert not wapi.lay.journal.exists()
+
+
+def test_malicious_note_returned_as_json_text(wapi):
+    evil = '<img src=x onerror=alert(1)></script><script>alert(2)</script>'
+    e = mark(wapi, value=evil) | {"kind": "note"}
+    assert post(wapi, "/api/journal", e)[0] == 200
+    _, headers, raw = get(wapi, f"/api/session/{SID}")
+    assert headers["Content-Type"] == "application/json; charset=utf-8"
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert json.loads(raw)["clips"][0]["notes"][0]["value"] == evil
+
+
+def test_jobs_post_validated(wapi):
+    jid = uuid.uuid4().hex
+    for params in ({"source": "../data", "chain": 1, "start": None},
+                   {"source": "/etc", "chain": 1, "start": None}):
+        assert post(wapi, "/api/jobs", {"job_id": jid, "kind": "import", "params": params})[0] \
+            == 400
+    assert post(wapi, "/api/jobs", {"job_id": jid, "kind": "shell", "params": {}})[0] == 400
+    assert post(wapi, "/api/jobs", {"job_id": jid, "kind": "backup", "params": {"mode": "full"},
+                                    "unit": "x"})[0] == 400
+    assert wapi.run.started() == []
+    status, _, body = post(wapi, "/api/jobs", {"job_id": jid, "kind": "backup",
+                                               "params": {"mode": "full"}})
+    assert status == 200 and body["job"]["state"] == "running"
+    status, _, body = post(wapi, f"/api/jobs/{jid}/cancel", {})
+    assert status == 200 and body["job"]["state"] == "cancelled"
+    assert post(wapi, f"/api/jobs/{uuid.uuid4().hex}/cancel", {})[0] == 404
+
+
+def test_backup_done_appends_event_once(wapi):
+    jid = uuid.uuid4().hex
+    post(wapi, "/api/jobs", {"job_id": jid, "kind": "backup", "params": {"mode": "light"}})
+    (wapi.lay.jobs / jid / "status.json").write_text(json.dumps(
+        {"state": "done", "result": "voxcut-backup_2026-10-21_10-00_light.tar"}))
+    wapi.jobs.poll()
+    wapi.app.on_done(wapi.jobs.list()[0])  # a repeat after a crash must not duplicate
+    events, _ = journal_mod.load(wapi.lay.journal)
+    assert [(e["kind"], e["value"]) for e in events] == [
+        ("backup", "voxcut-backup_2026-10-21_10-00_light.tar")]
+    assert json.loads(get(wapi, "/api/state")[2])["last_backup"] == events[0]["ts"]
+
+
+def test_restore_merges_journal_once(wapi):
+    old = Journal(wapi.lay.root / "old.jsonl")
+    old.append({"event_id": "c" * 32, "kind": "idea", "value": "из бэкапа"})
+    (wapi.lay.inbox / "voxcut-backup_x_full.tar").write_bytes(b"")
+    jid = uuid.uuid4().hex
+    post(wapi, "/api/jobs", {"job_id": jid, "kind": "restore",
+                             "params": {"name": "voxcut-backup_x_full.tar"}})
+    (wapi.lay.jobs / jid / "journal.jsonl").write_bytes((wapi.lay.root / "old.jsonl").read_bytes())
+    (wapi.lay.jobs / jid / "status.json").write_text(json.dumps({"state": "done"}))
+    wapi.jobs.poll()
+    wapi.jobs.poll()
+    wapi.app.on_done(wapi.jobs.list()[0])
+    events, _ = journal_mod.load(wapi.lay.journal)
+    assert [e["event_id"] for e in events] == ["c" * 32]
+    assert events[0]["ts"] == old.events()[0]["ts"]
+
+
+def test_get_state_does_not_start_jobs(wapi):
+    a, b = uuid.uuid4().hex, uuid.uuid4().hex
+    post(wapi, "/api/jobs", {"job_id": a, "kind": "backup", "params": {"mode": "light"}})
+    post(wapi, "/api/jobs", {"job_id": b, "kind": "backup", "params": {"mode": "light"}})
+    (wapi.lay.jobs / a / "status.json").write_text(json.dumps({"state": "done"}))
+    n = len(wapi.run.calls)
+    st = json.loads(get(wapi, "/api/state")[2])
+    assert len(wapi.run.calls) == n
+    assert {j["job_id"]: j["state"] for j in st["jobs"]}[b] == "queued"
+
+
+def test_note_text_not_in_log(wapi):
+    e = mark(wapi, value="личная заметка 12345") | {"kind": "note"}
+    post(wapi, "/api/journal", e)
+    text = "\n".join(wapi.logs)
+    assert "POST /api/journal 200" in text
+    assert "личная" not in text and e["event_id"] not in text and e["clip_id"] not in text
+
+
+def test_two_clients_concurrent_marks(wapi):
+    keys = [wapi.k, wapi.key()]
+    errors = []
+
+    def work(key):
+        for i in range(50):
+            status, _, _ = post(wapi, "/api/journal", mark(wapi, clip=i % 3), key=key)
+            if status != 200:
+                errors.append(status)
+
+    ts = [threading.Thread(target=work, args=(k,)) for k in keys]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    events, warnings = journal_mod.load(wapi.lay.journal)
+    assert errors == [] and len(events) == 100 and warnings == []

@@ -5,6 +5,7 @@ API key, then the route. The client never sends a path: static files come from a
 """
 
 import contextlib
+import hashlib
 import hmac
 import json
 import os
@@ -21,6 +22,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from voxcut import journal as jr
 from voxcut import library
+from voxcut.jobs import JobError
 from voxcut.journal import Journal
 from voxcut.library import Layout
 
@@ -85,6 +87,9 @@ class App:
         self.route("GET", "/api/state")(self._state)
         self.route("GET", "/api/session/{sid}")(self._session)
         self.route("GET", "/api/clip/{clip_id}")(self._clip)
+        self.route("POST", "/api/journal")(self._journal_post)
+        self.route("POST", "/api/jobs")(self._jobs_post)
+        self.route("POST", "/api/jobs/{job_id}/cancel")(self._jobs_cancel)
 
     def route(self, method: str, template: str):
         """Register a handler for templates like /api/session/{sid}; {x} matches one segment."""
@@ -170,6 +175,80 @@ class App:
         path = known[3]
         ctype = "audio/flac" if path.suffix.lower() == ".flac" else "audio/wav"
         return Response(200, path, ctype)  # Range is ignored: always the whole file (S3)
+
+    def _journal_post(self, req: Request) -> dict:
+        b = req.body
+        kind = b.get("kind")
+        if kind in ("mark", "note", "heard"):
+            if set(b) != {"event_id", "kind", "value", "clip_id"}:
+                raise HttpError(400, "поля: event_id, kind, value, clip_id")
+            with self._lock:
+                known = self.clips.get(b["clip_id"]) if isinstance(b["clip_id"], str) else None
+            if known is None:
+                raise HttpError(400, "неизвестный clip_id")
+            if kind == "heard" and b["value"] != "":
+                raise HttpError(400, "heard: value пустой")
+            event = {"event_id": b["event_id"], "kind": kind, "value": b["value"],
+                     "session_id": known[0], "start_s": known[1], "end_s": known[2]}
+        elif kind == "idea":
+            if not {"event_id", "kind", "value"} <= set(b) <= {"event_id", "kind", "value",
+                                                              "session_id"}:
+                raise HttpError(400, "поля: event_id, kind, value, session_id?")
+            if "session_id" in b and b["session_id"] not in {
+                    r["session_id"] for r in library.list_sessions(self.lay)}:
+                raise HttpError(400, "нет такой сессии")
+            event = dict(b)
+        else:
+            raise HttpError(400, "kind: mark, note, heard или idea")
+        try:
+            saved = self.journal.append(event)  # returns after fsync (U5)
+        except jr.JournalError as exc:
+            raise HttpError(400, str(exc)) from None
+        return {"saved": True, "event": saved}
+
+    def _jobs_post(self, req: Request) -> dict:
+        b = req.body
+        if self.jobs is None:
+            raise HttpError(503, "задачи недоступны")
+        if set(b) != {"job_id", "kind", "params"}:
+            raise HttpError(400, "поля: job_id, kind, params")
+        try:
+            return {"job": self.jobs.submit(b["job_id"], b["kind"], b["params"])}
+        except (ValueError, TypeError) as exc:
+            raise HttpError(400, str(exc)) from None
+        except JobError as exc:
+            raise HttpError(409, str(exc)) from None
+
+    def _jobs_cancel(self, req: Request) -> dict:
+        if self.jobs is None:
+            raise HttpError(503, "задачи недоступны")
+        try:
+            return {"job": self.jobs.cancel(req.params["job_id"])}
+        except KeyError:
+            raise HttpError(404, "нет такой задачи") from None
+
+    def on_done(self, job: dict) -> None:
+        """Results of jobs that belong in the journal; the server is its only writer (U5)."""
+        if job["kind"] == "backup":
+            eid = hashlib.sha256((job["job_id"] + "backup").encode()).hexdigest()[:32]
+            self.journal.append({"event_id": eid, "kind": "backup", "value": job["result"]})
+        elif job["kind"] == "restore":
+            events, _ = jr.load(self.lay.jobs / job["job_id"] / "journal.jsonl")
+            self.journal.merge(events)
+
+    def start_poller(self, interval: float = 2.0) -> threading.Event:
+        """jobs.poll() off the request path: GET never starts anything (S4)."""
+        stop = threading.Event()
+
+        def loop():
+            while not stop.wait(interval):
+                try:
+                    self.jobs.poll()
+                except Exception as exc:  # noqa: BLE001 - the poller must outlive one bad poll
+                    self.log(f"poll error {type(exc).__name__}")
+
+        threading.Thread(target=loop, daemon=True, name="jobs-poll").start()
+        return stop
 
     def key_ok(self, header: str | None) -> bool:
         if not header or not header.startswith("Bearer "):
@@ -299,5 +378,7 @@ def make_server(lay: Layout, host: str = HOST, port: int = 0, jobs=None,
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
     app = App(lay, server.server_address[1], jobs, journal)
+    if jobs is not None:
+        jobs.on_done = app.on_done
     handler.app = app
     return server, app
