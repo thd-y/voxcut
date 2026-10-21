@@ -25,6 +25,7 @@ from voxcut.intervals import (
     at_seam,
     data_bytes_ok,
     file_start,
+    gap_s,
     locate,
     meta_key,
     mtime_warnings,
@@ -80,6 +81,12 @@ def parts(*gaps_s, n=HOUR):
         out.append((f"f{i}", t, n))
         t = t + timedelta(seconds=n / SR)
     return out
+
+
+@pytest.mark.parametrize("gap", [-1.5, 0, 1.5])
+def test_gap_s(gap):
+    p = parts(gap)
+    assert gap_s(p[0], p[1], SR) == pytest.approx(gap)
 
 
 @pytest.mark.parametrize("gap", [-2.0, 0, 0.87, 1.87, 5.0])

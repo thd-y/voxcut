@@ -420,6 +420,11 @@ def session_name(start: datetime, n_samples: int, sr: int) -> str:
     return f"{start:%Y-%m-%d_%H-%M}_{minutes // 60}h{minutes % 60:02d}m"
 
 
+def gap_s(prev: tuple[str, datetime, int], cur: tuple[str, datetime, int], sr: int) -> float:
+    """Seconds between the end of `prev` and the start of `cur`, parts as (name, start, n)."""
+    return (cur[1] - prev[1]).total_seconds() - prev[2] / sr
+
+
 def split_chains(parts: list[tuple[str, datetime, int]], sr: int) -> list[list[int]]:
     """(name, start, n_samples) -> chains of indices in start order. Names are only for messages."""
     order = sorted(range(len(parts)), key=lambda i: parts[i][1])
@@ -427,7 +432,7 @@ def split_chains(parts: list[tuple[str, datetime, int]], sr: int) -> list[list[i
     for i in order:
         if chains:
             prev = parts[chains[-1][-1]]
-            gap = (parts[i][1] - prev[1]).total_seconds() - prev[2] / sr
+            gap = gap_s(prev, parts[i], sr)
             if gap < GAP_MIN_S:
                 raise SessionError(f"файлы {prev[0]} и {parts[i][0]} перекрываются по времени "
                                    f"на {-gap:.2f} с (допуск {-GAP_MIN_S:g} с)")

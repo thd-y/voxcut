@@ -28,6 +28,7 @@ from voxcut.intervals import (
     SessionError,
     data_bytes_ok,
     file_start,
+    gap_s,
     meta_key,
     mtime_warnings,
     n_frames,
@@ -549,7 +550,7 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
     seams = []
     for k in range(1, len(parts)):
         prev = parts[k - 1]
-        gap = (parts[k][1] - prev[1]).total_seconds() - prev[2] / sr
+        gap = gap_s(prev, parts[k], sr)
         seams.append({"offset_samples": offsets[k], "kind": "split", "after": prev[0],
                       "before": parts[k][0], "gap_est_s": round(gap, 3)})
     log(f"инвентарь {src_dir}:")
