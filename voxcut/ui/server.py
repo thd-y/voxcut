@@ -4,10 +4,13 @@ Every request goes through the same gate in a fixed order: Host, OPTIONS, POST o
 API key, then the route. The client never sends a path: static files come from a fixed table.
 """
 
+import contextlib
 import hmac
 import json
+import os
 import re
 import secrets
+import shutil
 import sys
 import threading
 import time
@@ -16,6 +19,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from voxcut import journal as jr
+from voxcut import library
 from voxcut.journal import Journal
 from voxcut.library import Layout
 
@@ -50,7 +55,7 @@ class HttpError(Exception):
 @dataclass
 class Response:
     status: int = 200
-    body: bytes = b""
+    body: bytes | Path = b""  # a Path is streamed from disk
     ctype: str = JSON_TYPE
     headers: dict = field(default_factory=dict)
 
@@ -74,8 +79,12 @@ class App:
         self._codes: dict[str, float] = {}
         self._keys: list[str] = []
         self.routes: list[tuple[str, str, re.Pattern, object]] = []
+        self.clips: dict[str, tuple[str, float, float, Path | None]] = {}  # S6: id -> file
         self.route("POST", "/api/exchange")(self._exchange)
         self.route("GET", "/api/ping")(lambda req: {"ok": True})
+        self.route("GET", "/api/state")(self._state)
+        self.route("GET", "/api/session/{sid}")(self._session)
+        self.route("GET", "/api/clip/{clip_id}")(self._clip)
 
     def route(self, method: str, template: str):
         """Register a handler for templates like /api/session/{sid}; {x} matches one segment."""
@@ -108,6 +117,60 @@ class App:
             self._keys.append(key)
         return {"key": key}
 
+    def _state(self, req: Request) -> dict:
+        events = self.journal.events()
+        return {
+            "sessions": library.list_sessions(self.lay),
+            "inbox": library.inbox_inventory(self.lay),
+            "jobs": self.jobs.list() if self.jobs is not None else [],
+            "last_backup": jr.last_backup(events),
+            "ideas": jr.ideas(events),
+            "journal_warnings": list(self.journal.warnings),
+        }
+
+    def _session(self, req: Request) -> dict:
+        sid = req.params["sid"]
+        rows = {r["session_id"]: r for r in library.list_sessions(self.lay)}
+        if not library.SESSION_ID_RE.fullmatch(sid) or sid not in rows:
+            raise HttpError(404, "нет такой сессии")
+        runs = library.session_runs(self.lay, sid)
+        wanted = req.query.get("run", [None])[0]
+        run = next((r for r in runs if r["run_id"] == wanted), None) if wanted else (
+            runs[0] if runs else None)
+        if wanted and run is None:
+            raise HttpError(404, "нет такого прогона")
+        sj = self.lay.sessions / sid / f"{sid}.session" / "session.json"
+        files = library.load_json(sj).get("files") if sj.is_file() else None
+        events = self.journal.events()
+        clips = []
+        for row in library.clip_table(self.lay, run["seg_dir"]) if run else []:
+            s, e = float(row["start_s"]), float(row["end_s"])
+            with self._lock:
+                self.clips[row["clip_id"]] = (sid, s, e, row["path"])
+            clips.append({"clip_id": row["clip_id"], "n": row["n"], "start_s": s, "end_s": e,
+                          "start_local": row.get("start_local"),
+                          "duration_s": row.get("duration_s", e - s), "p_max": row.get("p_max")}
+                         | jr.clip_view(events, sid, s, e))
+        return {
+            "session_id": sid,
+            "start_local": files[0].get("start_local") if files else None,
+            "duration_s": rows[sid]["duration_s"],
+            "runs": [{k: r[k] for k in ("run_id", "name", "created")} for r in runs],
+            "run_id": run["run_id"] if run else None,
+            "clips": clips,
+        }
+
+    def _clip(self, req: Request) -> Response:
+        if req.method != "GET":
+            raise HttpError(405, "только GET")
+        with self._lock:
+            known = self.clips.get(req.params["clip_id"])
+        if known is None or known[3] is None or not known[3].is_file():
+            raise HttpError(404, "нет такого клипа")
+        path = known[3]
+        ctype = "audio/flac" if path.suffix.lower() == ".flac" else "audio/wav"
+        return Response(200, path, ctype)  # Range is ignored: always the whole file (S3)
+
     def key_ok(self, header: str | None) -> bool:
         if not header or not header.startswith("Bearer "):
             return False
@@ -136,14 +199,20 @@ class Handler(BaseHTTPRequestHandler):
         self.app.log(f"{self.command} {getattr(self, '_template', '-')} {int(code)}")
 
     def _send(self, resp: Response) -> None:
-        self.send_response(resp.status)
-        self.send_header("Content-Type", resp.ctype)
-        self.send_header("Content-Length", str(len(resp.body)))
-        for k, v in resp.headers.items():
-            self.send_header(k, v)
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(resp.body)
+        is_file = isinstance(resp.body, Path)
+        with open(resp.body, "rb") if is_file else contextlib.nullcontext() as f:
+            self.send_response(resp.status)
+            self.send_header("Content-Type", resp.ctype)
+            self.send_header("Content-Length",
+                             str(os.fstat(f.fileno()).st_size if is_file else len(resp.body)))
+            for k, v in resp.headers.items():
+                self.send_header(k, v)
+            self.end_headers()
+            if self.command != "HEAD":
+                if is_file:
+                    shutil.copyfileobj(f, self.wfile, 1 << 20)
+                else:
+                    self.wfile.write(resp.body)
 
     def _json(self, status: int, obj) -> Response:
         return Response(status, json.dumps(obj, ensure_ascii=False).encode())
