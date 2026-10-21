@@ -1,9 +1,13 @@
 """Product folders and operations on them (U3–U6). No torch: heavy steps run in jobs."""
 
+import fcntl
 import hashlib
+import io
 import json
 import os
 import re
+import shutil
+import tarfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -178,9 +182,12 @@ def inbox_inventory(lay: Layout) -> dict:
         except (SessionError, SourceError, OSError, RuntimeError) as exc:
             entry["chains"], entry["error"] = [], str(exc)
         sources.append(entry)
-    backups = sorted(p.name for p in lay.inbox.iterdir()
-                     if p.is_file() and BACKUP_RE.fullmatch(p.name)) if lay.inbox.is_dir() else []
-    return {"sources": sources, "backups": backups}
+    return {"sources": sources, "backups": _backup_names(lay)}
+
+
+def _backup_names(lay: Layout) -> list[str]:
+    entries = lay.inbox.iterdir() if lay.inbox.is_dir() else []
+    return sorted(p.name for p in entries if p.is_file() and BACKUP_RE.fullmatch(p.name))
 
 
 def _write_json(path: Path, obj) -> None:
@@ -266,3 +273,125 @@ def process_session(lay: Layout, sid: str, stage, log) -> Path:
         stage("export")
         audio.export_clips(str(seg))
     return seg / "clips"
+
+
+JOURNAL_MEMBER = "data/journal/journal.jsonl"
+LAST_ON_RESTORE = ("run.json", "manifest.jsonl", "import.json")  # completion markers go last
+
+
+def _backup_files(lay: Layout, mode: str) -> list[Path]:
+    """Regular files of data/ (no symlinks, no *.tmp); light drops originals and session WAVs."""
+    skip = set()
+    if mode == "light":
+        for sj in lay.sessions.glob("*/*.session/session.json"):
+            skip.add(sj.parent / load_json(sj)["wav"])
+    out = []
+    for p in sorted(lay.data.rglob("*")):
+        rel = p.relative_to(lay.data)
+        if (p.is_symlink() or not p.is_file() or p == lay.journal or p in skip
+                or any(part.endswith(".tmp") for part in rel.parts)
+                or (mode == "light" and len(rel.parts) > 2 and rel.parts[0] == "sessions"
+                    and rel.parts[2] == "originals")):
+            continue
+        out.append(p)
+    return out
+
+
+def make_backup(lay: Layout, mode: str, now: datetime) -> str:
+    """U6: one uncompressed tar of data/ plus backup.json with sha256 of every member."""
+    if mode not in ("full", "light"):
+        raise RunError(f"неизвестный вид бэкапа: {mode}")
+    name = f"voxcut-backup_{now:%Y-%m-%d_%H-%M}_{mode}.tar"
+    dst = lay.backups / name
+    if dst.exists():
+        raise RunError(f"{name} уже есть; бэкапы не перезаписываются")
+    tmp = lay.backups / (name + ".tmp")
+    files: dict[str, str] = {}
+    try:
+        with tarfile.open(tmp, "w", format=tarfile.PAX_FORMAT) as tar:
+            for p in _backup_files(lay, mode):
+                arc = f"data/{p.relative_to(lay.data)}"
+                files[arc] = audio.sha256_file(str(p))  # run dirs are immutable: same bytes
+                tar.add(p, arc, recursive=False)
+            if lay.journal.is_file():
+                with open(lay.journal, "rb") as f:  # the server appends meanwhile: whole lines only
+                    fcntl.flock(f, fcntl.LOCK_SH)
+                    data = f.read()
+                info = tarfile.TarInfo(JOURNAL_MEMBER)
+                info.size, info.mtime = len(data), int(now.timestamp())
+                tar.addfile(info, io.BytesIO(data))
+                files[JOURNAL_MEMBER] = hashlib.sha256(data).hexdigest()
+            meta = json.dumps({"created": now.isoformat(), "mode": mode, "files": files},
+                              ensure_ascii=False, indent=1).encode()
+            info = tarfile.TarInfo("backup.json")
+            info.size, info.mtime = len(meta), int(now.timestamp())
+            tar.addfile(info, io.BytesIO(meta))
+        with open(tmp, "rb") as f:
+            os.fsync(f.fileno())
+        os.replace(tmp, dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)  # our own temp file, never published
+        raise
+    return name
+
+
+def _check_members(members: list[tarfile.TarInfo]) -> None:
+    for m in members:
+        parts = Path(m.name).parts
+        ok = ((m.isfile() or m.isdir()) and not m.name.startswith("/") and ".." not in parts
+              and (m.name == "backup.json" or (parts[:1] == ("data",) and len(parts) > 1)))
+        if not ok:
+            raise RunError(f"недопустимый член архива: {m.name!r}; ничего не распаковано")
+
+
+def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
+    """U6: verify every member, unpack to .run/restore.tmp, then only add files to data/."""
+    if name not in _backup_names(lay):
+        raise RunError(f"нет архива во входящих: {name!r}")
+    with tarfile.open(lay.inbox / name) as tar:
+        members = tar.getmembers()
+        _check_members(members)
+        try:
+            files = json.load(tar.extractfile("backup.json"))["files"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RunError(f"{name}: нет или битый backup.json") from exc
+        got = {}
+        for m in members:
+            if m.isfile() and m.name != "backup.json":
+                h, f = hashlib.sha256(), tar.extractfile(m)
+                while chunk := f.read(1 << 20):
+                    h.update(chunk)
+                got[m.name] = h.hexdigest()
+        if got != files:
+            bad = sorted(k for k in set(got) | set(files) if got.get(k) != files.get(k))
+            raise RunError(f"{name}: sha256 или состав не совпадает с backup.json: "
+                           f"{', '.join(bad[:10])}; ничего не распаковано")
+        tmp = lay.run / "restore.tmp"
+        if tmp.exists():
+            shutil.rmtree(tmp)  # our own temp dir from an interrupted restore
+        tar.extractall(tmp, filter="data")
+    try:
+        rels = sorted((k for k in files if k != JOURNAL_MEMBER and not k.startswith(
+            "data/journal/")), key=lambda k: (Path(k).name in LAST_ON_RESTORE, k))
+        conflicts, new = [], []
+        for rel in rels:
+            dst = lay.root / rel
+            if not dst.exists():
+                new.append(rel)
+            elif not dst.is_file() or audio.sha256_file(str(dst)) != files[rel]:
+                conflicts.append(rel)
+        if conflicts:
+            raise RunError("в data/ уже есть другие версии файлов, ничего не изменено:\n  "
+                           + "\n  ".join(conflicts[:20]))
+        for rel in new:
+            (lay.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            os.replace(tmp / rel, lay.root / rel)
+        if JOURNAL_MEMBER in files:
+            shutil.copyfile(tmp / JOURNAL_MEMBER, journal_out)
+    finally:
+        shutil.rmtree(tmp)
+    sids = sorted({Path(k).parts[2] for k in rels if k.startswith("data/sessions/")
+                   and len(Path(k).parts) > 3})
+    added = sorted({Path(k).parts[2] for k in new if k.startswith("data/sessions/")
+                    and len(Path(k).parts) > 3})
+    return {"added": added, "skipped": [s for s in sids if s not in added]}
