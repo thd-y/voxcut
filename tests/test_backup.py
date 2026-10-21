@@ -218,3 +218,21 @@ def test_backup_waits_for_journal_writer(lay):
     with tarfile.open(lay.backups / names[0]) as t:
         lines = t.extractfile("data/journal/journal.jsonl").read().decode().splitlines()
     assert [json.loads(x)["event_id"] for x in lines] == ["a" * 32, "b" * 32]
+
+
+def test_restore_writes_empty_journal_when_archive_has_none(lay, lay2):
+    (lay.data / "pilot").mkdir()
+    (lay.data / "pilot" / "a.txt").write_text("x")
+    name = make_backup(lay, "light", NOW)
+    to_inbox(lay2, lay, name)
+    restore_backup(lay2, name, lay2.run / "journal.in")
+    assert (lay2.run / "journal.in").read_bytes() == b""
+
+
+def test_unrestorable_backup_not_published(lay):
+    make_data(lay)
+    clips = lay.sessions / SID / "x.c0.raw" / "seg-aaaaaaaa" / "clips"
+    os.link(clips / "0000.wav", clips / "0001.wav")  # tar writes the 2nd as a hard link
+    with pytest.raises(RunError, match="член"):
+        make_backup(lay, "full", NOW)
+    assert list(lay.backups.iterdir()) == []

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -49,8 +50,14 @@ def validate(kind: str, params: dict, lay: library.Layout) -> dict:
                 raise ValueError("start: строка или null")
             parse_start(p["start"])  # SessionError is a ValueError
     elif kind == "process":
-        if p["session_id"] not in {r["session_id"] for r in library.list_sessions(lay)}:
+        if not isinstance(p["session_id"], str):
+            raise ValueError("session_id: строка")
+        row = next((r for r in library.list_sessions(lay)
+                    if r["session_id"] == p["session_id"]), None)
+        if row is None:
             raise ValueError("нет такой сессии")
+        if not row["can_process"]:
+            raise ValueError("сессию нельзя обработать (light-бэкап или незавершённый импорт)")
     elif kind == "backup":
         if p["mode"] not in ("full", "light"):
             raise ValueError("mode: full или light")
@@ -160,8 +167,12 @@ class Jobs:
         for job_id, rec in self._jobs.items():
             marker = self.lay.jobs / job_id / "on_done"
             if rec["state"] == "done" and self.on_done and not marker.exists():
-                self.on_done(self._view(job_id))
-                marker.touch()
+                try:
+                    self.on_done(self._view(job_id))
+                except Exception as exc:  # noqa: BLE001 - one bad hook must not stall the queue
+                    self._set_status(job_id, "done", error=f"после завершения: {exc}")
+                finally:
+                    marker.touch()
         if self._queue and not any(r["state"] == "running" for r in self._jobs.values()):
             self._start(self._queue.pop(0))
 
@@ -188,8 +199,12 @@ class Jobs:
             elif rec["state"] == "running":
                 self.run(["systemctl", "--user", "stop", self._unit(job_id)],
                          capture_output=True, text=True)
-                self._set_status(job_id, "cancelled")
-                rec["state"] = "cancelled"
+                st = _read(self.lay.jobs / job_id / "status.json") or {}
+                if st.get("state") in FINAL:  # it finished before the stop: keep its result
+                    rec["state"] = st["state"]
+                else:
+                    self._set_status(job_id, "cancelled")
+                    rec["state"] = "cancelled"
             return self._view(job_id)
 
     def poll(self) -> list[dict]:
@@ -212,11 +227,17 @@ class Jobs:
         return {"job_id": job_id, "kind": rec["job"]["kind"], "state": rec["state"],
                 "stage": st.get("stage"), "error": st.get("error"),
                 "started": st.get("started"), "finished": st.get("finished"),
-                "log_tail": tail}
+                "result": st.get("result"), "log_tail": tail}
+
+
+def _exit_on_sigterm() -> None:
+    """systemctl stop sends SIGTERM; exiting via SystemExit runs cleanup (e.g. *.tar.tmp)."""
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 
 def main(argv: list[str]) -> int:
     """python -m voxcut.jobs <job_dir>: runs inside the systemd unit."""
+    _exit_on_sigterm()
     d = Path(argv[0]).resolve()
     lay = library.Layout(d.parent.parent.parent)  # <root>/.run/jobs/<job_id>
     job = json.loads((d / "job.json").read_text())

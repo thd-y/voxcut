@@ -11,6 +11,7 @@ from voxcut.intervals import SessionError
 from voxcut.library import (
     Layout,
     clip_table,
+    finish_import,
     import_originals,
     inbox_inventory,
     list_sessions,
@@ -377,3 +378,47 @@ def test_import_never_copies_across_filesystems(lay, no_check, monkeypatch):
         import_originals(lay, "", 1, None, _quiet)
     assert sorted(p.name for p in lay.inbox.iterdir()) == sorted(p.name for p in paths)
     assert not list(lay.sessions.glob("*/originals/*"))
+
+
+def _crash_after_move(monkeypatch):
+    real, seen = audio.sha256_file, set()
+
+    def crash(p):
+        name = os.path.basename(p)
+        if name in seen:
+            raise SystemExit(143)  # SIGTERM / power cut after the move, before import.json
+        seen.add(name)
+        return real(p)
+
+    monkeypatch.setattr(audio, "sha256_file", crash)
+
+
+def test_interrupted_import_finished_by_process(lay, no_check, monkeypatch):
+    paths = make_folder(lay.inbox, chain_starts(2))
+    before = _shas(paths)
+    _crash_after_move(monkeypatch)
+    with pytest.raises(SystemExit):
+        import_originals(lay, "", 1, None, _quiet)
+    monkeypatch.undo()
+    row = list_sessions(lay)[0]
+    assert row["state"] == "incomplete" and row["can_process"]
+    assert "не удаляйте" in row["error"]
+    sid = row["session_id"]
+    finish_import(lay, sid, _quiet)
+    meta = json.loads((lay.sessions / sid / "import.json").read_text())
+    assert {f["name"]: f["sha256"] for f in meta["files"]} == before
+    assert list_sessions(lay)[0]["state"] == "imported"
+    assert not (lay.sessions / sid / "import.pending.json").exists()
+
+
+def test_interrupted_import_sha_mismatch_not_finished(lay, no_check, monkeypatch):
+    paths = make_folder(lay.inbox, chain_starts(2))
+    _crash_after_move(monkeypatch)
+    with pytest.raises(SystemExit):
+        import_originals(lay, "", 1, None, _quiet)
+    monkeypatch.undo()
+    sid = list_sessions(lay)[0]["session_id"]
+    (lay.sessions / sid / "originals" / paths[0].name).write_bytes(b"changed")
+    with pytest.raises(SessionError, match="sha256"):
+        finish_import(lay, sid, _quiet)
+    assert not (lay.sessions / sid / "import.json").exists()

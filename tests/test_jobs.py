@@ -215,3 +215,62 @@ def test_server_side_modules_do_not_import_torch():
     code = "import sys, voxcut.jobs, voxcut.library, voxcut.journal; print('torch' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+def test_on_done_error_does_not_block_queue(lay):
+    run = FakeRun()
+
+    def boom(job):
+        raise ValueError("нет journal.jsonl")
+
+    j = Jobs(lay, run=run, on_done=boom)
+    a, b = jid(), jid()
+    j.submit(a, "backup", {"mode": "light"})
+    j.submit(b, "backup", {"mode": "light"})
+    finish(lay, a)
+    views = {v["job_id"]: v for v in j.poll()}
+    assert views[b]["state"] == "running"
+    assert views[a]["state"] == "done" and "нет journal.jsonl" in views[a]["error"]
+    Jobs(lay, run=run, on_done=boom).poll()  # not retried forever after a restart
+
+
+def test_view_has_result(lay):
+    a = jid()
+    Jobs(lay, run=FakeRun()).submit(a, "backup", {"mode": "light"})
+    assert jobs.main([str(lay.jobs / a)]) == 0
+    assert Jobs(lay, run=FakeRun(active="inactive")).list()[0]["result"].endswith("_light.tar")
+
+
+def test_cancel_after_done_keeps_done(lay):
+    run, done = FakeRun(), []
+    j = Jobs(lay, run=run, on_done=done.append)
+    a = jid()
+    j.submit(a, "backup", {"mode": "light"})
+    finish(lay, a)  # the unit finished right before «отмена»
+    assert j.cancel(a)["state"] == "done"
+    j.poll()
+    assert [x["job_id"] for x in done] == [a]
+
+
+def test_sigterm_runs_cleanup(tmp_path):
+    """systemctl stop sends SIGTERM: the job's cleanup (e.g. *.tar.tmp removal) must run."""
+    flag = tmp_path / "cleaned"
+    code = (f"import os, signal, time\nfrom voxcut import jobs\njobs._exit_on_sigterm()\n"
+            f"try:\n    os.kill(os.getpid(), signal.SIGTERM)\n    time.sleep(5)\n"
+            f"finally:\n    open({str(flag)!r}, 'w').close()\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=10, check=False)
+    assert r.returncode == 143 and flag.exists()
+
+
+@pytest.mark.parametrize("sid", [["x"], {"a": 1}, 5])
+def test_validate_session_id_type(lay, sid):
+    with pytest.raises(ValueError):
+        validate("process", {"session_id": sid}, lay)
+
+
+def test_validate_process_needs_can_process(lay):
+    d = lay.sessions / SID
+    d.mkdir()
+    (d / "import.json").write_text("{}")  # light: no originals, no WAV
+    with pytest.raises(ValueError, match="обработ"):
+        validate("process", {"session_id": SID}, lay)

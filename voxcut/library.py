@@ -96,15 +96,22 @@ def _session_row(lay: Layout, sdir: Path) -> dict:
         state = "assembled"
     else:
         state = "imported"
+    pending = (sdir / "import.pending.json").is_file() and not (sdir / "import.json").is_file()
+    error = None
+    if state == "incomplete" and any(sdir.glob("originals*/*")):
+        error = (f"незавершённый импорт: файлы записи внутри {sdir.name}, не удаляйте их; "
+                 + ("«Обработать» сверит sha256 и завершит импорт" if pending
+                    else "нужна ручная проверка"))
     return {
         "session_id": sid,
         "name": sid.rsplit(".", 1)[0],
         "state": state,
-        "can_process": state != "incomplete" and ((sdir / "originals").is_dir() or wav),
+        "can_process": pending or (state != "incomplete"
+                                   and ((sdir / "originals").is_dir() or wav)),
         "duration_s": meta["n_samples"] / meta["sr"] if meta else None,
         "n_clips": len(read_jsonl(runs[0]["seg_dir"] / "clips" / "manifest.jsonl"))
         if runs else None,
-        "error": None,
+        "error": error,
     }
 
 
@@ -220,30 +227,54 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
     if sdir.exists():
         why = ("originals.tmp: незавершённый импорт" if (sdir / "originals.tmp").exists()
                else "с другими файлами")
-        raise SessionError(f"{sdir} уже есть ({why}); ничего не тронуто, разберите каталог вручную")
+        raise SessionError(f"{sdir} уже есть ({why}); ничего не тронуто. Если внутри файлы "
+                           f"записи, не удаляйте их: это единственные копии")
+    sdir.mkdir(parents=True)
+    _write_json(sdir / "import.pending.json", {  # lets an interrupted import be finished
+        "files": [{"name": p.name, "sha256": before[p.name], "size_bytes": p.stat().st_size}
+                  for p in plan.files],
+        "chain": chain, "start": start, "source": source,
+    })
     tmp = sdir / "originals.tmp"
-    tmp.mkdir(parents=True)
+    tmp.mkdir()
     for p in plan.files:
         os.rename(p, tmp / p.name)
     os.replace(tmp, sdir / "originals")
-    moved = [sdir / "originals" / p.name for p in plan.files]
-    after = {p.name: audio.sha256_file(str(p)) for p in moved}
+    finish_import(lay, plan.session_id, log)
+    return {"session_id": plan.session_id, "existing": False}
+
+
+def finish_import(lay: Layout, sid: str, log) -> None:
+    """Second half of the import, also after an interruption: sha256 after the move vs pending."""
+    sdir = lay.sessions / sid
+    if (sdir / "import.json").is_file():
+        return
+    pending = sdir / "import.pending.json"
+    if not pending.is_file():
+        raise SessionError(f"{sid}: нет import.pending.json, импорт не завершить автоматически")
+    meta = load_json(pending)
+    if (sdir / "originals.tmp").is_dir() and not (sdir / "originals").exists():
+        os.replace(sdir / "originals.tmp", sdir / "originals")
+    if (sdir / "originals.tmp").exists():
+        raise SessionError(f"{sid}: есть и originals, и originals.tmp; файлы записи внутри, "
+                           f"не удаляйте их, нужна ручная проверка")
+    before = {f["name"]: f["sha256"] for f in meta["files"]}
+    after = {}
+    for name in before:
+        p = sdir / "originals" / name
+        after[name] = audio.sha256_file(str(p)) if p.is_file() else None
     if after != before:
         bad = sorted(n for n in before if after.get(n) != before[n])
         raise SessionError(f"sha256 после переноса не совпадает: {', '.join(bad)}; "
                            f"файлы оставлены в {sdir / 'originals'}")
-    again = audio.plan_session(str(sdir / "originals"), None, start)
-    if again.session_id != plan.session_id:
+    again = audio.plan_session(str(sdir / "originals"), None, meta["start"])
+    if again.session_id != sid:
         raise SessionError(f"после переноса сессия {again.session_id}, ожидалась "
-                           f"{plan.session_id}; файлы оставлены в {sdir / 'originals'}")
-    _write_json(sdir / "import.json", {
-        "files": [{"name": p.name, "sha256": before[p.name], "size_bytes": p.stat().st_size}
-                  for p in moved],
-        "chain": chain, "start": start, "source": source,
-        "imported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-    })
-    log(f"импортировано {len(moved)} файлов: сессия {plan.session_id}")
-    return {"session_id": plan.session_id, "existing": False}
+                           f"{sid}; файлы оставлены в {sdir / 'originals'}")
+    _write_json(sdir / "import.json", meta | {
+        "imported_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+    pending.unlink()  # our own bookkeeping file; import.json now holds the same facts
+    log(f"импортировано {len(before)} файлов: сессия {sid}")
 
 
 V1_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "v1.toml"  # U8: the only config
@@ -252,8 +283,12 @@ V1_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "v1.toml"  # U8
 def process_session(lay: Layout, sid: str, stage, log) -> Path:
     """U8: the missing steps assemble -> probs -> segment -> export; resumes after a failure."""
     sdir = lay.sessions / sid
-    if not SESSION_ID_RE.fullmatch(sid) or not (sdir / "import.json").is_file():
+    if not SESSION_ID_RE.fullmatch(sid) or not any(
+            (sdir / n).is_file() for n in ("import.json", "import.pending.json")):
         raise RunError(f"нет сессии {sid}")
+    if not (sdir / "import.json").is_file():
+        stage("import")
+        finish_import(lay, sid, log)
     sess = sdir / f"{sid}.session"
     meta = load_json(sess / "session.json") if (sess / "session.json").is_file() else None
     if meta is None or not (sess / meta["wav"]).is_file():
@@ -328,6 +363,8 @@ def make_backup(lay: Layout, mode: str, now: datetime) -> str:
             tar.addfile(info, io.BytesIO(meta))
         with open(tmp, "rb") as f:
             os.fsync(f.fileno())
+        with tarfile.open(tmp) as tar:  # a backup that restore would refuse is not published
+            _verified_files(tar, name)
         os.replace(tmp, dst)
     except BaseException:
         tmp.unlink(missing_ok=True)  # our own temp file, never published
@@ -344,28 +381,34 @@ def _check_members(members: list[tarfile.TarInfo]) -> None:
             raise RunError(f"недопустимый член архива: {m.name!r}; ничего не распаковано")
 
 
+def _verified_files(tar: tarfile.TarFile, name: str) -> dict[str, str]:
+    """Members are plain files/dirs under data/ and match backup.json sha256, read from the tar."""
+    members = tar.getmembers()
+    _check_members(members)
+    try:
+        files = json.load(tar.extractfile("backup.json"))["files"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RunError(f"{name}: нет или битый backup.json") from exc
+    got = {}
+    for m in members:
+        if m.isfile() and m.name != "backup.json":
+            h, f = hashlib.sha256(), tar.extractfile(m)
+            while chunk := f.read(1 << 20):
+                h.update(chunk)
+            got[m.name] = h.hexdigest()
+    if got != files:
+        bad = sorted(k for k in set(got) | set(files) if got.get(k) != files.get(k))
+        raise RunError(f"{name}: sha256 или состав не совпадает с backup.json: "
+                       f"{', '.join(bad[:10])}; ничего не распаковано")
+    return files
+
+
 def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
     """U6: verify every member, unpack to .run/restore.tmp, then only add files to data/."""
     if name not in _backup_names(lay):
         raise RunError(f"нет архива во входящих: {name!r}")
     with tarfile.open(lay.inbox / name) as tar:
-        members = tar.getmembers()
-        _check_members(members)
-        try:
-            files = json.load(tar.extractfile("backup.json"))["files"]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise RunError(f"{name}: нет или битый backup.json") from exc
-        got = {}
-        for m in members:
-            if m.isfile() and m.name != "backup.json":
-                h, f = hashlib.sha256(), tar.extractfile(m)
-                while chunk := f.read(1 << 20):
-                    h.update(chunk)
-                got[m.name] = h.hexdigest()
-        if got != files:
-            bad = sorted(k for k in set(got) | set(files) if got.get(k) != files.get(k))
-            raise RunError(f"{name}: sha256 или состав не совпадает с backup.json: "
-                           f"{', '.join(bad[:10])}; ничего не распаковано")
+        files = _verified_files(tar, name)
         tmp = lay.run / "restore.tmp"
         if tmp.exists():
             shutil.rmtree(tmp)  # our own temp dir from an interrupted restore
@@ -388,6 +431,8 @@ def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
             os.replace(tmp / rel, lay.root / rel)
         if JOURNAL_MEMBER in files:
             shutil.copyfile(tmp / JOURNAL_MEMBER, journal_out)
+        else:
+            journal_out.write_bytes(b"")  # the merge step always has a file to read
     finally:
         shutil.rmtree(tmp)
     sids = sorted({Path(k).parts[2] for k in rels if k.startswith("data/sessions/")
