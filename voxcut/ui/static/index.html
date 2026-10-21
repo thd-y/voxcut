@@ -2,11 +2,76 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VoxCut</title>
 <link rel="stylesheet" href="/app.css">
 <script src="/app.js" defer></script>
 </head>
 <body>
-<main id="app"></main>
+<header>
+  <strong>VoxCut</strong>
+  <label>Сессия <select id="session"></select></label>
+  <label id="run-box" hidden>Прогон <select id="run"></select></label>
+  <span id="backup-info"></span>
+  <span id="msg" role="status"></span>
+</header>
+<div id="layout">
+  <main>
+    <section id="session-info"></section>
+    <canvas id="timeline" height="60"></canvas>
+    <div id="counter"></div>
+    <div id="player-box">
+      <div id="clip-title"></div>
+      <audio id="player" controls></audio>
+      <div id="clip-marks"></div>
+      <div id="note-box">
+        <textarea id="note" rows="2" maxlength="10000" placeholder="Заметка к отрезку текущего клипа"></textarea>
+        <button id="note-save" type="button">Сохранить заметку</button>
+        <span id="note-status"></span>
+      </div>
+      <div class="hint">Клавиши: 1 моё, 2 вокал, 3 шум, 0 снять, ← → предыдущий/следующий</div>
+    </div>
+    <div id="list-controls">
+      <label>Сортировка <select id="sort">
+        <option value="time">по времени</option>
+        <option value="p_max">по уверенности</option>
+      </select></label>
+      <label>Фильтр <select id="filter">
+        <option value="all">всё</option>
+        <option value="unheard">не слушал</option>
+        <option value="mine">моё</option>
+      </select></label>
+    </div>
+    <table id="clips">
+      <thead><tr><th>№</th><th>Начало</th><th>Длина, с</th><th>p_max</th><th>Отметка</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <aside>
+    <section>
+      <h2>Сессии</h2>
+      <ul id="sessions"></ul>
+    </section>
+    <section>
+      <h2>Входящие</h2>
+      <div id="inbox"></div>
+    </section>
+    <section>
+      <h2>Задачи</h2>
+      <div id="jobs"></div>
+    </section>
+    <section>
+      <h2>Бэкап</h2>
+      <button id="backup-full" type="button">Бэкап full</button>
+      <button id="backup-light" type="button">Бэкап light</button>
+    </section>
+    <section>
+      <h2>Идеи</h2>
+      <textarea id="idea" rows="2" maxlength="10000"></textarea>
+      <button id="idea-save" type="button">Записать идею</button>
+      <ul id="ideas"></ul>
+    </section>
+  </aside>
+</div>
 </body>
 </html>

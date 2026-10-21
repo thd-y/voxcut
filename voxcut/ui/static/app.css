@@ -1,1 +1,27 @@
-/* Written in task 12. */
+/* Working draft of form A; visual design is a separate owner session. */
+body { font: 14px system-ui, sans-serif; margin: 0; color: #212121; background: #fafafa; }
+header { display: flex; gap: 16px; align-items: center; padding: 8px 12px; background: #eceff1;
+  flex-wrap: wrap; }
+#msg { color: #b71c1c; }
+#layout { display: flex; gap: 12px; padding: 12px; }
+main { flex: 1; min-width: 0; }
+aside { width: 340px; flex: none; }
+aside section { margin-bottom: 16px; }
+h2 { font-size: 15px; margin: 0 0 6px; }
+#timeline { width: 100%; height: 60px; background: #fff; border: 1px solid #cfd8dc;
+  cursor: pointer; display: block; }
+#counter, #session-info, .hint, .note { color: #546e7a; margin: 4px 0; }
+#player-box { margin: 8px 0; padding: 8px; background: #fff; border: 1px solid #cfd8dc; }
+#player { width: 100%; }
+#note { width: 100%; box-sizing: border-box; }
+#idea { width: 100%; box-sizing: border-box; }
+#list-controls { display: flex; gap: 16px; margin: 8px 0; }
+table { border-collapse: collapse; width: 100%; background: #fff; }
+th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid #eceff1; }
+tbody tr { cursor: pointer; }
+tr.heard { color: #78909c; }
+tr.current { background: #fff3e0; }
+.error { color: #b71c1c; white-space: pre-wrap; }
+.source, .job { padding: 6px; margin-bottom: 6px; background: #fff; border: 1px solid #cfd8dc; }
+.chain input { width: 100%; box-sizing: border-box; margin: 4px 0; }
+pre { white-space: pre-wrap; font-size: 12px; max-height: 160px; overflow: auto; margin: 4px 0; }
