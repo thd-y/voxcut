@@ -54,6 +54,15 @@ def test_rf64_ok(tmp_path):
     check_wav_structure(str(write_wav(tmp_path / "a.wav", fmt="RF64")))
 
 
+def test_rf64_short_ds64_refused(tmp_path):
+    p = write_wav(tmp_path / "a.wav", fmt="RF64")
+    raw = p.read_bytes()
+    off = raw.index(b"ds64") + 4
+    p.write_bytes(raw[:off] + struct.pack("<I", 8) + raw[off + 4:])
+    with pytest.raises(SourceError, match="чанк b'ds64' короче 16 байт"):
+        check_wav_structure(str(p))
+
+
 @pytest.mark.parametrize("mutate, needle", [
     (lambda raw: lie_about_length(raw, SR),
      "длина по заголовку 4000 сэмплов (0.5 с), по размеру файла 16000 сэмплов (2.0 с)"),
