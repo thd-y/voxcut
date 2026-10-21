@@ -172,6 +172,7 @@ def evaluate(seg_dir: str, labels_path: str) -> tuple[Metrics, dict]:
     seg_dir = Path(seg_dir)
     run = load_json(seg_dir / "run.json")
     pj = load_json(seg_dir.parent / "probs.json")
+    check_reset_period(pj, seg_dir.parent)
     rows = read_jsonl(seg_dir / "manifest.jsonl")
     sha = run["source"]["sha256"]
     if pj["source_sha256"] != sha or any(r["source_sha256"] != sha for r in rows):

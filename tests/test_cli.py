@@ -279,3 +279,16 @@ def test_columns_have_session_volume():
     """D38: whole-session volume and clips per `me` follow the scored-based clip_min_h."""
     i = COLUMNS.index("clip_min_h")
     assert COLUMNS[i + 1:i + 3] == ("clip_min_h_session", "clip_per_me")
+
+
+def test_evaluate_refuses_probs_without_second_pass(tmp_path):
+    """D31: evaluate on a seg dir of one-pass probs would print unlike numbers silently."""
+    d = make_probs_dir(tmp_path, [0.9] * 10)
+    seg = segment(str(d), cfg())
+    meta = json.loads((d / "probs.json").read_text())
+    del meta["reset_period_frames"]
+    (d / "probs.json").write_text(json.dumps(meta))
+    labels = tmp_path / "l.txt"
+    labels.write_text("0\t0.3\tscored\n")
+    with pytest.raises(RunError, match=f"(?s)D31.*rm -rf {d}"):
+        evaluate(str(seg), str(labels))
