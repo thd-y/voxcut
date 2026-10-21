@@ -1,11 +1,18 @@
 import json
 import os
+from datetime import timedelta
 
 import pytest
+from test_session import T0, chain_starts, make_folder
 
+from voxcut import audio
+from voxcut.audio import SourceError, sha256_file
+from voxcut.intervals import SessionError
 from voxcut.library import (
     Layout,
     clip_table,
+    import_originals,
+    inbox_inventory,
     list_sessions,
     resolve_clip,
     session_runs,
@@ -164,3 +171,140 @@ def test_list_sessions_broken_session_does_not_hide_others(lay):
     assert got[SID]["state"] == "imported" and got[SID]["error"] is None
     assert got[SID2]["state"] == "incomplete" and not got[SID2]["can_process"]
     assert "run.json" in got[SID2]["error"]
+
+
+# --- import from inbox/ (UI task 5, U4, D39) ---
+
+@pytest.fixture
+def no_check(monkeypatch):
+    """check_source decodes with ffmpeg (D18); the slow test runs it for real."""
+    monkeypatch.setattr(audio, "check_source", lambda p: None)
+
+
+def _shas(paths):
+    return {p.name: sha256_file(str(p)) for p in paths}
+
+
+def _quiet(_msg):
+    pass
+
+
+def test_import_moves_unchanged(lay, no_check):
+    paths = make_folder(lay.inbox, chain_starts(3))
+    before = _shas(paths)
+    res = import_originals(lay, "", 1, None, _quiet)
+    assert res["existing"] is False
+    sdir = lay.sessions / res["session_id"]
+    assert _shas(sorted((sdir / "originals").iterdir())) == before
+    assert list(lay.inbox.iterdir()) == []
+    meta = json.loads((sdir / "import.json").read_text())
+    assert {f["name"]: f["sha256"] for f in meta["files"]} == before
+    assert meta["chain"] == 1 and meta["start"] is None and meta["source"] == ""
+    assert all(f["size_bytes"] > 0 for f in meta["files"]) and meta["imported_at"]
+    assert [r["state"] for r in list_sessions(lay)] == ["imported"]
+
+
+def test_import_from_subfolder(lay, no_check):
+    make_folder(lay.inbox / "folder01", chain_starts(2))
+    res = import_originals(lay, "folder01", 1, "2026-08-11 21:30", _quiet)
+    assert res["session_id"].startswith("2026-08-11_21-30_")
+    assert list((lay.inbox / "folder01").iterdir()) == []
+    assert json.loads((lay.sessions / res["session_id"] / "import.json").read_text())[
+        "start"] == "2026-08-11 21:30"
+
+
+@pytest.mark.parametrize("source", ["../data", "folder01/x", "nope", "/tmp"])
+def test_import_unknown_source_refused(lay, no_check, source):
+    make_folder(lay.inbox / "folder01", chain_starts(2))
+    with pytest.raises(SessionError, match="источник"):
+        import_originals(lay, source, 1, None, _quiet)
+
+
+def test_import_same_sha_existing(lay, no_check):
+    paths = make_folder(lay.inbox, chain_starts(2))
+    copies = {p.name: p.read_bytes() for p in paths}
+    first = import_originals(lay, "", 1, None, _quiet)
+    for name, data in copies.items():
+        (lay.inbox / name).write_bytes(data)
+    for p in paths:
+        os.utime(p, (p.stat().st_mtime, p.stat().st_mtime))
+    again = import_originals(lay, "", 1, None, _quiet)
+    assert again == {"session_id": first["session_id"], "existing": True}
+    assert sorted(p.name for p in lay.inbox.iterdir()) == sorted(copies)
+
+
+def test_import_partial_overlap_refused(lay, no_check):
+    paths = make_folder(lay.inbox, chain_starts(2))
+    keep = paths[0].read_bytes()
+    import_originals(lay, "", 1, None, _quiet)
+    make_folder(lay.inbox, chain_starts(2), seed=7)
+    (lay.inbox / paths[0].name).write_bytes(keep)
+    with pytest.raises(SessionError, match=paths[0].name):
+        import_originals(lay, "", 1, None, _quiet)
+    assert len(list(lay.inbox.iterdir())) == 2
+
+
+def test_import_truncated_refused_stays(lay, no_check):
+    """Review focus 2: the file is still being copied by Explorer when «импорт» is pressed."""
+    paths = make_folder(lay.inbox, chain_starts(2))
+    raw = paths[1].read_bytes()
+    paths[1].write_bytes(raw[: len(raw) // 2])
+    with pytest.raises((SourceError, SessionError)):
+        import_originals(lay, "", 1, None, _quiet)
+    assert sorted(p.name for p in lay.inbox.iterdir()) == sorted(p.name for p in paths)
+    assert list(lay.sessions.iterdir()) == []
+
+
+def test_import_sha_mismatch_after_move(lay, no_check, monkeypatch):
+    paths = make_folder(lay.inbox, chain_starts(2))
+    real, seen = audio.sha256_file, set()
+
+    def flaky(p):
+        name = os.path.basename(p)
+        if name in seen:
+            return "0" * 64
+        seen.add(name)
+        return real(p)
+
+    monkeypatch.setattr(audio, "sha256_file", flaky)
+    with pytest.raises(SessionError, match="sha256"):
+        import_originals(lay, "", 1, None, _quiet)
+    sid = next(lay.sessions.iterdir()).name
+    assert sorted(p.name for p in (lay.sessions / sid / "originals").iterdir()) == sorted(
+        p.name for p in paths)
+    assert list_sessions(lay)[0]["state"] == "incomplete"
+
+
+def test_import_unfinished_tmp_refused(lay, no_check):
+    make_folder(lay.inbox, chain_starts(2))
+    sid = inbox_inventory(lay)["sources"][0]["chains"][0]["session_id"]
+    (lay.sessions / sid / "originals.tmp").mkdir(parents=True)
+    with pytest.raises(SessionError, match="originals.tmp"):
+        import_originals(lay, "", 1, None, _quiet)
+    assert len(list(lay.inbox.iterdir())) == 2
+
+
+def test_inventory_two_chains_and_backup(lay):
+    make_folder(lay.inbox / "folder01", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    make_folder(lay.inbox / "broken", chain_starts(2, gap=60))
+    (lay.inbox / "voxcut-backup_2026-10-21_10-00_full.tar").write_bytes(b"")
+    (lay.inbox / "other.tar").write_bytes(b"")
+    inv = inbox_inventory(lay)
+    assert inv["backups"] == ["voxcut-backup_2026-10-21_10-00_full.tar"]
+    src = {s["source"]: s for s in inv["sources"]}
+    assert set(src) == {"folder01", "broken"}  # inbox/ root has no WAV
+    assert "склейка пауз" in src["broken"]["error"] and src["broken"]["chains"] == []
+    s1 = src["folder01"]
+    assert s1["error"] is None
+    assert [c["chain"] for c in s1["chains"]] == [1, 2]
+    assert s1["chains"][0]["files"] == ["20250301082921.WAV", "20250301082924.WAV"]
+    assert s1["chains"][1]["start_local"].startswith("2025-03-01T10:29")
+    assert s1["chains"][0]["duration_s"] == 4.0 and not s1["chains"][0]["imported"]
+
+
+@pytest.mark.slow
+def test_import_real_check_source(lay):
+    paths = make_folder(lay.inbox, chain_starts(2))
+    before = _shas(paths)
+    res = import_originals(lay, "", 1, None, _quiet)
+    assert _shas(sorted((lay.sessions / res["session_id"] / "originals").iterdir())) == before

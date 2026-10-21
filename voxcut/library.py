@@ -1,13 +1,16 @@
 """Product folders and operations on them (U3–U6). No torch: heavy steps run in jobs."""
 
 import hashlib
+import json
 import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from voxcut.audio import RunError, load_json, read_jsonl
+from voxcut import audio
+from voxcut.audio import RunError, SourceError, load_json, read_jsonl
+from voxcut.intervals import SessionError
 
 SESSION_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_\d+h\d{2}m\.[0-9a-f]{8}")
 
@@ -137,3 +140,99 @@ def clip_table(lay: Layout, seg_dir: Path) -> list[dict]:
         }
         for i, row in enumerate(rows)
     ]
+
+
+BACKUP_RE = re.compile(r"voxcut-backup_.+\.tar")
+
+
+def _source_names(lay: Layout) -> list[str]:
+    """inbox/ itself (if it holds WAV files) and every first-level subfolder (review focus 1)."""
+    entries = sorted(lay.inbox.iterdir()) if lay.inbox.is_dir() else []
+    root = [""] if any(p.is_file() and p.suffix.lower() == ".wav" for p in entries) else []
+    return root + [p.name for p in entries if p.is_dir() and not p.name.startswith(".")]
+
+
+def _source_dir(lay: Layout, source: str) -> Path:
+    if source not in _source_names(lay):
+        raise SessionError(f"нет такого источника во входящих: {source!r}")
+    return lay.inbox / source
+
+
+def inbox_inventory(lay: Layout) -> dict:
+    sources = []
+    for source in _source_names(lay):
+        src = str(lay.inbox / source)
+        entry = {"source": source, "chains": [], "error": None}
+        try:
+            for n, files in enumerate(audio.list_chains(src), 1):
+                plan = audio.plan_session(src, n)
+                entry["chains"].append({
+                    "chain": n,
+                    "files": files,
+                    "start_local": plan.real_start.isoformat(),
+                    "duration_s": plan.n_total / plan.sr,
+                    "session_id": plan.session_id,
+                    "imported": (lay.sessions / plan.session_id / "import.json").is_file(),
+                })
+        except (SessionError, SourceError, OSError, RuntimeError) as exc:
+            entry["chains"], entry["error"] = [], str(exc)
+        sources.append(entry)
+    backups = sorted(p.name for p in lay.inbox.iterdir()
+                     if p.is_file() and BACKUP_RE.fullmatch(p.name)) if lay.inbox.is_dir() else []
+    return {"sources": sources, "backups": backups}
+
+
+def _write_json(path: Path, obj) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def import_originals(lay: Layout, source: str, chain: int, start: str | None, log) -> dict:
+    """U4, D39: inbox/ -> data/sessions/<id>/originals/, unchanged; every refusal before the move."""
+    src = _source_dir(lay, source)
+    plan = audio.plan_session(str(src), chain, start)
+    for p in plan.files:
+        audio.check_source(str(p))  # D18
+    before = {p.name: audio.sha256_file(str(p)) for p in plan.files}
+    shas = set(before.values())
+    for other in sorted(lay.sessions.glob("*/import.json")):
+        known = {f["sha256"]: f["name"] for f in load_json(other)["files"]}
+        if set(known) == shas:
+            log(f"эти файлы уже импортированы: сессия {other.parent.name}")
+            return {"session_id": other.parent.name, "existing": True}
+        if shas & set(known):
+            same = sorted(n for n, s in before.items() if s in known)
+            raise SessionError(f"часть файлов уже в сессии {other.parent.name}: "
+                               f"{', '.join(same)}; импорт отменён, файлы на месте")
+    sdir = lay.sessions / plan.session_id
+    if sdir.exists():
+        why = ("originals.tmp: незавершённый импорт" if (sdir / "originals.tmp").exists()
+               else "с другими файлами")
+        raise SessionError(f"{sdir} уже есть ({why}); ничего не тронуто, разберите каталог вручную")
+    tmp = sdir / "originals.tmp"
+    tmp.mkdir(parents=True)
+    for p in plan.files:
+        os.rename(p, tmp / p.name)
+    os.replace(tmp, sdir / "originals")
+    moved = [sdir / "originals" / p.name for p in plan.files]
+    after = {p.name: audio.sha256_file(str(p)) for p in moved}
+    if after != before:
+        bad = sorted(n for n in before if after.get(n) != before[n])
+        raise SessionError(f"sha256 после переноса не совпадает: {', '.join(bad)}; "
+                           f"файлы оставлены в {sdir / 'originals'}")
+    again = audio.plan_session(str(sdir / "originals"), None, start)
+    if again.session_id != plan.session_id:
+        raise SessionError(f"после переноса сессия {again.session_id}, ожидалась "
+                           f"{plan.session_id}; файлы оставлены в {sdir / 'originals'}")
+    _write_json(sdir / "import.json", {
+        "files": [{"name": p.name, "sha256": before[p.name], "size_bytes": p.stat().st_size}
+                  for p in moved],
+        "chain": chain, "start": start, "source": source,
+        "imported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    })
+    log(f"импортировано {len(moved)} файлов: сессия {plan.session_id}")
+    return {"session_id": plan.session_id, "existing": False}
