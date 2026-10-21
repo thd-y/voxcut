@@ -22,7 +22,10 @@ voxcut = "voxcut.cli:main"
 dev = ["pytest", "ruff"]
 
 [tool.setuptools]
-packages = ["voxcut"]
+packages = ["voxcut", "voxcut.ui"]
+
+[tool.setuptools.package-data]
+"voxcut.ui" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
