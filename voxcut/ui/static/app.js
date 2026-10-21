@@ -8,6 +8,10 @@ let view = null;           // GET /api/session/{sid}
 let sid = null;
 let runId = null;
 let current = -1;          // index into view.clips
+let currentId = null;      // clip_id of the current clip: indexes change when a run changes
+let playingId = null;      // clip_id whose audio is in the player
+let openSeq = 0;           // only the newest openSession response is applied
+let queue = Promise.resolve();  // journal writes in key-press order
 let audioCtl = null;       // AbortController of the clip fetch in flight
 let audioUrl = null;       // object URL of the clip in the player
 
@@ -169,9 +173,12 @@ async function submit(kind, params) {
 // --- session view ---
 
 async function openSession(id, run) {
+  const seq = ++openSeq;
+  const v = await api("GET", `/api/session/${encodeURIComponent(id)}${run ? `?run=${run}` : ""}`);
+  if (seq !== openSeq) return;  // a newer openSession was started meanwhile
   sid = id;
   runId = run || null;
-  view = await api("GET", `/api/session/${encodeURIComponent(id)}${run ? `?run=${run}` : ""}`);
+  view = v;
   $("session").value = id;
   const runBox = $("run-box");
   runBox.hidden = view.runs.length < 2;
@@ -185,7 +192,12 @@ async function openSession(id, run) {
   $("session-info").textContent = view.clips.length
     ? `${id}: начало ${view.start_local || "?"}, клипов ${view.clips.length}`
     : `${id}: клипов пока нет${row ? ` (${row.state})` : ""}`;
-  if (current >= view.clips.length) current = -1;
+  current = view.clips.findIndex((c) => c.clip_id === currentId);
+  if (current < 0 && currentId !== null) {  // the clip is not in this run: nothing is current
+    currentId = null;
+    $("player").pause();
+    $("note").value = "";
+  }
   render();
 }
 
@@ -243,6 +255,8 @@ function drawTimeline() {
 async function select(i) {
   if (!view || i < 0 || i >= view.clips.length) return;
   current = i;
+  currentId = view.clips[i].clip_id;
+  $("player").pause();  // the old clip must not end (and become «heard») as the new one
   $("note").value = (view.clips[i].notes[0] || {}).value || "";
   $("note-status").textContent = "";
   render();
@@ -260,6 +274,7 @@ async function play(clip) {
     const url = URL.createObjectURL(await r.blob());
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = url;
+    playingId = clip.clip_id;
     $("player").src = url;
     await $("player").play().catch(() => {});
   } catch (e) {
@@ -267,12 +282,16 @@ async function play(clip) {
   }
 }
 
-async function journal(kind, value, clip) {
+function journal(kind, value, clip) {
   const body = { event_id: newId(), kind, value };
   if (clip) body.clip_id = clip.clip_id;
-  const r = await api("POST", "/api/journal", body);
-  if (!r.saved) throw new Error("не сохранено");
-  return r;
+  const p = queue.then(async () => {
+    const r = await api("POST", "/api/journal", body);
+    if (!r.saved) throw new Error("не сохранено");
+    return r;
+  });
+  queue = p.catch(() => {});
+  return p;
 }
 
 async function mark(value) {
@@ -289,8 +308,8 @@ async function mark(value) {
 }
 
 function bind() {
-  $("session").addEventListener("change", (e) => { current = -1; openSession(e.target.value); });
-  $("run").addEventListener("change", (e) => { current = -1; openSession(sid, e.target.value); });
+  $("session").addEventListener("change", (e) => { currentId = null; openSession(e.target.value); });
+  $("run").addEventListener("change", (e) => { currentId = null; openSession(sid, e.target.value); });
   $("sort").addEventListener("change", render);
   $("filter").addEventListener("change", render);
   $("timeline").addEventListener("click", (e) => {
@@ -305,7 +324,7 @@ function bind() {
     select(best);
   });
   $("player").addEventListener("ended", () => {
-    const c = view && view.clips[current];
+    const c = view && view.clips.find((x) => x.clip_id === playingId);
     if (c && !c.heard) journal("heard", "", c).then(() => openSession(sid, runId))
       .catch((e) => say(e.message));
   });
@@ -337,7 +356,7 @@ function bind() {
   $("backup-full").addEventListener("click", () => submit("backup", { mode: "full" }));
   $("backup-light").addEventListener("click", () => submit("backup", { mode: "light" }));
   document.addEventListener("keydown", (e) => {
-    if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName) || e.ctrlKey || e.altKey) return;
+    if (["INPUT", "TEXTAREA"].includes(e.target.tagName) || e.ctrlKey || e.altKey) return;
     if (e.key in MARKS) { e.preventDefault(); mark(MARKS[e.key]); return; }
     if (!view) return;
     const order = visible().map((r) => r.i);
