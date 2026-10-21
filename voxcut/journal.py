@@ -52,10 +52,20 @@ def load(path: Path) -> tuple[list[dict], list[str]]:
     return events, warnings
 
 
-def _validate(event: dict) -> dict:
-    if not isinstance(event, dict) or set(event) - FIELDS:
+def _when(e: dict) -> datetime:
+    return datetime.fromisoformat(e["ts"])
+
+
+def _validate(event: dict, with_ts: bool = False) -> dict:
+    if not isinstance(event, dict) or set(event) - FIELDS - ({"ts"} if with_ts else set()):
         raise JournalError("неизвестные поля события")
     e = dict(event)
+    if with_ts:
+        try:
+            if _when(e).tzinfo is None:
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            raise JournalError("ts: нужна дата ISO с часовым поясом") from None
     if not isinstance(e.get("event_id"), str) or not EVENT_ID_RE.fullmatch(e["event_id"]):
         raise JournalError("event_id: нужны 32 hex")
     if e.get("kind") not in KINDS:
@@ -112,26 +122,40 @@ class Journal:
 
     def append(self, event: dict) -> dict:
         e = _validate(event)
+        e["ts"] = datetime.now().astimezone().isoformat(timespec="milliseconds")
+        return self._write([e], fresh=True)[0]
+
+    def merge(self, events: list[dict]) -> int:
+        """Restore (U6): events of a backup journal keep their ts; known event_id are skipped."""
+        valid = [_validate(e, with_ts=True) for e in events]
+        return len(self._write(valid, fresh=False))
+
+    def _write(self, events: list[dict], fresh: bool) -> list[dict]:
+        """fresh: return the stored event even when its event_id is known; else only new ones."""
         with self._lock:
             fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX)
                 self._catch_up(fd)
-                if e["event_id"] in self._ids:
-                    return dict(self._ids[e["event_id"]])
+                if fresh and events[0]["event_id"] in self._ids:
+                    return [dict(self._ids[events[0]["event_id"]])]
+                new = list({e["event_id"]: e for e in events
+                            if e["event_id"] not in self._ids}.values())
+                if not new:
+                    return []
                 self._set_aside_torn_tail(fd)
-                e["ts"] = datetime.now().astimezone().isoformat(timespec="milliseconds")
-                line = (json.dumps(e, ensure_ascii=False) + "\n").encode()
-                view = memoryview(line)
+                data = "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in new).encode()
+                view = memoryview(data)
                 while view:
                     view = view[os.write(fd, view):]
                 os.fsync(fd)
             finally:
                 os.close(fd)
-            self._good += len(line)
-            self._events.append(e)
-            self._ids[e["event_id"]] = e
-            return dict(e)
+            self._good += len(data)
+            self._events += new
+            for e in new:
+                self._ids[e["event_id"]] = e
+            return [dict(e) for e in new]
 
     def _set_aside_torn_tail(self, fd: int) -> None:
         """A torn last line would become a broken middle line: move its bytes to <journal>.torn."""
@@ -151,7 +175,7 @@ class Journal:
 def clip_view(events: list[dict], session_id: str, start_s: float, end_s: float) -> dict:
     last: dict[tuple, dict] = {}
     heard = []
-    for e in events:
+    for e in sorted(events, key=_when):  # merged backup events are older than local ones
         if e.get("session_id") != session_id or e.get("kind") not in SPAN_KINDS:
             continue
         if not (e["start_s"] < end_s and e["end_s"] > start_s):
@@ -179,4 +203,5 @@ def ideas(events: list[dict]) -> list[dict]:
 
 
 def last_backup(events: list[dict]) -> str | None:
-    return next((e["ts"] for e in reversed(events) if e.get("kind") == "backup"), None)
+    backups = [e for e in events if e.get("kind") == "backup"]
+    return max(backups, key=_when)["ts"] if backups else None

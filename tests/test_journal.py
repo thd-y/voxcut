@@ -145,3 +145,52 @@ def test_ideas_and_last_backup(tmp_path):
     assert [e["value"] for e in journal.ideas(events)] == ["первая", "вторая"]
     assert journal.last_backup(events) == events[1]["ts"]
     assert journal.last_backup([]) is None
+
+
+def _proc_append(path, n):
+    j = Journal(path)
+    for _ in range(n):
+        j.append(ev(kind="note", value="y" * 2000))
+
+
+def test_two_processes_append(tmp_path):
+    """Review focus 5: two windows = two server processes writing one journal."""
+    import multiprocessing as mp
+
+    p = tmp_path / "j.jsonl"
+    ctx = mp.get_context("fork")
+    procs = [ctx.Process(target=_proc_append, args=(p, 50)) for _ in range(4)]
+    for pr in procs:
+        pr.start()
+    for pr in procs:
+        pr.join()
+    assert all(pr.exitcode == 0 for pr in procs)
+    events, warnings = load(p)
+    assert len(events) == 200 and warnings == []
+    assert len({e["event_id"] for e in events}) == 200
+
+
+def test_merge_keeps_ts_and_newer_local_wins(tmp_path):
+    """Restore (U6): backup events keep their own ts; a newer local correction is not overridden."""
+    old = Journal(tmp_path / "old.jsonl")
+    old.append(ev(value="моё"))
+    old.append(ev(kind="backup", value="voxcut-backup_x_full.tar", sid=None))
+    backup_events = old.events()
+    j = Journal(tmp_path / "j.jsonl")
+    j.append(ev(value="шум"))
+    local_backup = j.append(ev(kind="backup", value="voxcut-backup_y_light.tar", sid=None))
+    assert j.merge(backup_events) == 2
+    assert j.merge(backup_events) == 0  # replay adds nothing
+    events = j.events()
+    assert clip_view(events, "s1", 10.0, 20.0)["marks"] == ["шум"]
+    assert journal.last_backup(events) == local_backup["ts"]
+    assert journal.last_backup(backup_events) == backup_events[1]["ts"]
+    assert len(load(tmp_path / "j.jsonl")[0]) == 4
+
+
+def test_merge_rejects_events_without_valid_ts(tmp_path):
+    j = Journal(tmp_path / "j.jsonl")
+    for bad in (ev(), ev(ts="вчера"), ev(ts="2026-10-21T10:00:00")):  # naive ts is ambiguous
+        with pytest.raises(JournalError):
+            j.merge([bad])
+    assert j.events() == []

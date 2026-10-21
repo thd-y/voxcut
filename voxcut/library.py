@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from voxcut.audio import load_json, read_jsonl
+from voxcut.audio import RunError, load_json, read_jsonl
 
 SESSION_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_\d+h\d{2}m\.[0-9a-f]{8}")
 
@@ -70,37 +70,48 @@ def session_runs(lay: Layout, sid: str) -> list[dict]:
     return [r for _, r in sorted(runs, key=lambda x: x[0], reverse=True)]
 
 
+def _session_row(lay: Layout, sdir: Path) -> dict:
+    sid = sdir.name
+    sess = sdir / f"{sid}.session"
+    meta = load_json(sess / "session.json") if (sess / "session.json").is_file() else None
+    wav = meta is not None and (sess / meta["wav"]).is_file()
+    runs = session_runs(lay, sid)
+    if not (sdir / "import.json").is_file() or (sdir / "originals.tmp").exists():
+        state = "incomplete"
+    elif runs:
+        state = "clips"
+    elif _seg_dirs(sdir, "manifest.jsonl"):
+        state = "segmented"
+    elif list(sdir.glob("*/probs.json")):
+        state = "probs"
+    elif meta is not None:
+        state = "assembled"
+    else:
+        state = "imported"
+    return {
+        "session_id": sid,
+        "name": sid.rsplit(".", 1)[0],
+        "state": state,
+        "can_process": state != "incomplete" and ((sdir / "originals").is_dir() or wav),
+        "duration_s": meta["n_samples"] / meta["sr"] if meta else None,
+        "n_clips": len(read_jsonl(runs[0]["seg_dir"] / "clips" / "manifest.jsonl"))
+        if runs else None,
+        "error": None,
+    }
+
+
 def list_sessions(lay: Layout) -> list[dict]:
+    """One broken session dir (hand-copied data/, half a restore) must not hide the others."""
     out = []
     for sdir in sorted(lay.sessions.iterdir()) if lay.sessions.is_dir() else []:
-        sid = sdir.name
-        if not sdir.is_dir() or not SESSION_ID_RE.fullmatch(sid):
+        if not sdir.is_dir() or not SESSION_ID_RE.fullmatch(sdir.name):
             continue
-        sess = sdir / f"{sid}.session"
-        meta = load_json(sess / "session.json") if (sess / "session.json").is_file() else None
-        wav = meta is not None and (sess / meta["wav"]).is_file()
-        runs = session_runs(lay, sid)
-        if not (sdir / "import.json").is_file() or (sdir / "originals.tmp").exists():
-            state = "incomplete"
-        elif runs:
-            state = "clips"
-        elif _seg_dirs(sdir, "manifest.jsonl"):
-            state = "segmented"
-        elif list(sdir.glob("*/probs.json")):
-            state = "probs"
-        elif meta is not None:
-            state = "assembled"
-        else:
-            state = "imported"
-        out.append({
-            "session_id": sid,
-            "name": sid.rsplit(".", 1)[0],
-            "state": state,
-            "can_process": state != "incomplete" and ((sdir / "originals").is_dir() or wav),
-            "duration_s": meta["n_samples"] / meta["sr"] if meta else None,
-            "n_clips": len(read_jsonl(runs[0]["seg_dir"] / "clips" / "manifest.jsonl"))
-            if runs else None,
-        })
+        try:
+            out.append(_session_row(lay, sdir))
+        except (OSError, ValueError, KeyError, TypeError, RunError) as exc:
+            out.append({"session_id": sdir.name, "name": sdir.name.rsplit(".", 1)[0],
+                        "state": "incomplete", "can_process": False, "duration_s": None,
+                        "n_clips": None, "error": f"{type(exc).__name__}: {exc}"})
     return out
 
 

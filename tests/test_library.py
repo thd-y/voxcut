@@ -150,3 +150,17 @@ def test_session_runs_newest_first(lay):
     assert runs[0]["seg_dir"] == new
     assert len(runs[0]["run_id"]) == 12 and runs[0]["run_id"] != runs[1]["run_id"]
     assert session_runs(lay, SID2) == []
+
+
+def test_list_sessions_broken_session_does_not_hide_others(lay):
+    good = lay.sessions / SID
+    good.mkdir()
+    (good / "import.json").write_text("{}")
+    (good / "originals").mkdir()
+    bad = make_seg(lay, SID2)
+    (lay.sessions / SID2 / "import.json").write_text("{}")
+    (bad / "run.json").unlink()
+    got = {r["session_id"]: r for r in list_sessions(lay)}
+    assert got[SID]["state"] == "imported" and got[SID]["error"] is None
+    assert got[SID2]["state"] == "incomplete" and not got[SID2]["can_process"]
+    assert "run.json" in got[SID2]["error"]
