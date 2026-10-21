@@ -77,6 +77,19 @@ def test_matches_silero_loop_bitwise(tmp_path, model):
 
 
 @pytest.mark.slow
+def test_reset_at_seam_equals_separate_files(tmp_path, model):
+    """D29: after a frame-aligned seam the probs equal a run over the second file alone."""
+    a, b = noise_wav(tmp_path / "a.wav", 1.024), noise_wav(tmp_path / "b.wav", 1.024, seed=1)
+    x = np.concatenate([sf.read(a, dtype="int16")[0], sf.read(b, dtype="int16")[0]])
+    ab = tmp_path / "ab.wav"
+    sf.write(ab, x, SR, subtype="PCM_16")
+    af = vad_filter(None, 1)
+    sep = np.concatenate([vad_probs(a, af, model)[0], vad_probs(b, af, model)[0]])
+    assert np.array_equal(vad_probs(str(ab), af, model, reset_at=[32])[0], sep)
+    assert not np.array_equal(vad_probs(str(ab), af, model)[0], sep)  # без сброса иначе
+
+
+@pytest.mark.slow
 def test_two_runs_identical_npy(tmp_path):
     src = noise_wav(tmp_path / "a.wav", 5)
     a = compute_probs(src, str(tmp_path / "o1"))

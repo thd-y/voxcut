@@ -474,6 +474,11 @@ def seam_windows(seams: list[int], tol: int, n_samples: int) -> list[tuple[int, 
     return [(max(0, s - tol), min(n_samples, s + tol)) for s in seams]
 
 
+def seam_frames(seams: list[int], sr: int) -> list[int]:
+    """Frames before which Silero restarts (D29): the frame holding each seam; frame 0 already does."""
+    return [f for f in (s * VAD_SR // (sr * FRAME_SAMPLES) for s in seams) if f > 0]
+
+
 def mtime_warnings(parts: list[tuple[str, datetime, int]], mtime_ends: list[datetime],
                    sr: int) -> list[str]:
     """Warnings, not refusals (D25, X7): a clock reset backwards hides behind name order."""

@@ -31,6 +31,7 @@ from voxcut.intervals import (
     parse_config,
     parse_start,
     pick_chain,
+    seam_frames,
     seam_windows,
     session_name,
     split_chains,
@@ -191,6 +192,16 @@ def test_at_seam_no_seams():
 def test_seam_windows_clipped():
     assert seam_windows([SEAM, SR // 2, 20 * SR - 10], TOL, 20 * SR) == [
         (SEAM - TOL, SEAM + TOL), (0, SR // 2 + TOL), (20 * SR - 10 - TOL, 20 * SR)]
+
+
+@pytest.mark.parametrize("offsets, sr, expected", [
+    ([57_602_048, 230_407_168], SR, [112_504, 450_014]),  # стыки кратны кадру
+    ([2 * SR, 4 * SR], SR, [62, 125]),  # стык внутри кадра: сброс перед этим кадром
+    ([3 * 48_000], 48_000, [93]),  # смещение в сэмплах источника, кадры в 16 кГц
+    ([0, 511, 512], SR, [1]),  # кадр 0 и так начинается со сброса
+])
+def test_seam_frames(offsets, sr, expected):
+    assert seam_frames(offsets, sr) == expected
 
 
 def test_mtime_warnings():
@@ -420,7 +431,7 @@ def test_session_probs_segment_export(tmp_path):
     assert pdir.name.endswith(".c0.raw")
     pj = json.loads((pdir / "probs.json").read_text())
     assert (pj["channel"], pj["channel_source"]) == (0, "session.channels_identical")
-    assert pj["session"] == s
+    assert pj["session"] == s and pj["seam_reset_frames"] == [62, 125]  # D29
     assert compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"), 0) == pdir  # тот же .c0
     seg = segment(str(pdir), CFG)
     seams = [json.loads(x) for x in (seg / "seams.jsonl").read_text().splitlines()]
@@ -467,6 +478,19 @@ def test_two_starts_same_minute_refused_on_reuse(tmp_path):
     compute_probs(str(a / sa["wav"]), str(tmp_path / "probs"))
     with pytest.raises(RunError, match="(?s)блок session.*rm -rf"):
         compute_probs(str(b / sb["wav"]), str(tmp_path / "probs"))
+
+
+@pytest.mark.slow
+def test_probs_without_seam_reset_refused_on_reuse(tmp_path):
+    """D29: a session probs dir from before the seam reset is not reused silently."""
+    make_folder(tmp_path / "in", chain_starts(2), data=same_channels)
+    sdir, s, _ = run_session(tmp_path)
+    pdir = compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
+    pj = json.loads((pdir / "probs.json").read_text())
+    del pj["seam_reset_frames"]
+    (pdir / "probs.json").write_text(json.dumps(pj))
+    with pytest.raises(RunError, match="(?s)сброс.*rm -rf"):
+        compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
 
 
 # --- cli ---

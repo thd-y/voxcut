@@ -32,6 +32,7 @@ from voxcut.intervals import (
     n_frames,
     parse_start,
     pick_chain,
+    seam_frames,
     session_name,
     split_chains,
     start_local,
@@ -233,10 +234,11 @@ def vad_filter(channel: str | int | None, channels: int) -> str:
     raise SourceError(f'channel = {channel!r}: ожидается "mono", "mix" или индекс 0..{channels - 1}')
 
 
-def vad_probs(src: str, af: str, model=None) -> tuple[np.ndarray, int]:
+def vad_probs(src: str, af: str, model=None, reset_at=()) -> tuple[np.ndarray, int]:
     """Stream the 16 kHz copy through Silero frame by frame: (probs float32, n16k).
 
     inference_mode is mandatory: without it autograd keeps ~21 KB per frame (C1).
+    The model state is reset before each frame in reset_at, i.e. at session seams (D29).
     """
     import torch
 
@@ -246,6 +248,7 @@ def vad_probs(src: str, af: str, model=None) -> tuple[np.ndarray, int]:
 
         model = load_silero_vad()
     model.reset_states()
+    resets = set(reset_at)
     probs, n16k = [], 0
     args = ["-i", src, "-map", "0:a:0", "-af", af, "-f", "f32le", "-"]
     with torch.inference_mode(), ffmpeg_stream(args) as out:
@@ -254,6 +257,8 @@ def vad_probs(src: str, af: str, model=None) -> tuple[np.ndarray, int]:
             n16k += len(x)
             if len(x) < FRAME_SAMPLES:
                 x = np.pad(x, (0, FRAME_SAMPLES - len(x)))
+            if len(probs) in resets:
+                model.reset_states()
             probs.append(model(torch.from_numpy(x.copy()), VAD_SR).item())
     return np.asarray(probs, dtype=np.float32), n16k
 
@@ -347,6 +352,8 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
     if channel is None and session and session["channels_identical"]:
         channel, channel_source = 0, "session.channels_identical"
     dst = Path(out_dir) / probs_dir_name(src, sha, channel)
+    resets = seam_frames([x["offset_samples"] for x in session["seams"]],
+                         session["sr"]) if session else None
     if dst.exists():
         meta = load_json(dst / "probs.json")
         check_env(meta, current_env(vad_filter(channel, meta["channels"])), dst)
@@ -354,6 +361,9 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
             raise RunError(f"{dst}: блок session в probs.json не совпадает с session.json "
                            f"рядом с источником.\nУдалите каталог и запустите заново: "
                            f"rm -rf {shlex.quote(str(dst))}")
+        if meta.get("seam_reset_frames") != resets:
+            raise RunError(f"{dst}: probs посчитаны без сброса Silero на стыках (D29).\n"
+                           f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(dst))}")
         return dst
     info = check_source(src)
     if session and session["n_samples"] != info.n_samples:
@@ -361,7 +371,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
                        f"в источнике {info.n_samples}")
     af = vad_filter(channel, info.channels)
     tmp = fresh_tmp(dst)
-    probs, n16k = vad_probs(src, af)
+    probs, n16k = vad_probs(src, af, reset_at=resets or ())
     if len(probs) != n_frames(n16k):
         raise RuntimeError(f"кадров {len(probs)}, ожидалось n_frames({n16k}) = {n_frames(n16k)}")
     np.save(tmp / "probs.npy", probs)
@@ -387,6 +397,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
     if channel_source:
         meta["channel_source"] = channel_source
     if session:
+        meta["seam_reset_frames"] = resets
         meta["session"] = session
     (tmp / "probs.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))  # last
     os.replace(tmp, dst)
