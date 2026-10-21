@@ -241,9 +241,9 @@ def test_reset_period_is_120_s():
 
 
 def test_v1_config():
-    """D32: the v1 starting config shipped with the repo."""
+    """D32, D37: the v1 config shipped with the repo."""
     root = Path(__file__).resolve().parent.parent
     cfg, meta = parse_config((root / "configs" / "v1.toml").read_text())
     assert cfg.effective() == {"threshold": 0.1, "neg_threshold": pytest.approx(0.01), "min_speech_ms": 0,
-                               "min_silence_ms": 2000, "pad_ms": 1000, "merge_gap_ms": 10000}
-    assert meta["name"] == "v1-start"
+                               "min_silence_ms": 2000, "pad_ms": 3000, "merge_gap_ms": 10000}
+    assert meta["name"] == "v1"
