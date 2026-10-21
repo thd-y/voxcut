@@ -223,3 +223,24 @@ def test_server_does_not_import_torch():
     code = "import sys, voxcut.ui.server; print('torch' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+class DeadConsole:
+    def write(self, s):
+        raise OSError(5, "Input/output error")  # a closed WSL console (2026-10-22)
+
+    def flush(self):
+        pass
+
+
+def test_dead_console_does_not_break_requests(tmp_path, monkeypatch):
+    lay = Layout(tmp_path)
+    lay.ensure()
+    server, app = make_server(lay)  # default log: stderr
+    monkeypatch.setattr(sys, "stderr", DeadConsole())
+    threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True).start()
+    try:
+        assert Client(app).req("GET", "/")[0] == 200
+    finally:
+        server.shutdown()
+        server.server_close()

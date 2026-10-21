@@ -72,12 +72,19 @@ class Request:
     headers: object
 
 
+def _log(line: str) -> None:
+    try:
+        print(line, file=sys.stderr, flush=True)
+    except OSError:
+        pass  # a closed console must not cost the request its response
+
+
 class App:
     def __init__(self, lay: Layout, port: int, jobs=None, journal: Journal | None = None):
         self.lay, self.port, self.jobs = lay, port, jobs
         self.journal = journal if journal is not None else Journal(lay.journal)
         self.clock = time.monotonic
-        self.log = lambda line: print(line, file=sys.stderr, flush=True)
+        self.log = _log
         self._lock = threading.Lock()
         self._codes: dict[str, float] = {}
         self._keys: list[str] = []

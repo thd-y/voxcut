@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import threading
+import time
 from urllib.parse import urlsplit
 
 import pytest
@@ -139,3 +140,19 @@ def test_envcheck_listeners_parsing():
           "LISTEN 0 5 [::]:45633 [::]:* users:((\"python\",pid=173670,fd=5))\n")
     assert listeners(ss, 173670) == ["127.0.0.1:45633", "[::]:45633"]
     assert listeners(ss, 17367) == []
+
+
+def test_closing_console_stops_server(tmp_path, edge):
+    master, slave = os.openpty()
+    console = os.fdopen(slave, "r")
+    done = []
+    th = threading.Thread(target=lambda: done.append(launch.main(
+        ["--root", str(tmp_path)], popen=FakePopen(), console=console)), daemon=True)
+    th.start()
+    deadline = time.monotonic() + 10
+    while not (tmp_path / ".run" / "ui.json").exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    os.close(master)  # the owner closes the VoxCut.cmd window
+    th.join(10)
+    assert done == [0]
+    assert not (tmp_path / ".run" / "ui.json").exists()

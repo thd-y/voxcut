@@ -10,6 +10,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -83,7 +84,18 @@ def _serve_socket(sock: socket.socket, app) -> None:
                 pass
 
 
-def main(argv: list[str] | None = None, popen=subprocess.Popen, on_ready=None) -> int:
+def _watch_console(console, server) -> None:
+    """WSL sends no SIGHUP when the VoxCut.cmd window closes: stop on the console's EOF/EIO."""
+    try:
+        while console.readline():
+            pass
+    except OSError:
+        pass
+    server.shutdown()
+
+
+def main(argv: list[str] | None = None, popen=subprocess.Popen, on_ready=None,
+         console=sys.stdin) -> int:
     ap = argparse.ArgumentParser(prog="voxcut-ui")
     ap.add_argument("--root", default=str(ROOT))
     lay = Layout(Path(ap.parse_args(argv).root).resolve())
@@ -112,6 +124,8 @@ def main(argv: list[str] | None = None, popen=subprocess.Popen, on_ready=None) -
         _open_window(popen, app.port, app.new_launch_code())
         print(f"VoxCut: 127.0.0.1:{app.port}. Окно открыто. Сервер работает, пока открыта "
               f"эта консоль (Ctrl+C — остановить); задачи продолжаются без него.", flush=True)
+        if console is not None and console.isatty():
+            threading.Thread(target=_watch_console, args=(console, server), daemon=True).start()
         if on_ready:
             on_ready(server)
         try:
