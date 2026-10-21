@@ -47,3 +47,9 @@ def test_index_served_with_csp(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_no_translate_prompt():
+    text = (STATIC_DIR / "index.html").read_text()
+    assert '<html lang="ru" translate="no">' in text
+    assert '<meta name="google" content="notranslate">' in text
