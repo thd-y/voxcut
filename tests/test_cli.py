@@ -31,7 +31,8 @@ def make_probs_dir(root, probs, name="rec.abcdef01.raw", sha="ab" * 32, channel=
     n16k = len(probs) * F
     meta = ENV | {"source_path": "/x/rec.wav", "source_sha256": sha, "source_sr": SR,
                   "source_n_samples": n16k * SR // 16000, "channels": 1, "channel": channel,
-                  "codec_name": "pcm_s16le", "n16k": n16k, "n_frames": len(probs)}
+                  "codec_name": "pcm_s16le", "n16k": n16k, "n_frames": len(probs),
+                  "reset_period_frames": 3750}
     (d / "probs.json").write_text(json.dumps(meta))
     return d
 
@@ -39,6 +40,16 @@ def make_probs_dir(root, probs, name="rec.abcdef01.raw", sha="ab" * 32, channel=
 def cfg(text="threshold = 0.5\npad_ms = 0\nmerge_gap_ms = 0\n"):
     return parse_config(text)[0]
 
+
+
+@pytest.mark.parametrize("change", [{"reset_period_frames": None}, {"reset_period_frames": 1875}])
+def test_segment_refuses_probs_without_second_pass(tmp_path, change):
+    """D31: segment/sweep never run on probs from before the second pass (pilot dirs)."""
+    d = make_probs_dir(tmp_path, [0.9] * 10)
+    meta = json.loads((d / "probs.json").read_text()) | change
+    (d / "probs.json").write_text(json.dumps({k: v for k, v in meta.items() if v is not None}))
+    with pytest.raises(RunError, match=f"(?s)D31.*rm -rf {d}"):
+        segment(str(d), cfg())
 
 # речь 1–2 с и 5–6 с (кадр 32 мс), всего 10 с
 SPEECH = np.full(313, 0.05)

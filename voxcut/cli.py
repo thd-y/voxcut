@@ -19,6 +19,7 @@ from voxcut.audio import (
     SourceError,
     assemble_session,
     check_env,
+    check_reset_period,
     compute_probs,
     export_clips,
     fresh_tmp,
@@ -57,6 +58,7 @@ FW_CONFIG = SegmentConfig(threshold=0.5, neg_threshold=0.35, min_speech_ms=0,
 def load_probs(probs_dir: Path) -> tuple[dict, np.ndarray]:
     """probs.json + probs.npy, checked against each other (D6)."""
     meta = load_json(probs_dir / "probs.json")
+    check_reset_period(meta, probs_dir)
     probs = np.load(probs_dir / "probs.npy")
     if len(probs) != meta["n_frames"] or n_frames(meta["n16k"]) != meta["n_frames"]:
         raise RunError(f"{probs_dir}: в probs.npy {len(probs)} кадров, в probs.json "

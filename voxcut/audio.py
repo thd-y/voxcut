@@ -342,6 +342,13 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line]
 
 
+def check_reset_period(meta: dict, probs_dir: Path) -> None:
+    """probs from before the second Silero pass (D31) are never reused, by probs or segment."""
+    if meta.get("reset_period_frames") != RESET_PERIOD_FRAMES:
+        raise RunError(f"{probs_dir}: probs посчитаны без второго прохода Silero (D31).\n"
+                       f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(probs_dir))}")
+
+
 def read_session(src: str, sha: str) -> dict | None:
     path = Path(src).parent / "session.json"
     if not path.exists():
@@ -375,9 +382,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
             raise RunError(f"{dst}: блок session в probs.json не совпадает с session.json "
                            f"рядом с источником.\nУдалите каталог и запустите заново: "
                            f"rm -rf {shlex.quote(str(dst))}")
-        if meta.get("reset_period_frames") != RESET_PERIOD_FRAMES:
-            raise RunError(f"{dst}: probs посчитаны без второго прохода Silero (D31).\n"
-                           f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(dst))}")
+        check_reset_period(meta, dst)
         if meta.get("seam_reset_frames") != resets:
             raise RunError(f"{dst}: probs посчитаны без сброса Silero на стыках (D29).\n"
                            f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(dst))}")
