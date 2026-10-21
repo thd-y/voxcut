@@ -272,6 +272,14 @@ def test_broken_wav_refused_before_chains(tmp_path, no_decode):
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
 
 
+def test_empty_wav_refused_not_crashed(tmp_path, no_decode):
+    """A recorder that died right after creating a file leaves 0 bytes."""
+    make_folder(tmp_path / "in", chain_starts(2))
+    (tmp_path / "in" / f"{T0 + timedelta(hours=5):%Y%m%d%H%M%S}.wav").write_bytes(b"")
+    with pytest.raises(SourceError, match="не RIFF/RF64 WAVE"):
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+
+
 def test_two_chains_refused_with_numbers(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
     with pytest.raises(SessionError, match="--chain N") as e:

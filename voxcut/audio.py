@@ -132,6 +132,9 @@ def _printable(cid: bytes) -> bool:
     return all(0x20 <= b <= 0x7E for b in cid)
 
 
+_CHUNK_MIN = {b"ds64": 16, b"fmt ": 14}  # bytes read from them below
+
+
 def check_wav_structure(src: str) -> None:
     """D15: both ffmpeg and libsndfile trust the WAV header, so walk the RIFF chunks ourselves.
 
@@ -142,7 +145,8 @@ def check_wav_structure(src: str) -> None:
     fix = shlex.join(["ffmpeg", "-ignore_length", "1", "-i", src, "-c:a", "copy",
                       "-rf64", "auto", f"{src}.fixed.wav"])
     with open(src, "rb") as f:
-        magic, _, wave = struct.unpack("<4sI4s", f.read(12))
+        head = f.read(12)
+        magic, wave = head[:4], head[8:]
         if magic not in (b"RIFF", b"RF64") or wave != b"WAVE":
             raise SourceError(f"{src}: не RIFF/RF64 WAVE")
         sr = block_align = data_start = data_size = ds64_data = None
@@ -157,11 +161,7 @@ def check_wav_structure(src: str) -> None:
             if not _printable(cid):
                 bad = f"мусор вместо чанка на смещении {pos}"
                 break
-            if cid == b"ds64":
-                ds64_data = struct.unpack("<QQ", f.read(16))[1]
-            elif cid == b"fmt ":
-                _, _, sr, _, block_align = struct.unpack("<HHIIH", f.read(14))
-            elif cid == b"data" and data_start is None:
+            if cid == b"data" and data_start is None:
                 if magic == b"RF64" and csize == 0xFFFFFFFF and ds64_data is not None:
                     csize = ds64_data
                 data_start, data_size = pos + 8, csize
@@ -172,6 +172,13 @@ def check_wav_structure(src: str) -> None:
             if end > size:
                 bad = f"чанк {cid!r} на смещении {pos} выходит за конец файла"
                 break
+            if csize < _CHUNK_MIN.get(cid, 0):
+                bad = f"чанк {cid!r} короче {_CHUNK_MIN[cid]} байт"
+                break
+            if cid == b"ds64":
+                ds64_data = struct.unpack("<QQ", f.read(16))[1]
+            elif cid == b"fmt ":
+                _, _, sr, _, block_align = struct.unpack("<HHIIH", f.read(14))
             pos = end + (csize & 1)
         if bad is None and (data_start is None or not block_align):
             bad = "нет чанка fmt или data"

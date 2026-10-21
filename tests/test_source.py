@@ -71,6 +71,24 @@ def test_broken_wav_refused_with_lengths_and_command(tmp_path, mutate, needle):
     assert "ffmpeg -ignore_length 1 -i" in str(e.value)
 
 
+def short_fmt(raw: bytes) -> bytes:
+    off = raw.index(b"fmt ") + 4
+    return raw[:off] + struct.pack("<I", 2) + raw[off + 4:off + 6]
+
+
+@pytest.mark.parametrize("mutate, needle", [
+    (lambda raw: b"", "не RIFF/RF64 WAVE"),  # диктофон создал файл и выключился
+    (lambda raw: raw[:5], "не RIFF/RF64 WAVE"),
+    (lambda raw: raw[:30], "выходит за конец файла"),  # обрыв внутри fmt
+    (short_fmt, "чанк b'fmt ' короче 14 байт"),
+])
+def test_truncated_wav_refused_not_crashed(tmp_path, mutate, needle):
+    p = write_wav(tmp_path / "a.wav")
+    p.write_bytes(mutate(p.read_bytes()))
+    with pytest.raises(SourceError, match=needle):
+        check_wav_structure(str(p))
+
+
 # --- D21: channel ---
 
 @pytest.mark.parametrize("channel, channels, expected", [
