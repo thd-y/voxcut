@@ -451,11 +451,11 @@ def export_clips(seg_dir: str) -> Path:
     run = load_json(seg_dir / "run.json")
     rows = read_jsonl(seg_dir / "manifest.jsonl")
     src = run["source"]["path"]
-    if sha256_file(src) != run["source"]["sha256"]:
-        raise RunError(f"{src}: sha256 не совпадает с манифестом {seg_dir}, источник изменился")
     dst = seg_dir / "clips"
     if dst.exists():
         raise RunError(f"{dst} уже существует: клипы не перезаписываются (D19)")
+    if sha256_file(src) != run["source"]["sha256"]:
+        raise RunError(f"{src}: sha256 не совпадает с манифестом {seg_dir}, источник изменился")
     info = sf.info(src)
     dtype = _DTYPES.get(info.subtype, "int16")  # 8-bit PCM is exact through int16
     ext = "flac" if info.format == "FLAC" else "wav"

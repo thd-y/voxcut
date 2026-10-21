@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from voxcut import audio
 from voxcut.audio import RunError, export_clips, sha256_file
 from voxcut.cli import main
 
@@ -57,10 +58,15 @@ def test_end_clamped_to_eof(tmp_path):
     assert row["end_sample"] == SR * 2 and sf.info(clips.parent / row["audio_path"]).frames == 10
 
 
-def test_existing_clips_refused(tmp_path):
+def test_existing_clips_refused(tmp_path, monkeypatch):
     src = make_source(tmp_path / "s.wav", "PCM_16")
     seg = make_seg_dir(tmp_path, src, [(0, 100)])
     export_clips(seg)
+
+    def no_hash(path):
+        raise AssertionError("отказ должен прийти до чтения часов аудио")
+
+    monkeypatch.setattr(audio, "sha256_file", no_hash)
     with pytest.raises(RunError, match="уже существует"):
         export_clips(seg)
 
