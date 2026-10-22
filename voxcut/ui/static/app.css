@@ -104,3 +104,5 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
   #work { grid-template-columns: 1fr; grid-template-rows: minmax(160px, 40%) 1fr; }
   #list-pane { border-right: 0; border-bottom: 1px solid var(--border); }
 }
+.icon { width: 16px; height: 16px; flex-shrink: 0; }
+h2 > .icon { display: inline-block; margin-right: 6px; vertical-align: -2px; }

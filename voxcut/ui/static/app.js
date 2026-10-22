@@ -103,6 +103,7 @@ function undoTarget(stack, clips) {
 }
 
 const DECISIONS = [KEEP, ...REASONS];  // keys 1..5 (R2)
+const DECISION_ICONS = { "моё": "check", "вокал": "mic-vocal", "музыка": "music", "шум": "audio-waveform", "другое": "ellipsis" };  // D55
 
 // R10: physical keys (KeyboardEvent.code), the same in Russian and English layouts.
 function keyAction(ev, { inField, dialogOpen, screen, rechoose = null }) {
@@ -183,8 +184,12 @@ function el(tag, text, cls) {
   return e;
 }
 
-function button(text, onClick, variant, size = "sm") {
+// D55: Lucide icons come from <template id="icon-…"> in index.html (JS cannot create SVG here).
+const icon = (name) => $(`icon-${name}`).content.firstElementChild.cloneNode(true);
+
+function button(text, onClick, variant, size = "sm", iconName = null) {
   const b = el("button", text, "btn");
+  if (iconName) b.prepend(icon(iconName));
   b.type = "button";
   if (variant) b.dataset.variant = variant;
   if (size) b.dataset.size = size;
@@ -662,7 +667,7 @@ function renderCard() {
     }
   }
   const own = ownNote(clip);
-  $("note-btn").firstChild.textContent = own ? "заметка " : "+ заметка ";
+  $("note-label").textContent = own ? "заметка" : "+ заметка";
   $("note-box").hidden = ui.noteClipId !== clip.clip_id;
   const showOwn = own && ui.noteClipId !== clip.clip_id;
   setKids($("note-view"), JSON.stringify([clip.clip_id, showOwn && own.value, ui.expanded]), () => {
@@ -698,7 +703,8 @@ function renderPlayer() {
   const clip = selected();
   $("pos").textContent = clip ? `${fmtPos(t)} / ${fmtPos(dur || clip.duration_s)}` : "";
   $("spinner").hidden = !(mine && ui.audio === "loading");
-  $("play-btn").textContent = mine && !p.paused ? "❚❚" : "▶";
+  $("play-icon").hidden = mine && !p.paused;
+  $("pause-icon").hidden = !$("play-icon").hidden;
 }
 
 function cssVar(name, fallback) {
@@ -753,7 +759,7 @@ function renderLibrary() {
       }, s.session_id === sid ? "secondary" : undefined));
     }
     if (s.can_process && s.state !== "clips") {
-      acts.append(button("Обработать", () => submit("process", { session_id: s.session_id }), "outline"));
+      acts.append(button("Обработать", () => submit("process", { session_id: s.session_id }), "outline", "sm", "cog"));
     } else if (!s.can_process && s.state === "clips") {
       acts.append(el("span", "только прослушивание (light)", "muted small"));
     }
@@ -793,7 +799,7 @@ function renderLibrary() {
         const row = el("div", null, "row");
         row.append(input, button("Импортировать", () => submit("import", {
           source: src.source, chain: ch.chain, start: input.value.trim() || null,
-        })));
+        }), undefined, "sm", "folder-input"));
         box.append(row);
       }
       parts.push(box);
@@ -1207,7 +1213,7 @@ function bind() {
     const b = button(value === KEEP ? "Оставить" : value[0].toUpperCase() + value.slice(1), () => {
       if (ui.tab === "mine") pickRechoose(value);
       else decide(value);
-    }, value === KEEP ? undefined : "outline", "default");
+    }, value === KEEP ? undefined : "outline", "default", DECISION_ICONS[value]);
     b.dataset.value = value;
     b.append(el("kbd", String(i + 1), "kbd"));
     return b;
@@ -1241,6 +1247,9 @@ function bind() {
   });
   $("note-btn").addEventListener("click", openNote);
   $("rechoose-btn").addEventListener("click", openRechoose);
+  $("inbox-open").addEventListener("click", () => {  // D49
+    api("POST", "/api/inbox/open", {}).catch((e) => toast("Проводник не открылся", e.message, true));
+  });
   $("rechoose-yes").addEventListener("click", () => closeRechoose(true));
   $("rechoose-no").addEventListener("click", () => closeRechoose(false));
   $("note").addEventListener("blur", saveNote);

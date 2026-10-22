@@ -23,10 +23,10 @@
   <span id="progress-label" class="muted"></span>
   <button type="button" id="job-badge" class="badge" hidden></button>
   <button type="button" id="theme" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Светлая или тёмная тема" title="Тема">
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20z" fill="currentColor"/></svg>
+    <svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#sun-moon"></use></svg>
   </button>
-  <button type="button" id="help-btn" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Клавиши" title="Клавиши">?</button>
-  <button type="button" id="library-btn" class="btn" data-variant="outline" data-size="sm">Библиотека <kbd class="kbd">G</kbd></button>
+  <button type="button" id="help-btn" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Клавиши" title="Клавиши"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#keyboard"></use></svg></button>
+  <button type="button" id="library-btn" class="btn" data-variant="outline" data-size="sm"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#library"></use></svg>Библиотека <kbd class="kbd">G</kbd></button>
 </header>
 
 <div id="conn-alert" class="alert" data-variant="destructive" role="alert" hidden>
@@ -57,7 +57,7 @@
           <h2 id="clip-title" class="clip-title"></h2>
           <p id="clip-sub"></p>
           <div data-slot="card-action">
-            <button type="button" id="note-btn" class="btn" data-variant="ghost" data-size="sm">+ заметка <kbd class="kbd">N</kbd></button>
+            <button type="button" id="note-btn" class="btn" data-variant="ghost" data-size="sm"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#notebook-pen"></use></svg><span id="note-label">+ заметка</span> <kbd class="kbd">N</kbd></button>
           </div>
         </header>
         <div id="clip-alert" class="alert" data-variant="destructive" role="alert" hidden>
@@ -65,14 +65,14 @@
           <section id="clip-alert-text"></section>
         </div>
         <div id="player-row">
-          <button type="button" id="play-btn" class="btn" data-variant="outline" data-size="icon-sm" aria-label="Играть или пауза">▶</button>
+          <button type="button" id="play-btn" class="btn" data-variant="outline" data-size="icon-sm" aria-label="Играть или пауза"><span id="play-icon"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#play"></use></svg></span><span id="pause-icon" hidden><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#pause"></use></svg></span></button>
           <div id="bar" class="progress" role="progressbar" aria-label="Позиция в клипе" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="bar-fill"></span></div>
           <span id="spinner" class="spinner" hidden></span>
           <span id="pos" class="muted mono"></span>
         </div>
         <div id="decisions" class="decisions"></div>
         <div id="rechoose" class="rechoose" hidden>
-          <button type="button" id="rechoose-btn" class="btn" data-variant="link" data-size="sm">изменить выбор <kbd class="kbd">R</kbd></button>
+          <button type="button" id="rechoose-btn" class="btn" data-variant="link" data-size="sm"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#pencil"></use></svg>изменить выбор <kbd class="kbd">R</kbd></button>
           <p id="rechoose-hint" class="muted small" hidden>1–5 — новый выбор, Esc — отмена</p>
           <div id="rechoose-confirm" role="alertdialog" aria-labelledby="rechoose-question" hidden>
             <p id="rechoose-question"></p>
@@ -112,6 +112,7 @@
   </section>
   <section class="card">
     <header><h2>Входящие</h2><p>Файлы диктофона из папки <span class="mono">inbox</span> продукта.</p></header>
+    <section class="row"><button type="button" id="inbox-open" class="btn" data-variant="outline" data-size="sm"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#folder-open"></use></svg>Открыть в проводнике</button></section>
     <section id="inbox"></section>
   </section>
   <section class="card">
@@ -121,12 +122,12 @@
   <section class="card">
     <header><h2>Бэкап</h2><p id="backup-info"></p></header>
     <section class="row">
-      <button type="button" id="backup-full" class="btn" data-variant="outline">Бэкап full</button>
-      <button type="button" id="backup-light" class="btn" data-variant="outline">Бэкап light</button>
+      <button type="button" id="backup-full" class="btn" data-variant="outline"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#archive"></use></svg>Бэкап full</button>
+      <button type="button" id="backup-light" class="btn" data-variant="outline"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#archive"></use></svg>Бэкап light</button>
     </section>
   </section>
   <section class="card">
-    <header><h2>Идеи</h2><p>Новая идея — клавиша <kbd class="kbd">I</kbd> на любом экране.</p></header>
+    <header><h2><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#lightbulb"></use></svg>Идеи</h2><p>Новая идея — клавиша <kbd class="kbd">I</kbd> на любом экране.</p></header>
     <section><ul id="ideas"></ul></section>
   </section>
 </main>
@@ -172,6 +173,13 @@
   </div>
 </dialog>
 
+<template id="icon-check"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#check"></use></svg></template>
+<template id="icon-mic-vocal"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#mic-vocal"></use></svg></template>
+<template id="icon-music"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#music"></use></svg></template>
+<template id="icon-audio-waveform"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#audio-waveform"></use></svg></template>
+<template id="icon-ellipsis"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#ellipsis"></use></svg></template>
+<template id="icon-folder-input"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#folder-input"></use></svg></template>
+<template id="icon-cog"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#cog"></use></svg></template>
 <audio id="player" preload="auto"></audio>
 </body>
 </html>

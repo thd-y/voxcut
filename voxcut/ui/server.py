@@ -47,6 +47,7 @@ STATIC = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/vendor/basecoat-luma.css": ("vendor/basecoat-luma.css", "text/css; charset=utf-8"),
+    "/vendor/lucide-sprite.svg": ("vendor/lucide-sprite.svg", "image/svg+xml"),
 }
 JSON_TYPE = "application/json; charset=utf-8"
 

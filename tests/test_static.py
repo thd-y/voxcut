@@ -12,6 +12,11 @@ FORBIDDEN = ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "
              "new Function", 'setAttribute("style"', "setAttribute('style'", "localStorage",
              "sessionStorage", "document.cookie", "http://", "https://", "localhost"]
 BASECOAT_SHA256 = "744bb04803c3480d1e79b3cfd38ecb6b103075400774cb89bf57b5e27e6d15a2"
+LUCIDE_SHA256 = "38b8bdb9efef8076bacdf3d273b700e9bf5172643d962ba61f8f8b7ef4c45ff4"
+LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mic-vocal", "music",
+                "audio-waveform", "ellipsis", "notebook-pen", "lightbulb", "pencil", "folder-open",
+                "folder-input", "cog", "archive"]  # D55
+LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt"}
 
 
 def static_files():
@@ -34,13 +39,28 @@ def test_static_rules(path):
 
 def test_static_table_covers_all_files():
     files = {p.relative_to(STATIC_DIR).as_posix() for p in STATIC_DIR.rglob("*") if p.is_file()}
-    assert {name for name, _ in STATIC.values()} == files - {"vendor/LICENSE.md"}
+    assert {name for name, _ in STATIC.values()} == files - LICENSES
 
 
 def test_vendor_basecoat_pinned():
     data = (STATIC_DIR / "vendor" / "basecoat-luma.css").read_bytes()
     assert hashlib.sha256(data).hexdigest() == BASECOAT_SHA256
     assert (STATIC_DIR / "vendor" / "LICENSE.md").is_file()
+
+
+def test_vendor_lucide_pinned():
+    data = (STATIC_DIR / "vendor" / "lucide-sprite.svg").read_bytes()
+    assert hashlib.sha256(data).hexdigest() == LUCIDE_SHA256
+    assert (STATIC_DIR / "vendor" / "LICENSE-lucide.txt").is_file()
+    assert re.findall(r'<symbol id="([^"]+)"', data.decode()) == LUCIDE_ICONS
+
+
+def test_icon_refs_exist_in_sprite():
+    refs = set()
+    for name in ("index.html", "app.js"):
+        refs |= set(re.findall(r"/vendor/lucide-sprite\.svg#([a-z-]+)",
+                               (STATIC_DIR / name).read_text()))
+    assert refs and refs <= set(LUCIDE_ICONS)
 
 
 def test_index_served_with_csp(tmp_path):
@@ -51,7 +71,8 @@ def test_index_served_with_csp(tmp_path):
     threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True).start()
     try:
         c = Client(app)
-        for path in ("/", "/app.js", "/app.css", "/vendor/basecoat-luma.css"):
+        for path in ("/", "/app.js", "/app.css", "/vendor/basecoat-luma.css",
+                     "/vendor/lucide-sprite.svg"):
             status, headers, _ = c.req("GET", path)
             assert status == 200 and {k: headers.get(k) for k in SECURITY} == SECURITY
     finally:
