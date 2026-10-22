@@ -413,3 +413,59 @@ def test_stream_error_logged_by_type_only(api, capfd, tmp_path):
     err = capfd.readouterr().err
     assert "secret-dir" not in err and "Traceback" not in err
     assert "secret-dir" not in "\n".join(logs) and any("OSError" in x for x in logs)
+
+
+# --- D49: open inbox/ in Explorer ---
+
+@pytest.fixture
+def oapi(wapi):
+    calls = []
+    wapi.app.open_folder = calls.append
+    wapi.opened = calls
+    return wapi
+
+
+def test_inbox_open_calls_explorer_with_fixed_path(oapi):
+    assert post(oapi, "/api/inbox/open", {})[::2] == (200, {"ok": True})
+    assert oapi.opened == [oapi.lay.inbox]
+
+
+def test_inbox_open_rejects_body_fields(oapi):
+    assert post(oapi, "/api/inbox/open", {"path": "/etc"})[0] == 400
+    assert oapi.opened == []
+
+
+def test_inbox_open_without_key_is_401(oapi):
+    assert oapi.req("POST", "/api/inbox/open", {})[0] == 401
+    status, _, _ = oapi.req("POST", "/api/inbox/open", {}, key=oapi.k, origin=False,
+                            headers={"Sec-Fetch-Site": "same-origin"})
+    assert status == 403
+    assert oapi.opened == []
+
+
+def test_inbox_open_tool_missing_is_503(oapi):
+    def missing(path):
+        raise FileNotFoundError("wslpath")
+
+    oapi.app.open_folder = missing
+    status, _, body = post(oapi, "/api/inbox/open", {})
+    assert status == 503 and "проводник недоступен" in body["error"]
+
+
+def test_open_folder_argv(tmp_path):
+    runs, popens = [], []
+
+    def run(argv, **kw):
+        runs.append(argv)
+        return type("R", (), {"stdout": "\\\\wsl.localhost\\U\\inbox\n"})()
+
+    def popen(argv, **kw):
+        popens.append((argv, kw))
+
+    target = tmp_path / "inbox"
+    server_mod.open_folder(target, run=run, popen=popen)
+    assert target.is_dir()
+    assert runs == [["wslpath", "-w", str(target)]]
+    argv, kw = popens[0]
+    assert argv == ["explorer.exe", "\\\\wsl.localhost\\U\\inbox"]
+    assert kw["start_new_session"] is True and "shell" not in kw
