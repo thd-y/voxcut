@@ -261,7 +261,7 @@ def test_on_done_error_does_not_block_queue(lay):
     finish(lay, a)
     views = {v["job_id"]: v for v in j.poll()}
     assert views[b]["state"] == "running"
-    assert views[a]["state"] == "done" and "нет journal.jsonl" in views[a]["error"]
+    assert views[a]["state"] == "failed" and "нет journal.jsonl" in views[a]["error"]
     Jobs(lay, run=run, on_done=boom).poll()  # not retried forever after a restart
 
 

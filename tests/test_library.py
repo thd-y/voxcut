@@ -279,6 +279,14 @@ def test_import_symlink_refused_before_move(lay, no_check, tmp_path):
     assert paths[0].is_file() and paths[1].is_symlink() and list(lay.sessions.iterdir()) == []
 
 
+def test_import_inbox_changed_between_reads_refused(lay, no_check, monkeypatch):
+    make_folder(lay.inbox, chain_starts(2))
+    monkeypatch.setattr(audio, "list_chains", lambda src: [["20250301082921.WAV"]])  # stale read
+    with pytest.raises(SessionError, match="входящие изменились"):
+        import_originals(lay, "", 1, None, _quiet, files=["20250301082921.WAV"])
+    assert list(lay.sessions.iterdir()) == []
+
+
 def test_import_repeat_of_gone_chain_refused(lay, no_check):
     make_folder(lay.inbox, chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
     c1 = inbox_inventory(lay)["sources"][0]["chains"][0]["files"]

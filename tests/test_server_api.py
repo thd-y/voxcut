@@ -330,18 +330,29 @@ def test_restore_merges_journal_once(wapi):
     assert events[0]["ts"] == old.events()[0]["ts"]
 
 
-def test_restore_merge_failure_says_how_to_retry(wapi):
-    """Review #4: on_done runs once; the error must tell the owner to run the restore again."""
+@pytest.mark.parametrize("case, advice", [
+    ("transient", "восстановите этот архив ещё раз"),  # review #4: on_done runs once
+    ("broken", "повтор не поможет"),  # the archive's journal itself: retrying loops
+])
+def test_restore_merge_failure_advice(wapi, monkeypatch, case, advice):
     (wapi.lay.inbox / "voxcut-backup_x_full.tar").write_bytes(b"")
     jid = uuid.uuid4().hex
     post(wapi, "/api/jobs", {"job_id": jid, "kind": "restore",
                              "params": {"name": "voxcut-backup_x_full.tar"}})
-    (wapi.lay.jobs / jid / "journal.jsonl").write_bytes(b"{broken\n{}\n")
+    if case == "broken":
+        (wapi.lay.jobs / jid / "journal.jsonl").write_bytes(b"{broken\n{}\n")
+    else:
+        (wapi.lay.jobs / jid / "journal.jsonl").write_bytes(b"")
+
+        def full(events):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(wapi.app.journal, "merge", full)
     (wapi.lay.jobs / jid / "status.json").write_text(json.dumps({"state": "done"}))
     wapi.jobs.poll()
     wapi.jobs.poll()
-    err = next(j for j in wapi.jobs.list() if j["job_id"] == jid)["error"]
-    assert "восстановите этот архив ещё раз" in err
+    job = next(j for j in wapi.jobs.list() if j["job_id"] == jid)
+    assert advice in job["error"] and job["state"] == "failed"  # the badge shows «failed»
 
 
 def test_get_state_does_not_start_jobs(wapi):

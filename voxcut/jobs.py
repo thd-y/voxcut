@@ -176,7 +176,8 @@ class Jobs:
                 try:
                     self.on_done(self._view(job_id))
                 except Exception as exc:  # noqa: BLE001 - one bad hook must not stall the queue
-                    self._set_status(job_id, "done", error=f"после завершения: {exc}")
+                    self._set_status(job_id, "failed", error=f"после завершения: {exc}")
+                    rec["state"] = "failed"  # the badge flags it; the job's work is only partly in
                 finally:
                     marker.touch()
         if self._queue and not any(r["state"] == "running" for r in self._jobs.values()):

@@ -226,6 +226,8 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
                                f"или файлы изменились); ничего не тронуто")
         chain = chains.index(files) + 1
     plan = audio.plan_session(str(src), chain, start)
+    if files is not None and [p.name for p in plan.files] != files:  # inbox changed in between
+        raise SessionError("входящие изменились во время импорта; ничего не тронуто, повторите")
     for p in plan.files:
         if p.is_symlink():  # os.rename would move the link, not the recording
             raise SessionError(f"{p.name}: ссылка, а не файл; положите во входящие сам файл "
@@ -376,7 +378,7 @@ def make_backup(lay: Layout, mode: str, now: datetime) -> str:
         if odd:
             raise RunError("full-бэкап отменён: записи вне originals/ или ссылки — "
                            + ", ".join(str(p.relative_to(lay.data)) for p in odd)
-                           + " (originals.tmp — незавершённый импорт, его доделывает «Обработать»)")
+                           + " (originals.tmp — незавершённый импорт, обычно его доделывает «Обработать»)")
     tmp = lay.backups / (name + ".tmp")
     files: dict[str, str] = {}
     try:
