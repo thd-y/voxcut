@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 
 import numpy as np
@@ -78,6 +79,25 @@ def test_changed_source_refused(tmp_path):
     with pytest.raises(RunError, match="sha256"):
         export_clips(seg)
     assert not (seg / "clips").exists()
+
+
+def test_source_override_used_and_sha_checked(tmp_path):
+    """D64: the library passes its own session WAV; sha256 is still checked against run.json."""
+    src = make_source(tmp_path / "s.wav", "PCM_16")
+    seg = make_seg_dir(tmp_path, src, [(0, 1000)])
+    moved = tmp_path / "elsewhere.wav"
+    os.replace(src, moved)
+    clips = export_clips(str(seg), source=str(moved))
+    row = json.loads((clips / "manifest.jsonl").read_text())
+    whole, _ = sf.read(moved, dtype="int16", always_2d=True)
+    got, _ = sf.read(clips.parent / row["audio_path"], dtype="int16", always_2d=True)
+    assert np.array_equal(got, whole[0:1000])
+    (tmp_path / "b").mkdir()
+    seg2 = make_seg_dir(tmp_path / "b", str(moved), [(0, 100)])
+    other = make_source(tmp_path / "other.wav", "PCM_16", seed=1)
+    with pytest.raises(RunError, match="sha256"):
+        export_clips(str(seg2), source=other)
+    assert not (seg2 / "clips").exists()
 
 
 def test_orphan_tmp_removed_and_zero_intervals(tmp_path):

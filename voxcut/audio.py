@@ -444,8 +444,11 @@ _DTYPES = {"PCM_16": "int16", "PCM_24": "int32", "PCM_32": "int32", "FLOAT": "fl
            "DOUBLE": "float64"}
 
 
-def export_clips(seg_dir: str) -> Path:
+def export_clips(seg_dir: str, source: str | None = None) -> Path:
     """`export`: cut final intervals from the source into seg-dir/clips/ (D18, C7, D19).
+
+    `source` (D64): the library's own copy of the session WAV instead of run.json's absolute
+    path, which a restore into another root leaves stale; its sha256 is checked all the same.
 
     Blocks in the source's native dtype, so RSS does not grow with the clip length; clips keep
     the container, subtype and all channels of the source.
@@ -453,7 +456,7 @@ def export_clips(seg_dir: str) -> Path:
     seg_dir = Path(seg_dir)
     run = load_json(seg_dir / "run.json")
     rows = read_jsonl(seg_dir / "manifest.jsonl")
-    src = run["source"]["path"]
+    src = source or run["source"]["path"]
     dst = seg_dir / "clips"
     if dst.exists():
         raise RunError(f"{dst} уже существует: клипы не перезаписываются (D19)")

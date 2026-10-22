@@ -464,6 +464,24 @@ def test_process_light_refused(lay):
         process_session(lay, sid, lambda s: None, _quiet)
 
 
+def test_process_exports_from_own_session(lay, monkeypatch):
+    """D64: export reads this session's WAV, not the absolute path stored in run.json."""
+    sdir = lay.sessions / SID
+    sess = sdir / f"{SID}.session"
+    sess.mkdir(parents=True)
+    (sdir / "import.json").write_text(json.dumps({"start": None, "files": []}))
+    (sess / "session.json").write_text(json.dumps({"wav": "x.wav", "n_samples": 1, "sr": 1}))
+    (sess / "x.wav").write_bytes(b"RIFF")
+    seg = sdir / "x.c0.raw" / "seg-aaaaaaaa"
+    seg.mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(audio, "compute_probs", lambda src, out: sdir / "x.c0.raw")
+    monkeypatch.setattr("voxcut.library.segment", lambda pdir, cfg, meta: seg)
+    monkeypatch.setattr(audio, "export_clips", lambda *a, **k: calls.append((a, k)))
+    process_session(lay, SID, lambda s: None, _quiet)
+    assert calls == [((str(seg), str(sess / "x.wav")), {})]
+
+
 @pytest.mark.parametrize("sid", ["../x", "2026-08-11_21-30_0h00m.00000000"])
 def test_process_unknown_session_refused(lay, sid):
     with pytest.raises(RunError, match="нет сессии"):

@@ -373,7 +373,7 @@ def process_session(lay: Layout, sid: str, stage, log) -> Path:
     seg = segment(str(pdir), *read_config(str(V1_CONFIG)))
     if not (seg / "clips").exists():
         stage("export")
-        audio.export_clips(str(seg))
+        audio.export_clips(str(seg), str(sess / meta["wav"]))  # D64
     return seg / "clips"
 
 
