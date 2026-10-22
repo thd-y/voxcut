@@ -11,10 +11,12 @@ from pathlib import Path
 from voxcut.jobs import JobError, ensure_slice, unit_argv
 from voxcut.ui.launch import ROOT, edge_argv, edge_path
 
-PROBE_BLOCKED = 3  # the probe's own exit code for «connection refused»: nothing else counts
-PROBE = ("import socket, sys\n"
+PROBE_BLOCKED = 3  # ENETUNREACH: an empty network namespace has no route at all
+PROBE_OTHER = 4  # any other network error (timeout, refused): proves nothing
+PROBE = ("import errno, socket, sys\n"
          "try:\n    socket.create_connection(('1.1.1.1', 53), 3)\n"
-         f"except OSError:\n    sys.exit({PROBE_BLOCKED})\n")
+         "except OSError as e:\n"
+         f"    sys.exit({PROBE_BLOCKED} if e.errno == errno.ENETUNREACH else {PROBE_OTHER})\n")
 
 
 def listeners(ss_text: str, pid: int) -> list[str]:
@@ -23,16 +25,36 @@ def listeners(ss_text: str, pid: int) -> list[str]:
             if re.search(rf"pid={pid},", line) and len(line.split()) > 3]
 
 
-def probe_verdict(rc: int | None) -> tuple[bool, str]:
-    """D63: PrivateNetwork=yes is proven only by the probe's refused code, not by any failure."""
+def probe_verdict(rc: int | None, control: int | None) -> tuple[bool, str]:
+    """D63: isolated only if the unit sees ENETUNREACH while the same unit without
+    PrivateNetwork reaches the network; an offline host or a unit that never ran proves nothing."""
     what = "задача-пробник в юните до 1.1.1.1:53"
     if rc == PROBE_BLOCKED:
-        return True, f"{what}: сеть отрезана"
+        if control == 0:
+            return True, f"{what}: сеть отрезана (без PrivateNetwork доходит)"
+        return False, (f"{what}: не проверено — без PrivateNetwork сети тоже нет "
+                       f"(код {control})")
+    if rc == PROBE_OTHER:
+        return False, f"{what}: другая ошибка сети, не ENETUNREACH — изоляция не проверена"
     if rc == 0:
         return False, f"{what}: есть сеть (PrivateNetwork не работает)"
     if rc is None:
         return False, f"{what}: таймаут, юнит не ответил"
     return False, f"{what}: пробник не запустился (код {rc}), изоляция не проверена"
+
+
+def run_probe(root: Path, isolated: bool) -> int | None:
+    """PROBE in a job unit; `isolated=False` is the same unit without PrivateNetwork=yes."""
+    argv = unit_argv(f"voxcut-envcheck-{uuid.uuid4().hex[:8]}", [sys.executable, "-c", PROBE],
+                     root)
+    if not isolated:
+        i = argv.index("PrivateNetwork=yes")
+        del argv[i - 1:i + 1]
+    try:
+        return subprocess.run([argv[0], "--wait", "--pipe", *argv[1:]], capture_output=True,
+                              text=True, timeout=60, check=False).returncode
+    except subprocess.TimeoutExpired:
+        return None
 
 
 def run_checks(root: Path) -> list[tuple[bool, str]]:
@@ -65,14 +87,7 @@ def run_checks(root: Path) -> list[tuple[bool, str]]:
     except JobError as exc:
         out.append((False, str(exc)))
 
-    argv = unit_argv(f"voxcut-envcheck-{uuid.uuid4().hex[:8]}", [sys.executable, "-c", PROBE],
-                     root)
-    try:
-        rc = subprocess.run([argv[0], "--wait", "--pipe", *argv[1:]], capture_output=True,
-                            text=True, timeout=60, check=False).returncode
-    except subprocess.TimeoutExpired:
-        rc = None
-    out.append(probe_verdict(rc))
+    out.append(probe_verdict(run_probe(root, True), run_probe(root, False)))
     return out
 
 

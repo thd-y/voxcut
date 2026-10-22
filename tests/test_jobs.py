@@ -229,20 +229,12 @@ def test_main_failure_recorded(lay):
 @pytest.mark.slow
 @pytest.mark.host
 def test_real_unit_no_network(lay):
+    from voxcut.ui.envcheck import PROBE_BLOCKED, run_probe
+
     ensure_slice(subprocess.run)
-    probe = [sys.executable, "-c", "import socket; socket.create_connection(('1.1.1.1', 53), 3)"]
-
-    def run_unit(argv):
-        return subprocess.run([argv[0], "--wait", "--pipe", *argv[1:]], capture_output=True,
-                              text=True, timeout=60, check=False).returncode
-
-    argv = unit_argv(f"voxcut-probe-{jid()[:8]}", probe, lay.root)
-    i = argv.index("PrivateNetwork=yes")
-    control = unit_argv(f"voxcut-probe-{jid()[:8]}", probe, lay.root)
-    del control[i - 1:i + 1]  # the same unit with the network left on
-    if run_unit(control) != 0:
+    if run_probe(lay.root, False) != 0:
         pytest.skip("сети нет и без PrivateNetwork: проба ничего не докажет")
-    assert run_unit(argv) != 0
+    assert run_probe(lay.root, True) == PROBE_BLOCKED  # ENETUNREACH, not any failure (D63)
 
 
 def test_server_side_modules_do_not_import_torch():

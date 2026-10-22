@@ -158,13 +158,36 @@ def test_closing_console_stops_server(tmp_path, edge):
     assert not (tmp_path / ".run" / "ui.json").exists()
 
 
-@pytest.mark.parametrize("rc, ok, text", [
-    (3, True, "сеть отрезана"), (0, False, "есть сеть"), (1, False, "пробник не запустился"),
-    (127, False, "пробник не запустился"), (None, False, "таймаут"),
+@pytest.mark.parametrize("rc, control, ok, text", [
+    (3, 0, True, "сеть отрезана"),
+    (3, 3, False, "не проверено"), (3, 1, False, "не проверено"), (3, None, False, "не проверено"),
+    (0, 0, False, "есть сеть"), (4, 0, False, "другая ошибка"),
+    (1, 0, False, "пробник не запустился"), (127, 0, False, "пробник не запустился"),
+    (None, 0, False, "таймаут"),
 ])
-def test_envcheck_probe_verdict(rc, ok, text):
-    """Only the probe's own «refused» code counts: a unit that never ran proves nothing (D63)."""
+def test_envcheck_probe_verdict(rc, control, ok, text):
+    """D63: isolated only if the unit sees ENETUNREACH and the same unit without
+    PrivateNetwork reaches the network: an offline host or a dead unit proves nothing."""
     from voxcut.ui.envcheck import probe_verdict
 
-    got_ok, got_text = probe_verdict(rc)
+    got_ok, got_text = probe_verdict(rc, control)
     assert got_ok is ok and text in got_text
+
+
+@pytest.mark.parametrize("exc, code", [
+    (OSError(101, "Network is unreachable"), 3),  # ENETUNREACH: empty namespace
+    (TimeoutError("timed out"), 4),  # an offline host or a firewall, not isolation
+    (ConnectionRefusedError(111, "refused"), 4),
+])
+def test_envcheck_probe_exit_codes(monkeypatch, exc, code):
+    import socket
+
+    from voxcut.ui.envcheck import PROBE
+
+    def connect(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    with pytest.raises(SystemExit) as e:
+        exec(PROBE, {})  # noqa: S102 - our own constant, the same code `python -c` runs
+    assert e.value.code == code
