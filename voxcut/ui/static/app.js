@@ -251,6 +251,24 @@ function applyTheme() {
   if (view) drawTimeline();
 }
 
+// D62: canonical launch window, shrunk to 90% of a small screen, centred on its work area.
+const WINDOW_W = 1280, WINDOW_H = 800, WINDOW_MAX = 0.9;
+function launchRect(avail) {
+  const width = Math.min(WINDOW_W, Math.round(avail.width * WINDOW_MAX));
+  const height = Math.min(WINDOW_H, Math.round(avail.height * WINDOW_MAX));
+  return { width, height, left: avail.left + Math.round((avail.width - width) / 2),
+    top: avail.top + Math.round((avail.height - height) / 2) };
+}
+
+function fitWindow() {  // once, on a fresh launch code; Edge ignores --window-size when already running
+  const r = launchRect({ width: screen.availWidth, height: screen.availHeight,
+    left: screen.availLeft, top: screen.availTop });
+  try {
+    resizeTo(r.width, r.height);
+    moveTo(r.left, r.top);
+  } catch {}  // a window Edge will not move is not an error
+}
+
 async function start() {
   darkQuery = matchMedia("(prefers-color-scheme: dark)");
   applyTheme();
@@ -266,6 +284,7 @@ async function start() {
     });
     if (!r.ok) throw new Error();
     KEY = (await r.json()).key;
+    fitWindow();
   } catch {
     ui.fatal = true;
     render();
@@ -1382,7 +1401,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction };
+    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect };
 } else {
   start();
 }

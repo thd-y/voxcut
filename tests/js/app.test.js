@@ -180,3 +180,14 @@ test("keyAction", () => {
     assert.equal(app.keyAction(e, { ...ctx, ...c }), want, JSON.stringify([ev, c]));
   }
 });
+
+test("launchRect", () => {
+  assert.deepEqual(app.launchRect({ width: 2560, height: 1392, left: 0, top: 0 }),
+    { width: 1280, height: 800, left: 640, top: 296 });  // D62, probe 2026-10-22
+  assert.deepEqual(app.launchRect({ width: 1093, height: 574, left: 0, top: 0 }),
+    { width: 984, height: 517, left: 55, top: 29 });  // 1366×768 at 125%
+  assert.deepEqual(app.launchRect({ width: 1920, height: 1040, left: -1920, top: 0 }),
+    { width: 1280, height: 800, left: -1600, top: 120 });  // second monitor on the left
+  const r = app.launchRect({ width: 1001, height: 701, left: 0, top: 0 });
+  assert.ok(Object.values(r).every(Number.isInteger));
+});
