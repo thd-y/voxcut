@@ -106,7 +106,7 @@ def _session_row(lay: Layout, sdir: Path) -> dict:
         "session_id": sid,
         "name": sid.rsplit(".", 1)[0],
         "state": state,
-        "can_process": pending or (state != "incomplete"
+        "can_process": (pending and any(sdir.glob("originals*/*"))) or (state != "incomplete"
                                    and ((sdir / "originals").is_dir() or wav)),
         "duration_s": meta["n_samples"] / meta["sr"] if meta else None,
         "n_clips": len(read_jsonl(runs[0]["seg_dir"] / "clips" / "manifest.jsonl"))
@@ -258,8 +258,13 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
     })
     tmp = sdir / "originals.tmp"
     tmp.mkdir()
-    for p in plan.files:
-        os.rename(p, tmp / p.name)
+    moved = []
+    try:
+        for p in plan.files:
+            os.rename(p, tmp / p.name)
+            moved.append(p)
+    except OSError as exc:  # SIGTERM (SystemExit) is not rolled back: «Обработать» finishes it
+        _rollback_import(sdir, moved, p, exc)
     os.replace(tmp, sdir / "originals")
     finish_import(lay, plan.session_id, log)
     if source:  # D50: only an empty source folder goes; inbox/ itself and any file stay
@@ -274,6 +279,26 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
                 log(f"в inbox/{source}/ остались файлы: {', '.join(names)}; "
                     f"папка скрыта, удалите вручную")
     return {"session_id": plan.session_id, "existing": False}
+
+
+def _rollback_import(sdir: Path, moved: list[Path], failed: Path, exc: OSError) -> None:
+    """Move the files back to inbox/; drop our own session dir only if all of them made it."""
+    tmp = sdir / "originals.tmp"
+    stuck = []
+    for p in reversed(moved):
+        try:
+            os.rename(tmp / p.name, p)
+        except OSError:
+            stuck.append(p.name)
+    if stuck:
+        raise SessionError(f"{failed.name}: перенос не удался ({exc}); вернуть не удалось: "
+                           f"{', '.join(sorted(stuck))} — они в {tmp}, не удаляйте их: это "
+                           f"единственные копии; остальные файлы во входящих") from exc
+    tmp.rmdir()
+    (sdir / "import.pending.json").unlink()
+    sdir.rmdir()
+    raise SessionError(f"{failed.name}: перенос не удался ({exc}); файлы во входящих, "
+                       f"ничего не тронуто") from exc
 
 
 def finish_import(lay: Layout, sid: str, log) -> None:
@@ -291,6 +316,9 @@ def finish_import(lay: Layout, sid: str, log) -> None:
         raise SessionError(f"{sid}: есть и originals, и originals.tmp; файлы записи внутри, "
                            f"не удаляйте их, нужна ручная проверка")
     before = {f["name"]: f["sha256"] for f in meta["files"]}
+    if not any((sdir / d / n).is_file() for d in ("originals", "originals.tmp") for n in before):
+        raise SessionError(f"{sid}: файлов записи нет в originals: они во входящих или не "
+                           f"восстановлены из бэкапа; ничего не тронуто")
     after = {}
     for name in before:
         p = sdir / "originals" / name
