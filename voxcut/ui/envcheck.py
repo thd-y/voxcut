@@ -11,13 +11,28 @@ from pathlib import Path
 from voxcut.jobs import JobError, ensure_slice, unit_argv
 from voxcut.ui.launch import ROOT, edge_argv, edge_path
 
-PROBE = "import socket; socket.create_connection(('1.1.1.1', 53), 3)"
+PROBE_BLOCKED = 3  # the probe's own exit code for «connection refused»: nothing else counts
+PROBE = ("import socket, sys\n"
+         "try:\n    socket.create_connection(('1.1.1.1', 53), 3)\n"
+         f"except OSError:\n    sys.exit({PROBE_BLOCKED})\n")
 
 
 def listeners(ss_text: str, pid: int) -> list[str]:
     """Local addresses that `ss -ltnpH` shows for this pid."""
     return [line.split()[3] for line in ss_text.splitlines()
             if re.search(rf"pid={pid},", line) and len(line.split()) > 3]
+
+
+def probe_verdict(rc: int | None) -> tuple[bool, str]:
+    """D63: PrivateNetwork=yes is proven only by the probe's refused code, not by any failure."""
+    what = "задача-пробник в юните до 1.1.1.1:53"
+    if rc == PROBE_BLOCKED:
+        return True, f"{what}: сеть отрезана"
+    if rc == 0:
+        return False, f"{what}: есть сеть (PrivateNetwork не работает)"
+    if rc is None:
+        return False, f"{what}: таймаут, юнит не ответил"
+    return False, f"{what}: пробник не запустился (код {rc}), изоляция не проверена"
 
 
 def run_checks(root: Path) -> list[tuple[bool, str]]:
@@ -52,9 +67,12 @@ def run_checks(root: Path) -> list[tuple[bool, str]]:
 
     argv = unit_argv(f"voxcut-envcheck-{uuid.uuid4().hex[:8]}", [sys.executable, "-c", PROBE],
                      root)
-    rc = subprocess.run([argv[0], "--wait", "--pipe", *argv[1:]], capture_output=True,
-                        text=True, timeout=60, check=False).returncode
-    out.append((rc != 0, f"задача-пробник в юните до 1.1.1.1:53: код {rc} (нужен не 0)"))
+    try:
+        rc = subprocess.run([argv[0], "--wait", "--pipe", *argv[1:]], capture_output=True,
+                            text=True, timeout=60, check=False).returncode
+    except subprocess.TimeoutExpired:
+        rc = None
+    out.append(probe_verdict(rc))
     return out
 
 

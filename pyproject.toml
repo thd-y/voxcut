@@ -29,7 +29,10 @@ packages = ["voxcut", "voxcut.ui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: требует ffmpeg/torch; не входит в make check"]
+markers = [
+    "slow: требует ffmpeg/torch; не входит в make check",
+    "host: запускает настоящие юниты systemd --user; вне CI (D63)",
+]
 
 [tool.ruff]
 line-length = 100

@@ -227,6 +227,7 @@ def test_main_failure_recorded(lay):
 
 
 @pytest.mark.slow
+@pytest.mark.host
 def test_real_unit_no_network(lay):
     ensure_slice(subprocess.run)
     probe = [sys.executable, "-c", "import socket; socket.create_connection(('1.1.1.1', 53), 3)"]

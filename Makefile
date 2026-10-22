@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 TORCH_CPU := https://download.pytorch.org/whl/cpu
 
-.PHONY: setup check lint test test-slow ui ui-envcheck
+.PHONY: setup check lint test test-ci test-slow ui ui-envcheck
 
 setup:
 	python3 -m venv .venv
@@ -22,6 +22,10 @@ test-slow:
 
 test:
 	$(PY) -m pytest -q; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ]
+
+# CI (D63): всё, кроме тестов с настоящими юнитами systemd --user.
+test-ci:
+	$(PY) -m pytest -q -m "not host"; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ]
 
 # Интерфейс (U1): один сервер на продукт, окно Edge InPrivate; повторный запуск открывает ещё окно.
 ui:

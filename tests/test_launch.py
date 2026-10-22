@@ -156,3 +156,15 @@ def test_closing_console_stops_server(tmp_path, edge):
     th.join(10)
     assert done == [0]
     assert not (tmp_path / ".run" / "ui.json").exists()
+
+
+@pytest.mark.parametrize("rc, ok, text", [
+    (3, True, "сеть отрезана"), (0, False, "есть сеть"), (1, False, "пробник не запустился"),
+    (127, False, "пробник не запустился"), (None, False, "таймаут"),
+])
+def test_envcheck_probe_verdict(rc, ok, text):
+    """Only the probe's own «refused» code counts: a unit that never ran proves nothing (D63)."""
+    from voxcut.ui.envcheck import probe_verdict
+
+    got_ok, got_text = probe_verdict(rc)
+    assert got_ok is ok and text in got_text
