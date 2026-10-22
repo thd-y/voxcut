@@ -285,15 +285,19 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
         _rollback_import(sdir, moved, p, exc)
     os.replace(tmp, sdir / "originals")
     finish_import(lay, plan.session_id, log)
-    _drop_empty_source(lay, source, log)
-    return {"session_id": plan.session_id, "existing": False}
+    return {"session_id": plan.session_id, "existing": False}  # finish_import dropped the source
 
 
 def _drop_empty_source(lay: Layout, source: str, log) -> None:
-    """D50: only an empty source folder goes; inbox/ itself and any file stay."""
-    if not source:
+    """D50: only an empty source folder goes; inbox/ itself and any file stay.
+
+    `source` may come from a restored import.pending.json: only a plain, visible folder name."""
+    if not isinstance(source, str) or not source or Path(source).name != source \
+            or source.startswith("."):
         return
     src = lay.inbox / source
+    if src.is_symlink() or not src.is_dir():
+        return
     try:
         os.rmdir(src)
     except OSError:
@@ -396,8 +400,7 @@ def finish_import(lay: Layout, sid: str, log) -> None:
         "imported_at": datetime.now().astimezone().isoformat(timespec="seconds")})
     pending.unlink()  # our own bookkeeping file; import.json now holds the same facts
     log(f"импортировано {len(before)} файлов: сессия {sid}")
-    if incoming:  # files came from inbox/: its source passed _source_names in _pending_files
-        _drop_empty_source(lay, meta["source"], log)
+    _drop_empty_source(lay, meta.get("source"), log)  # also after a retry that moved nothing
 
 
 V1_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "v1.toml"  # U8: the only config
