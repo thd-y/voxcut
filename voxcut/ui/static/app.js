@@ -338,7 +338,7 @@ async function pollOnce() {
   if (auto) {
     autoTried = auto;
     await openSession(auto).catch((e) => {
-      ui.openError = e.message;  // an empty screen with the reason, not an endless skeleton
+      if (e.offline) autoTried = null;  // the link came back: the next poll tries again
       fail(e);
     });
   } else if (sid !== null && view && !runId) {
@@ -371,7 +371,17 @@ async function openSession(id, run) {
     ui.loaded = false;
     render();
   }
-  const v = await api("GET", sessionPath(id, run));
+  let v;
+  try {
+    v = await api("GET", sessionPath(id, run));
+  } catch (e) {
+    if (seq === openSeq) {
+      if (view) ui.loaded = true;  // the open session stays on screen
+      else ui.openError = e.message;  // an empty screen with the reason, not an endless skeleton
+      render();
+    }
+    throw e;
+  }
   if (seq !== openSeq) return;
   const changed = id !== sid || (run || null) !== runId;
   sid = id;
