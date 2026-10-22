@@ -552,10 +552,17 @@ def list_chains(src_dir: str) -> list[list[str]]:
     return [[wavs[i].name for i in c] for c in chains]
 
 
-def plan_session(src_dir: str, chain: int | None = None, start: str | None = None) -> SessionPlan:
+def plan_chains(src_dir: str) -> list[SessionPlan]:
+    """A plan per chain from one header pass (the UI polls the inbox)."""
+    inv = _inventory(src_dir)
+    return [plan_session(src_dir, n, inventory=inv) for n in range(1, len(inv[3]) + 1)]
+
+
+def plan_session(src_dir: str, chain: int | None = None, start: str | None = None,
+                 inventory=None) -> SessionPlan:
     """Everything assemble_session refuses before the first decode; reads headers only."""
     real_start = parse_start(start) if start is not None else None
-    wavs, infos, parts, chains = _inventory(src_dir)
+    wavs, infos, parts, chains = inventory or _inventory(src_dir)
     idx = pick_chain(chains, chain, [p.name for p in wavs])
     files = [wavs[i] for i in idx]
     infos = [infos[i] for i in idx]

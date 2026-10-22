@@ -184,11 +184,10 @@ def inbox_inventory(lay: Layout) -> dict:
         src = str(lay.inbox / source)
         entry = {"source": source, "chains": [], "error": None}
         try:
-            for n, files in enumerate(audio.list_chains(src), 1):
-                plan = audio.plan_session(src, n)
+            for n, plan in enumerate(audio.plan_chains(src), 1):
                 entry["chains"].append({
                     "chain": n,
-                    "files": files,
+                    "files": [p.name for p in plan.files],
                     "start_local": plan.real_start.isoformat(),
                     "duration_s": plan.n_total / plan.sr,
                     "session_id": plan.session_id,

@@ -27,6 +27,9 @@ class JobError(RuntimeError):
     pass
 
 
+LIST_MAX = 20  # (агент) jobs shown in /api/state; older finished ones stay on disk
+
+
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -216,8 +219,11 @@ class Jobs:
             return [self._view(j) for j in self._jobs]
 
     def list(self) -> list[dict]:
+        """Every queued or running job plus the newest finished ones; .run/jobs/ itself only grows."""
         with self._lock:
-            return [self._view(j) for j in self._jobs]
+            ids = list(self._jobs)
+            return [self._view(j) for n, j in enumerate(ids) if n >= len(ids) - LIST_MAX
+                    or self._jobs[j]["state"] in ("queued", "running")]
 
     def _view(self, job_id: str) -> dict:
         rec, d = self._jobs[job_id], self.lay.jobs / job_id

@@ -6,7 +6,7 @@ import uuid
 import pytest
 
 from voxcut import jobs
-from voxcut.jobs import JobError, Jobs, ensure_slice, unit_argv, validate
+from voxcut.jobs import LIST_MAX, JobError, Jobs, ensure_slice, unit_argv, validate
 from voxcut.library import Layout
 
 SID = "2026-08-11_21-30_4h16m.0badface"
@@ -45,6 +45,31 @@ def jid():
 def finish(lay, job_id, state="done"):
     (lay.jobs / job_id / "status.json").write_text(json.dumps({"state": state, "stage": None,
                                                                "error": None}))
+
+
+def test_list_keeps_last_finished_and_every_active(lay):
+    """Review #6: /api/state polls this every 2 s; .run/jobs/ only grows."""
+    run = FakeRun()
+    j = Jobs(lay, run=run)
+    ids = [jid() for _ in range(LIST_MAX + 5)]
+    for i in ids:
+        j.submit(i, "backup", {"mode": "light"})
+        finish(lay, i)
+        j.poll()
+    late = jid()
+    j.submit(late, "backup", {"mode": "light"})
+    view = [v["job_id"] for v in Jobs(lay, run=run).list()]  # also after a server restart
+    assert view == ids[-(LIST_MAX - 1):] + [late]
+
+
+def test_list_never_hides_running_job(lay):
+    j = Jobs(lay, run=FakeRun())
+    running = jid()
+    j.submit(running, "backup", {"mode": "light"})
+    for _ in range(LIST_MAX):
+        j.submit(jid(), "backup", {"mode": "light"})  # queued behind it
+    view = j.list()
+    assert len(view) == LIST_MAX + 1 and view[0]["job_id"] == running
 
 
 def test_unit_argv_exact(tmp_path):

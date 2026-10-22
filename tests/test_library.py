@@ -407,6 +407,18 @@ def test_inventory_two_chains_and_backup(lay):
     assert s1["chains"][0]["duration_s"] == 4.0 and not s1["chains"][0]["imported"]
 
 
+def test_inventory_reads_headers_once_per_source(lay, monkeypatch):
+    """Review #6: /api/state polls the inbox every 2 s; one header pass per folder."""
+    make_folder(lay.inbox / "folder01", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    calls = []
+    real = audio._inventory
+    monkeypatch.setattr(audio, "_inventory", lambda src: calls.append(src) or real(src))
+    chains = inbox_inventory(lay)["sources"][0]["chains"]
+    assert [c["files"] for c in chains] == [
+        ["20250301082921.WAV", "20250301082924.WAV"], ["20250301102921.WAV"]]
+    assert len(calls) == 1
+
+
 @pytest.mark.slow
 def test_import_real_check_source(lay):
     paths = make_folder(lay.inbox, chain_starts(2))
