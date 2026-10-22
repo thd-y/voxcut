@@ -25,7 +25,7 @@ dev = ["pytest", "ruff"]
 packages = ["voxcut", "voxcut.ui"]
 
 [tool.setuptools.package-data]
-"voxcut.ui" = ["static/*"]
+"voxcut.ui" = ["static/*", "static/vendor/*", "static/img/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

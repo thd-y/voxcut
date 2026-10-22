@@ -100,3 +100,19 @@ def test_no_translate_prompt():
     text = (STATIC_DIR / "index.html").read_text()
     assert '<html lang="ru" translate="no">' in text
     assert '<meta name="google" content="notranslate">' in text
+
+
+def test_package_data_covers_static():
+    """A wheel ships every file the server serves: `static/*` alone skips vendor/ and img/."""
+    import glob
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    patterns = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["setuptools"][
+        "package-data"]["voxcut.ui"]
+    pkg = STATIC_DIR.parent
+    shipped = {Path(f).resolve() for pat in patterns
+               for f in glob.glob(str(pkg / pat), recursive=True) if Path(f).is_file()}
+    served = {(STATIC_DIR / name).resolve() for name, _ in STATIC.values()}
+    assert served <= shipped, sorted(str(p) for p in served - shipped)

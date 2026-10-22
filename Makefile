@@ -14,7 +14,7 @@ lint:
 # Определение готовности любой задачи. pytest exit 5 = «тестов ещё нет», это не ошибка.
 check: lint
 	$(PY) -m pytest -q -m "not slow"; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ]
-	@if command -v node >/dev/null 2>&1; then node --test 'tests/js/*.test.js'; \
+	@if command -v node >/dev/null 2>&1; then node --test tests/js/*.test.js; \
 	else echo "ВНИМАНИЕ: node не найден, JS-тесты пропущены (D48)"; fi
 
 test-slow:
