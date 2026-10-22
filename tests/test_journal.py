@@ -123,8 +123,23 @@ def test_marks_survive_recut(tmp_path):
     assert clip_view(events, "s1", 5.0, 12.0)["marks"] == ["моё"]
     assert clip_view(events, "s1", 18.0, 30.0)["marks"] == ["моё"]
     assert clip_view(events, "s1", 18.0, 30.0)["notes"][0]["value"] == "заметка"
-    assert clip_view(events, "s1", 20.0, 25.0) == {"marks": [], "notes": [], "heard": False}
+    assert clip_view(events, "s1", 20.0, 25.0) == {"marks": [], "notes": [], "heard": False,
+                                                   "own_mark": ""}
     assert clip_view(events, "s2", 5.0, 12.0)["marks"] == []
+
+
+def test_own_mark_and_note(tmp_path):
+    j = Journal(tmp_path / "j.jsonl")
+    j.append(ev(value="моё"))
+    j.append(ev(kind="note", value="своя"))
+    j.append(ev(value="вокал", start=12.0, end=18.0))
+    j.append(ev(kind="note", value="чужая", start=12.0, end=18.0))
+    v = clip_view(j.events(), "s1", 10.0, 20.0)
+    assert sorted(v["marks"]) == ["вокал", "моё"] and v["own_mark"] == "моё"
+    assert {n["value"]: n["own"] for n in v["notes"]} == {"своя": True, "чужая": False}
+    assert clip_view(j.events(), "s1", 12.0, 18.0)["own_mark"] == "вокал"
+    j.append(ev(value=""))
+    assert clip_view(j.events(), "s1", 10.0, 20.0)["own_mark"] == ""
 
 
 def test_heard_half_coverage(tmp_path):

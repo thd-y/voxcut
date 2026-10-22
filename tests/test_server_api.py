@@ -88,7 +88,7 @@ def test_session_view(api):
         "run_id", "name", "created"}
     c0 = v["clips"][0]
     assert set(c0) == {"clip_id", "n", "start_s", "end_s", "start_local", "duration_s",
-                       "p_max", "marks", "notes", "heard"}
+                       "p_max", "marks", "notes", "heard", "own_mark"}
     assert "secret" not in json.dumps(v)  # no paths reach the client
     assert session(api, query=f"?run={v['run_id']}") == v
     assert get(api, f"/api/session/{SID}?run=ffffffffffff")[0] == 404

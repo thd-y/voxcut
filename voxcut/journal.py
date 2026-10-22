@@ -185,16 +185,19 @@ def clip_view(events: list[dict], session_id: str, start_s: float, end_s: float)
         else:
             last[(e["start_s"], e["end_s"], e["kind"])] = e
     marks = [e["value"] for k, e in last.items() if k[2] == "mark" and e["value"]]
+    own = (start_s, end_s)  # D47: the server writes a clip's own span from its clip table
     notes = [
-        {"event_id": e["event_id"], "value": e["value"]}
+        {"event_id": e["event_id"], "value": e["value"], "own": k[:2] == own}
         for k, e in last.items()
         if k[2] == "note" and e["value"]
     ]
+    own_mark = last.get((*own, "mark"), {}).get("value", "")
     covered = total(intersect(union(heard), [(start_s, end_s)]))
     return {
         "marks": list(dict.fromkeys(marks)),
         "notes": notes,
         "heard": covered >= 0.5 * (end_s - start_s),
+        "own_mark": own_mark,
     }
 
 
