@@ -371,6 +371,7 @@ async function reloadView() {
 function keepSelection() {
   if (ui.selectedId && !view.clips.some((c) => c.clip_id === ui.selectedId)) {
     closeNote();
+    ui.rechoose = null;  // a question about a clip that is gone must not apply to the next one
     ui.selectedId = null;  // the clip is not in this run
     stopAudio();
   }
@@ -988,6 +989,7 @@ function decide(value) {
   const entry = undoEntry(clip);  // before setMark: it records the previous own decision
   ui.undo.push(entry);
   $("player").pause();
+  ui.playWhenReady = false;  // D53: a decided clip still loading must not start later
   const list = shown();
   const pos = list.indexOf(clip);
   setMark(clip, value).catch(() => {
