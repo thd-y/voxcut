@@ -405,10 +405,10 @@ class Handler(BaseHTTPRequestHandler):
     def _read_body(self) -> dict:
         if self.headers.get("Transfer-Encoding"):
             raise HttpError(400, "нужен Content-Length")
-        try:
-            n = int(self.headers.get("Content-Length", ""))
-        except ValueError:
-            raise HttpError(400, "нужен Content-Length") from None
+        raw = self.headers.get("Content-Length", "")
+        if not (raw.isascii() and raw.isdigit()):  # int() takes "-1", "+5", "5_0"
+            raise HttpError(400, "нужен Content-Length")
+        n = int(raw)
         if n > BODY_MAX:
             if n <= DRAIN_MAX:  # read it away so the client sees 413, not a reset connection
                 self.rfile.read(n)

@@ -198,6 +198,20 @@ def test_body_limit_413(served):
     assert c.req("POST", "/api/exchange", b'{"code": "' + b"a" * 1000 + b'"}')[0] == 403
 
 
+@pytest.mark.parametrize("length", ["-1", "+5", "5_0", "٥", "5 5", ""])
+def test_bad_content_length_400(served, length):
+    """Only a plain decimal is a length: int() takes -1 and read(-1) reads without a limit.
+
+    Whitespace after the colon is legal HTTP and is stripped by the parser, so " 5" is 5."""
+    c, _ = served
+    head = (f"POST /api/exchange HTTP/1.1\r\nHost: 127.0.0.1:{c.port}\r\n"
+            f"Origin: {c.origin}\r\nSec-Fetch-Site: same-origin\r\n"
+            f"Content-Type: application/json\r\nContent-Length: {length}\r\n\r\n")
+    with socket.create_connection(("127.0.0.1", c.port), timeout=2) as s:
+        s.sendall(head.encode())  # no body, the connection stays open
+        assert s.recv(64).split(b" ")[1] == b"400"
+
+
 def test_get_never_mutates(served):
     c, _ = served
     code = c.app.new_launch_code()
