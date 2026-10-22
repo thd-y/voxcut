@@ -132,6 +132,7 @@ let queue = Promise.resolve();  // journal writes in key-press order
 let audioCtl = null;       // AbortController of the clip fetch in flight
 let audioUrl = null;       // object URL of the clip in the player
 let playingId = null;      // clip_id whose audio is in the player
+let writes = 0;            // journal writes started; a reload sent before the latest one is stale
 let listSig = "";
 let scrolledId = null;
 const shownWarnings = new Set();
@@ -246,14 +247,20 @@ async function poll() {
   if (polling || ui.fatal) return;  // a slow response must not stack polls (each would restart openSession)
   polling = true;
   try {
+    await pollOnce();
+  } finally {
+    polling = false;  // only after the session load too: a 2 s+ GET must not be restarted by the next poll
+  }
+}
+
+async function pollOnce() {
+  try {
     serverState = await api("GET", "/api/state");
     $("conn-alert").hidden = true;
   } catch (e) {
     if (e.offline) $("conn-alert").hidden = false;
     else if (!ui.fatal) toast("Ошибка", e.message, true);
     return;
-  } finally {
-    polling = false;
   }
   for (const w of serverState.journal_warnings) {
     if (!shownWarnings.has(w)) {
@@ -322,8 +329,10 @@ async function openSession(id, run) {
 async function reloadView() {
   if (!sid || ui.pending.size) return;
   const seq = openSeq;  // not bumped: a reload must never cancel a newer openSession
+  const w = writes;
   const v = await api("GET", sessionPath(sid, runId));
-  if (seq !== openSeq || ui.pending.size || !ui.loaded) return;
+  // a write started after this GET was sent: the view is older than the screen; that write reloads again
+  if (seq !== openSeq || w !== writes || ui.pending.size || !ui.loaded) return;
   view = v;
   keepSelection();
   render();
@@ -890,6 +899,7 @@ function step(delta) {
 }
 
 function journal(kind, value, clip) {
+  writes++;
   const body = { event_id: newId(), kind, value };
   if (clip) body.clip_id = clip.clip_id;
   const p = queue.then(async () => {
