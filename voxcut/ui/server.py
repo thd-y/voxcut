@@ -275,8 +275,12 @@ class App:
             eid = hashlib.sha256((job["job_id"] + "backup").encode()).hexdigest()[:32]
             self.journal.append({"event_id": eid, "kind": "backup", "value": job["result"]})
         elif job["kind"] == "restore":
-            events, _ = jr.load(self.lay.jobs / job["job_id"] / "journal.jsonl")
-            self.journal.merge(events)
+            try:
+                events, _ = jr.load(self.lay.jobs / job["job_id"] / "journal.jsonl")
+                self.journal.merge(events)
+            except Exception as exc:  # on_done runs once: a new restore job is the retry
+                raise RuntimeError(f"журнал из архива не слит ({exc}); файлы восстановлены, "
+                                   f"восстановите этот архив ещё раз, чтобы слить журнал") from exc
 
     def start_poller(self, interval: float = 2.0) -> threading.Event:
         """jobs.poll() off the request path: GET never starts anything (S4)."""
