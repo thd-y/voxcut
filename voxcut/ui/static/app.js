@@ -480,6 +480,7 @@ function renderSkeleton() {
   $("clip-list").replaceChildren(...Array.from({ length: 8 }, () => el("div", null, "skeleton skeleton-row")));
   $("clip-title").replaceChildren(el("div", null, "skeleton skeleton-title"));
   setKids($("clip-sub"), "", () => []);
+  $("clip-saving").hidden = true;
   $("summary").hidden = true;
   $("card-top").hidden = false;
   $("card-body").hidden = true;
@@ -653,6 +654,7 @@ function renderCard() {
   if (!clip) {
     $("clip-title").textContent = ui.tab === "mine" ? "Нет оставленных клипов" : "Клип не выбран";
     setKids($("clip-sub"), "", () => []);
+    $("clip-saving").hidden = true;
     $("note-view").replaceChildren();
     $("other-notes").replaceChildren();
     $("note-box").hidden = true;
@@ -662,10 +664,11 @@ function renderCard() {
   }
   const idx = view.clips.indexOf(clip);
   $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s)}`;
-  // aria-live: rewrite only on change, or every 2 s poll would be read out again
+  // aria-live: rewrite only on change, or every 2 s poll would be read out again;
+  // the save spinner sits outside the live region, so it never re-reads the same text
   const sub = `клип ${idx + 1} из ${view.clips.length} · ${statusText(clip)}`;
-  const saving = ui.pending.has(clip.clip_id);
-  setKids($("clip-sub"), JSON.stringify([sub, saving]), () => (saving ? [sub, " ", el("span", null, "spinner")] : [sub]));
+  setKids($("clip-sub"), sub, () => [sub]);
+  $("clip-saving").hidden = !ui.pending.has(clip.clip_id);
   const s = status(clip);
   for (const b of $("decisions").children) {
     const on = s.value === b.dataset.value && s.kind !== "conflict";
@@ -711,7 +714,8 @@ function renderPlayer() {
   $("bar").setAttribute("aria-valuenow", String(Math.round(pct)));
   const clip = selected();
   $("pos").textContent = clip ? `${fmtPos(t)} / ${fmtPos(dur || clip.duration_s)}` : "";
-  $("bar").setAttribute("aria-valuetext", clip ? `${fmtPos(t)} из ${fmtPos(dur || clip.duration_s)}` : "");
+  if (clip) $("bar").setAttribute("aria-valuetext", `${fmtPos(t)} из ${fmtPos(dur || clip.duration_s)}`);
+  else $("bar").removeAttribute("aria-valuetext");
   $("spinner").hidden = !(mine && ui.audio === "loading");
   $("play-icon").hidden = mine && !p.paused;
   $("pause-icon").hidden = !$("play-icon").hidden;
