@@ -19,13 +19,19 @@ LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mi
 LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt"}
 
 
-def static_files():
-    return sorted(p for p in STATIC_DIR.iterdir() if p.is_file())
+SVG_NS = 'xmlns="http://www.w3.org/2000/svg"'  # a standalone SVG needs it; not a request
 
 
-@pytest.mark.parametrize("path", static_files(), ids=lambda p: p.name)
+def static_files():  # our own files at any depth; vendor/ is pinned by sha256 instead
+    return sorted(p for p in STATIC_DIR.rglob("*")
+                  if p.is_file() and p.relative_to(STATIC_DIR).parts[0] != "vendor")
+
+
+@pytest.mark.parametrize("path", static_files(), ids=lambda p: p.relative_to(STATIC_DIR).as_posix())
 def test_static_rules(path):
     text = path.read_text()
+    if path.suffix == ".svg":
+        text = text.replace(SVG_NS, "")
     found = [w for w in FORBIDDEN if w in text]
     assert found == [], f"{path.name}: {found}"
     if path.suffix == ".html":
@@ -35,6 +41,15 @@ def test_static_rules(path):
         assert re.findall(r'<script[^>]*src="([^"]+)"', text) == ["/app.js"]
         assert re.findall(r'<link[^>]*href="([^"]+)"', text) == [
             "/vendor/basecoat-luma.css", "/app.css", "/favicon.svg"]
+
+
+def test_light_tokens_scoped():
+    # Audit 2026-10-22: light-only overrides; on plain :root they would also win over Basecoat's .dark
+    css = (STATIC_DIR / "app.css").read_text()
+    blocks = re.findall(r"([^{}]+)\{([^}]*)\}", css)
+    for token in ("--muted-foreground:", "--destructive:"):
+        where = [sel.strip().split("\n")[-1].strip() for sel, body in blocks if token in body]
+        assert where == [":root:not(.dark)"], (token, where)
 
 
 def test_static_table_covers_all_files():
