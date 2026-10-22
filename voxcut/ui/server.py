@@ -406,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Transfer-Encoding"):
             raise HttpError(400, "нужен Content-Length")
         raw = self.headers.get("Content-Length", "")
-        if not (raw.isascii() and raw.isdigit()):  # int() takes "-1", "+5", "5_0"
+        if not (raw.isascii() and raw.isdigit()) or len(raw) > 18:  # int() takes "-1", "5_0"
             raise HttpError(400, "нужен Content-Length")
         n = int(raw)
         if n > BODY_MAX:

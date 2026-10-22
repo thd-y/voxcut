@@ -198,7 +198,7 @@ def test_body_limit_413(served):
     assert c.req("POST", "/api/exchange", b'{"code": "' + b"a" * 1000 + b'"}')[0] == 403
 
 
-@pytest.mark.parametrize("length", ["-1", "+5", "5_0", "٥", "5 5", ""])
+@pytest.mark.parametrize("length", ["-1", "+5", "5_0", "٥", "5 5", "", "9" * 5000, "1" * 19])
 def test_bad_content_length_400(served, length):
     """Only a plain decimal is a length: int() takes -1 and read(-1) reads without a limit.
 
