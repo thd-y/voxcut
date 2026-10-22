@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 import uuid
 
 import pytest
@@ -191,6 +192,7 @@ def test_merge_keeps_ts_and_newer_local_wins(tmp_path):
     old.append(ev(value="моё"))
     old.append(ev(kind="backup", value="voxcut-backup_x_full.tar", sid=None))
     backup_events = old.events()
+    time.sleep(0.002)  # ts has millisecond resolution: the local correction must be newer
     j = Journal(tmp_path / "j.jsonl")
     j.append(ev(value="шум"))
     local_backup = j.append(ev(kind="backup", value="voxcut-backup_y_light.tar", sid=None))
