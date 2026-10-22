@@ -84,6 +84,8 @@ function gapBefore(clips, i, min = 30) {
   return gap >= min ? gap : null;
 }
 
+const gapLabel = (seconds) => `пауза ${fmtPos(seconds)}`;  // D54
+
 const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
 
 function undoTarget(stack, clips) {
@@ -95,19 +97,31 @@ function undoTarget(stack, clips) {
 const DECISIONS = [KEEP, ...REASONS];  // keys 1..5 (R2)
 
 // R10: physical keys (KeyboardEvent.code), the same in Russian and English layouts.
-function keyAction(ev, { inField, dialogOpen, screen }) {
+function keyAction(ev, { inField, dialogOpen, screen, rechoose = null }) {
   const { code } = ev;
   if (inField) {
     if (code === "Escape") return "escape";
     return dialogOpen && ev.ctrlKey && code === "Enter" ? "save-idea" : null;
+  }
+  const digit = /^(?:Digit|Numpad)([1-5])$/.exec(code);
+  const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  if (rechoose === "menu") {  // D52: the re-choice menu takes only 1-5 and Esc
+    if (code === "Escape") return "escape";
+    return digit && plain && !ev.repeat ? `pick:${DECISIONS[digit[1] - 1]}` : null;
+  }
+  if (rechoose) {  // D52: confirming «rechoose»; a held key never confirms
+    if (code === "Escape") return "cancel";
+    if (!plain || ev.repeat) return null;
+    if (code === "Enter") return "confirm";
+    if (digit) return DECISIONS[digit[1] - 1] === rechoose ? "confirm" : "cancel";
+    return null;
   }
   if (dialogOpen) return code === "Escape" ? "escape" : null;
   if (ev.ctrlKey || ev.altKey || ev.metaKey) {
     return ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey && code === "KeyZ" ? "undo" : null;
   }
   const work = screen !== "library";
-  const digit = /^(?:Digit|Numpad)([1-5])$/.exec(code);
-  if (digit) return work && !ev.repeat ? `mark:${DECISIONS[digit[1] - 1]}` : null;
+  if (digit) return screen === "review" && !ev.repeat ? `mark:${DECISIONS[digit[1] - 1]}` : null;
   if (code === "ArrowLeft" || code === "ArrowRight") {
     if (!work) return null;
     if (ev.shiftKey) return code === "ArrowLeft" ? "seek:-5" : "seek:5";
@@ -115,6 +129,7 @@ function keyAction(ev, { inField, dialogOpen, screen }) {
   }
   if (code === "Slash") return ev.shiftKey ? "help" : (screen === "mine" ? "search" : null);
   const simple = { Space: work && !ev.repeat && "play", KeyN: work && "note", KeyM: work && "tab",
+    KeyR: screen === "mine" && "rechoose",
     KeyI: "idea", KeyG: "library", Escape: "escape" };
   return (Object.hasOwn(simple, code) && simple[code]) || null;
 }
@@ -1220,7 +1235,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, undoEntry, undoTarget, DECISIONS, keyAction };
+    counts, nextUndecided, visibleClips, gapBefore, gapLabel, undoEntry, undoTarget, DECISIONS, keyAction };
 } else {
   start();
 }

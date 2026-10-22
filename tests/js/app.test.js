@@ -75,6 +75,10 @@ test("visibleClips", () => {
   assert.deepEqual(ids(app.visibleClips(cs, { tab: "mine", filter: "mine", query: "елка" })), ["b"]);
 });
 
+test("gapLabel", () => {
+  assert.equal(app.gapLabel(273), "пауза 4:33");
+});
+
 test("gapBefore", () => {
   const cs = [clip("a", [], "", [], 0, 10), clip("b", [], "", [], 39.9, 45), clip("c", [], "", [], 75, 80)];
   assert.equal(app.gapBefore(cs, 0), null);
@@ -94,7 +98,7 @@ test("undo", () => {
 });
 
 test("keyAction", () => {
-  const ctx = { inField: false, dialogOpen: false, screen: "review" };
+  const ctx = { inField: false, dialogOpen: false, screen: "review", rechoose: null };
   const cases = [
     [{ code: "Digit2" }, {}, "mark:вокал"],
     [{ code: "Digit1" }, {}, "mark:моё"],
@@ -131,6 +135,23 @@ test("keyAction", () => {
     [{ code: "KeyG" }, {}, "library"],
     [{ code: "Numpad5" }, {}, "mark:другое"],
     [{ code: "Digit6" }, {}, null],
+    // D52: re-choice in «Мои клипы»
+    [{ code: "KeyR" }, { screen: "mine" }, "rechoose"],
+    [{ code: "KeyR" }, {}, null],
+    [{ code: "KeyR" }, { screen: "library" }, null],
+    [{ code: "Digit3" }, { screen: "mine" }, null],
+    [{ code: "Digit3" }, { screen: "mine", rechoose: "menu" }, "pick:музыка"],
+    [{ code: "Numpad1" }, { screen: "mine", rechoose: "menu" }, "pick:моё"],
+    [{ code: "Digit3", repeat: true }, { screen: "mine", rechoose: "menu" }, null],
+    [{ code: "Escape" }, { screen: "mine", rechoose: "menu" }, "escape"],
+    [{ code: "KeyN" }, { screen: "mine", rechoose: "menu" }, null],
+    [{ code: "Enter" }, { screen: "mine", rechoose: "музыка" }, "confirm"],
+    [{ code: "Digit3" }, { screen: "mine", rechoose: "музыка" }, "confirm"],
+    [{ code: "Digit3", repeat: true }, { screen: "mine", rechoose: "музыка" }, null],
+    [{ code: "Digit4" }, { screen: "mine", rechoose: "музыка" }, "cancel"],
+    [{ code: "Escape" }, { screen: "mine", rechoose: "музыка" }, "cancel"],
+    [{ code: "KeyN" }, { screen: "mine", rechoose: "музыка" }, null],
+    [{ code: "KeyZ", ctrlKey: true }, { screen: "mine", rechoose: "музыка" }, null],
   ];
   for (const [ev, c, want] of cases) {
     const e = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, ...ev };
