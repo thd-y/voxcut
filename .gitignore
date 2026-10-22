@@ -28,3 +28,6 @@ inbox/
 backups/
 .run/
 
+# impeccable: локальное согласие на хук и кэш хука
+.impeccable/config.local.json
+.impeccable/hook.cache.json
