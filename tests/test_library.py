@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from test_session import T0, chain_starts, make_folder
@@ -650,6 +651,26 @@ def test_pending_session_blocks_reimport_of_rest(lay, no_check, monkeypatch):
         import_originals(lay, "", 1, None, _quiet)
     assert paths[1].exists() and paths[2].exists()
     assert len(list(lay.sessions.iterdir())) == 1
+
+
+@pytest.mark.parametrize("bad", ["../x.wav", "ABS", ".", ""])
+def test_pending_names_outside_refused(lay, no_check, monkeypatch, tmp_path, bad):
+    """A pending file may come from a backup: only plain file names are looked up (D65)."""
+    import shutil
+
+    paths = make_folder(lay.inbox, chain_starts(3))
+    _sigterm_mid_move(lay, monkeypatch)
+    sdir = next(lay.sessions.iterdir())
+    name = str(tmp_path / "abs.wav") if bad == "ABS" else bad
+    outside = Path(name) if bad == "ABS" else sdir / "x.wav"
+    shutil.copyfile(sdir / "originals.tmp" / paths[0].name, outside)  # the same sha256
+    meta = json.loads((sdir / "import.pending.json").read_text())
+    meta["files"][0]["name"] = name
+    (sdir / "import.pending.json").write_text(json.dumps(meta))
+    assert list_sessions(lay)[0]["can_process"] is False
+    with pytest.raises(SessionError):
+        finish_import(lay, sdir.name, _quiet)
+    assert outside.is_file()
 
 
 def test_rollback_never_overwrites_inbox(lay, no_check, monkeypatch):

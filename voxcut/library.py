@@ -329,6 +329,9 @@ def _pending_files(lay: Layout, sdir: Path, meta: dict) -> dict[str, Path | None
         dirs.append(lay.inbox / meta["source"])
     out = {}
     for f in meta["files"]:
+        if Path(f["name"]).name != f["name"] or f["name"] in ("", ".", ".."):
+            out[f["name"]] = None  # not a plain file name: never looked up outside these dirs
+            continue
         out[f["name"]] = next((d / f["name"] for d in dirs if (d / f["name"]).is_file()
                                and not (d / f["name"]).is_symlink()), None)
     return out
