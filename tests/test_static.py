@@ -58,7 +58,7 @@ def test_vendor_lucide_pinned():
 def test_icon_refs_exist_in_sprite():
     refs = set()
     for name in ("index.html", "app.js"):
-        refs |= set(re.findall(r"/vendor/lucide-sprite\.svg#([a-z-]+)",
+        refs |= set(re.findall(r"/vendor/lucide-sprite\.svg#([a-z0-9-]+)",
                                (STATIC_DIR / name).read_text()))
     assert refs and refs <= set(LUCIDE_ICONS)
 

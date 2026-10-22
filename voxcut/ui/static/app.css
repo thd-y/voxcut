@@ -93,11 +93,21 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 .lib-row:last-child { border-bottom: 0; }
 .lib-row .error { color: var(--destructive); white-space: pre-wrap; }
 .lib-row pre { white-space: pre-wrap; font-size: 12px; max-height: 160px; overflow: auto; margin: 0; }
-#ideas { margin: 0; padding: 0; list-style: none; }
-#ideas li { padding: 8px 0; }
-#ideas li + li { border-top: 1px solid var(--border); }
-#ideas time { display: block; font-size: 11px; color: var(--muted-foreground); }
-#ideas p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ideas { margin: 0; padding: 0; list-style: none; overflow-y: auto; flex: 1; min-height: 0; }
+.ideas li { padding: 8px 0; }
+.ideas li + li { border-top: 1px solid var(--border); }
+.ideas time { font-size: 11px; color: var(--muted-foreground); }
+.ideas p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.idea-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.idea-ask { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.idea-del { opacity: .4; transition: opacity .1s; }
+.idea-del:hover, .idea-del:focus-visible { opacity: 1; }
+/* D57: the ideas card never grows past the window; its list scrolls instead */
+.ideas-card { display: flex; flex-direction: column; max-height: calc(100dvh - 96px); min-width: 0; }
+.ideas-card > section { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* D58: the expanded window */
+.ideas-dialog > div { width: min(1100px, 96vw); max-width: none; height: 90vh; display: flex; flex-direction: column; }
+.ideas-dialog > div > section { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
 .dialog textarea { width: 100%; }
 .keys td { padding: 3px 8px 3px 0; vertical-align: top; }

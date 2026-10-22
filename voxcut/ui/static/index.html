@@ -126,9 +126,10 @@
       <button type="button" id="backup-light" class="btn" data-variant="outline"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#archive"></use></svg>Бэкап light</button>
     </section>
   </section>
-  <section class="card">
-    <header><h2><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#lightbulb"></use></svg>Идеи</h2><p>Новая идея — клавиша <kbd class="kbd">I</kbd> на любом экране.</p></header>
-    <section><ul id="ideas"></ul></section>
+  <section class="card ideas-card">
+    <header><h2><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#lightbulb"></use></svg>Идеи</h2><p>Новая идея — клавиша <kbd class="kbd">I</kbd> на любом экране.</p>
+      <div data-slot="card-action"><button type="button" id="ideas-expand" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Развернуть идеи" title="Развернуть"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#maximize-2"></use></svg></button></div></header>
+    <section><ul id="ideas" class="ideas"></ul></section>
   </section>
 </main>
 
@@ -145,6 +146,14 @@
       <button type="button" id="idea-cancel" class="btn" data-variant="outline">Закрыть</button>
       <button type="button" id="idea-save" class="btn">Записать</button>
     </footer>
+  </div>
+</dialog>
+
+<dialog id="ideas-dialog" class="dialog ideas-dialog" aria-labelledby="ideas-dialog-title">
+  <div>
+    <header><h2 id="ideas-dialog-title"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#lightbulb"></use></svg>Идеи</h2><p>Esc — закрыть.</p></header>
+    <section><ul id="ideas-full" class="ideas"></ul></section>
+    <footer><button type="button" id="ideas-close" class="btn" data-variant="outline">Закрыть</button></footer>
   </div>
 </dialog>
 
@@ -173,6 +182,7 @@
   </div>
 </dialog>
 
+<template id="icon-x"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#x"></use></svg></template>
 <template id="icon-check"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#check"></use></svg></template>
 <template id="icon-mic-vocal"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#mic-vocal"></use></svg></template>
 <template id="icon-music"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#music"></use></svg></template>

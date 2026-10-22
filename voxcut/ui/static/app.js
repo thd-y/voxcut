@@ -166,6 +166,7 @@ const ui = {
   loaded: false, audio: "idle", audioError: "", playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
   rechoose: null,  // D52: null | "menu" | the decision awaiting confirmation
+  ideaDelete: null, ideaDeleting: false,  // D56: the idea asked about, a delete in flight
 };
 const GAP_MIN_S = 120;  // one recording: 131 gaps >= 30 s (noise), 12 >= 120 s (real breaks)
 const NAMES = { process: "обработка", import: "импорт", backup: "бэкап", restore: "восстановление" };
@@ -831,12 +832,62 @@ function renderLibrary() {
 
   $("backup-info").textContent = st.last_backup
     ? `Последний бэкап: ${st.last_backup}` : "Бэкапов ещё не было.";
-  setKids($("ideas"), JSON.stringify(st.ideas.map((i) => i.event_id)),
-    () => st.ideas.slice().reverse().map((i) => {
-      const li = el("li");
-      li.append(el("time", ideaTime(i.ts)), el("p", i.value));
-      return li;
-    }));
+  renderIdeas();
+}
+
+// D56-D58: one list in two places (the card and the expanded window), newest first.
+function renderIdeas() {
+  const ideas = serverState ? serverState.ideas : [];
+  if (ui.ideaDelete && !ideas.some((i) => i.event_id === ui.ideaDelete)) ui.ideaDelete = null;
+  const sig = JSON.stringify([ideas.map((i) => i.event_id), ui.ideaDelete, ui.ideaDeleting]);
+  for (const ul of [$("ideas"), $("ideas-full")]) {
+    setKids(ul, sig, () => ideas.slice().reverse().map(ideaRow));
+  }
+}
+
+function ideaRow(idea) {
+  const li = el("li");
+  li.dataset.id = idea.event_id;
+  const head = el("div", null, "idea-head");
+  head.append(el("time", ideaTime(idea.ts)));
+  if (ui.ideaDelete === idea.event_id) {
+    const ask = el("span", null, "idea-ask");
+    const yes = button("Да", () => deleteIdea(idea.event_id), "destructive");
+    yes.classList.add("idea-yes");
+    yes.disabled = ui.ideaDeleting;  // a double click must not send a second delete
+    const no = button("Нет", () => askDeleteIdea(null), "outline");
+    no.classList.add("idea-no");
+    ask.append(el("span", "Удалить идею?"), yes, no);
+    head.append(ask);
+  } else {
+    const x = button("", () => askDeleteIdea(idea.event_id), "ghost", "icon-sm", "x");
+    x.classList.add("idea-del");
+    x.setAttribute("aria-label", "Удалить идею");
+    head.append(x);
+  }
+  li.append(head, el("p", idea.value));
+  return li;
+}
+
+function askDeleteIdea(id) {
+  ui.ideaDelete = id;
+  renderIdeas();
+}
+
+async function deleteIdea(id) {
+  if (ui.ideaDeleting) return;
+  ui.ideaDeleting = true;
+  renderIdeas();
+  try {
+    await api("POST", "/api/journal", { event_id: newId(), kind: "idea_deleted", value: id });
+    ui.ideaDelete = null;
+    await poll();
+  } catch (e) {
+    toast("Идея не удалена", e.message, true);
+  } finally {
+    ui.ideaDeleting = false;
+    renderIdeas();
+  }
 }
 
 async function submit(kind, params) {
@@ -1155,6 +1206,7 @@ async function saveIdea() {
 }
 
 function escape(target) {
+  if (ui.ideaDelete && !ui.ideaDeleting) return askDeleteIdea(null);
   const open = document.querySelector("dialog[open]");
   if (open) {
     open.close();
@@ -1249,6 +1301,8 @@ function bind() {
   });
   $("note-btn").addEventListener("click", openNote);
   $("rechoose-btn").addEventListener("click", openRechoose);
+  $("ideas-expand").addEventListener("click", () => $("ideas-dialog").showModal());
+  $("ideas-close").addEventListener("click", () => $("ideas-dialog").close());
   $("inbox-open").addEventListener("click", () => {  // D49
     api("POST", "/api/inbox/open", {}).catch((e) => toast("Проводник не открылся", e.message, true));
   });
