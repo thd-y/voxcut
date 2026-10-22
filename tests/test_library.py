@@ -346,6 +346,20 @@ def test_import_same_sha_existing(lay, no_check):
     assert sorted(p.name for p in lay.inbox.iterdir()) == sorted(copies)
 
 
+def test_import_skips_broken_session_json(lay, no_check):
+    broken = lay.sessions / SID2
+    broken.mkdir(parents=True)
+    (broken / "import.json").write_text("{")
+    (lay.sessions / "junk").mkdir()
+    (lay.sessions / "junk" / "import.json").write_text("{}")
+    make_folder(lay.inbox, chain_starts(2))
+    logged = []
+    got = import_originals(lay, "", 1, None, logged.append)
+    assert (lay.sessions / got["session_id"] / "import.json").is_file()
+    assert any(SID2 in m for m in logged)
+    assert not any("junk" in m for m in logged)
+
+
 def test_import_partial_overlap_refused(lay, no_check):
     paths = make_folder(lay.inbox, chain_starts(2))
     keep = paths[0].read_bytes()

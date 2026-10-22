@@ -236,7 +236,14 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
     before = {p.name: audio.sha256_file(str(p)) for p in plan.files}
     shas = set(before.values())
     for other in sorted(lay.sessions.glob("*/import.json")):
-        known = {f["sha256"]: f["name"] for f in load_json(other)["files"]}
+        if not SESSION_ID_RE.fullmatch(other.parent.name):
+            continue
+        try:
+            known = {f["sha256"]: f["name"] for f in load_json(other)["files"]}
+        except (OSError, ValueError, KeyError, TypeError) as exc:  # as list_sessions: one bad dir
+            log(f"{other.parent.name}: import.json не читается ({type(exc).__name__}), "
+                f"проверка повторного импорта для неё пропущена")
+            continue
         if set(known) == shas:
             log(f"эти файлы уже импортированы: сессия {other.parent.name}")
             return {"session_id": other.parent.name, "existing": True}
