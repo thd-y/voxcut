@@ -881,6 +881,8 @@ async function deleteIdea(id) {
   try {
     await api("POST", "/api/journal", { event_id: newId(), kind: "idea_deleted", value: id });
     ui.ideaDelete = null;
+    // Gone at once: a poll already in flight makes poll() return before fresh state arrives.
+    serverState.ideas = serverState.ideas.filter((i) => i.event_id !== id);
     await poll();
   } catch (e) {
     toast("Идея не удалена", e.message, true);
@@ -1101,6 +1103,7 @@ function undo() {
 function setTab(tab) {
   ui.tab = tab;
   ui.rechoose = null;
+  ui.ideaDelete = null;
   ui.screen = "session";
   if (view && !shown().some((c) => c.clip_id === ui.selectedId)) {
     ui.selectedId = null;
@@ -1113,6 +1116,7 @@ function setTab(tab) {
 
 function toggleLibrary() {
   ui.rechoose = null;
+  ui.ideaDelete = null;
   if (ui.screen === "library") {
     if (sid) ui.screen = "session";
   } else ui.screen = "library";
@@ -1206,7 +1210,9 @@ async function saveIdea() {
 }
 
 function escape(target) {
-  if (ui.ideaDelete && !ui.ideaDeleting) return askDeleteIdea(null);
+  // The idea question takes Esc only when nothing else is open over it.
+  if (ui.ideaDelete && !ui.ideaDeleting && ui.screen === "library"
+      && !document.querySelector("dialog[open]:not(#ideas-dialog)")) return askDeleteIdea(null);
   const open = document.querySelector("dialog[open]");
   if (open) {
     open.close();
