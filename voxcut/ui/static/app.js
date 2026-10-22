@@ -156,6 +156,7 @@ const ui = {
   selectedId: null, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,
   loaded: false, audio: "idle", audioError: "", playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
+  rechoose: null,  // D52: null | "menu" | the decision awaiting confirmation
 };
 const GAP_MIN_S = 120;  // one recording: 131 gaps >= 30 s (noise), 12 >= 120 s (real breaks)
 const NAMES = { process: "обработка", import: "импорт", backup: "бэкап", restore: "восстановление" };
@@ -327,6 +328,7 @@ async function openSession(id, run) {
   if (changed) {
     closeNote();
     stopAudio();
+    ui.rechoose = null;
     ui.undo = [];
     ui.hideSummary = false;
     ui.selectedId = null;
@@ -587,6 +589,18 @@ function renderList() {
   }
 }
 
+// D52: on «Мои клипы» the 1-5 panel shows only inside the re-choice menu.
+function renderRechoose() {
+  const mine = ui.tab === "mine";
+  $("decisions").hidden = mine && ui.rechoose !== "menu";
+  $("rechoose").hidden = !mine;
+  $("rechoose-btn").hidden = ui.rechoose !== null;
+  $("rechoose-hint").hidden = ui.rechoose !== "menu";
+  const asking = mine && ui.rechoose !== null && ui.rechoose !== "menu";
+  $("rechoose-confirm").hidden = !asking;
+  if (asking) $("rechoose-question").textContent = `Отбросить как «${ui.rechoose}»?`;
+}
+
 function setDecisionsEnabled(on) {
   for (const b of $("decisions").children) b.disabled = !on;
   $("play-btn").disabled = !on;
@@ -629,6 +643,7 @@ function renderCard() {
   $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s)}`;
   $("clip-sub").textContent = `клип ${idx + 1} из ${view.clips.length} · ${statusText(clip)}`;
   if (ui.pending.has(clip.clip_id)) $("clip-sub").append(" ", el("span", null, "spinner"));
+  renderRechoose();
   const s = status(clip);
   for (const b of $("decisions").children) {
     const on = s.value === b.dataset.value && s.kind !== "conflict";
@@ -895,6 +910,7 @@ function seek(delta) {
 
 function select(clipId, { play = false } = {}) {
   if (clipId !== ui.selectedId) {
+    ui.rechoose = null;
     closeNote();
     $("note-status").textContent = "";
     ui.expanded = false;
@@ -973,6 +989,26 @@ function decide(value) {
   $("card").focus({ preventScroll: true });
 }
 
+function openRechoose() {
+  if (ui.tab !== "mine" || !clipOnScreen()) return;
+  ui.rechoose = "menu";
+  render();
+}
+
+// Every clip in «Мои клипы» is kept, so «Оставить» is the same choice: no question, no write.
+function pickRechoose(value) {
+  if (ui.rechoose !== "menu" || !clipOnScreen()) return;
+  ui.rechoose = value === KEEP ? null : value;
+  render();
+}
+
+function closeRechoose(confirmed) {
+  const value = ui.rechoose;
+  ui.rechoose = null;
+  if (confirmed && value && value !== "menu") decide(value);
+  else render();
+}
+
 function undo() {
   if (ui.screen !== "session" || !view || !ui.loaded) return;
   const t = undoTarget(ui.undo, view.clips);
@@ -993,6 +1029,7 @@ function undo() {
 
 function setTab(tab) {
   ui.tab = tab;
+  ui.rechoose = null;
   ui.screen = "session";
   if (view && !shown().some((c) => c.clip_id === ui.selectedId)) {
     ui.selectedId = null;
@@ -1004,6 +1041,7 @@ function setTab(tab) {
 }
 
 function toggleLibrary() {
+  ui.rechoose = null;
   if (ui.screen === "library") {
     if (sid) ui.screen = "session";
   } else ui.screen = "library";
@@ -1113,6 +1151,7 @@ function escape(target) {
 
 function run(action, target) {
   if (action.startsWith("mark:")) return decide(action.slice(5));
+  if (action.startsWith("pick:")) return pickRechoose(action.slice(5));
   if (action.startsWith("seek:")) return seek(Number(action.slice(5)));
   const onSession = ui.screen === "session" && view && view.clips.length;
   const acts = {
@@ -1128,6 +1167,10 @@ function run(action, target) {
     help: () => $("help-dialog").showModal(),
     escape: () => escape(target),
     "save-idea": saveIdea,
+    rechoose: openRechoose,
+    confirm: () => closeRechoose(true),
+    cancel: () => closeRechoose(false),
+    noop: () => {},
   };
   return acts[action] && acts[action]();
 }
@@ -1139,7 +1182,7 @@ function onKey(e) {
     && (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && t.type !== "checkbox"));
   const dialogOpen = !!document.querySelector("dialog[open]");
   const screen = ui.screen === "library" ? "library" : ui.tab;
-  const action = keyAction(e, { inField, dialogOpen, screen });
+  const action = keyAction(e, { inField, dialogOpen, screen, rechoose: ui.rechoose });
   if (!action) return;
   e.preventDefault();  // Space and digits must not press a focused button
   e.stopPropagation();
@@ -1150,7 +1193,8 @@ function bind() {
   document.addEventListener("keydown", onKey, true);
   $("decisions").replaceChildren(...DECISIONS.map((value, i) => {
     const b = button(value === KEEP ? "Оставить" : value[0].toUpperCase() + value.slice(1), () => {
-      decide(value);
+      if (ui.tab === "mine") pickRechoose(value);
+      else decide(value);
     }, value === KEEP ? undefined : "outline", "default");
     b.dataset.value = value;
     b.append(el("kbd", String(i + 1), "kbd"));
@@ -1184,6 +1228,9 @@ function bind() {
     $("card").focus({ preventScroll: true });
   });
   $("note-btn").addEventListener("click", openNote);
+  $("rechoose-btn").addEventListener("click", openRechoose);
+  $("rechoose-yes").addEventListener("click", () => closeRechoose(true));
+  $("rechoose-no").addEventListener("click", () => closeRechoose(false));
   $("note").addEventListener("blur", saveNote);
   $("search").addEventListener("input", (e) => {
     ui.query = e.target.value;

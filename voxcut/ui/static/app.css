@@ -58,6 +58,10 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 #pos { min-width: 88px; text-align: right; }
 .decisions { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 24px; }
 .decisions .kbd { margin-left: 6px; }
+.rechoose { padding: 0 24px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.rechoose .kbd { margin-left: 6px; }
+#rechoose-confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#rechoose-confirm[hidden] { display: none; }
 .btn[data-state=kept], .badge[data-state=kept] { background: var(--kept); color: var(--kept-foreground);
   border-color: transparent; }
 .btn[aria-pressed=true]:not([data-state=kept]) { background: var(--secondary); }

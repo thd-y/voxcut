@@ -71,6 +71,15 @@
           <span id="pos" class="muted mono"></span>
         </div>
         <div id="decisions" class="decisions"></div>
+        <div id="rechoose" class="rechoose" hidden>
+          <button type="button" id="rechoose-btn" class="btn" data-variant="link" data-size="sm">изменить выбор <kbd class="kbd">R</kbd></button>
+          <p id="rechoose-hint" class="muted small" hidden>1–5 — новый выбор, Esc — отмена</p>
+          <div id="rechoose-confirm" role="alertdialog" aria-labelledby="rechoose-question" hidden>
+            <p id="rechoose-question"></p>
+            <button type="button" id="rechoose-yes" class="btn" data-variant="destructive" data-size="sm">Да <kbd class="kbd">Enter</kbd></button>
+            <button type="button" id="rechoose-no" class="btn" data-variant="outline" data-size="sm">Нет <kbd class="kbd">Esc</kbd></button>
+          </div>
+        </div>
       </div>
       <div id="card-body">
         <div id="note-box" hidden>
@@ -144,7 +153,8 @@
     <section>
       <table class="keys">
         <tr><td><kbd class="kbd">1</kbd></td><td>оставить</td></tr>
-        <tr><td><kbd class="kbd">2</kbd> <kbd class="kbd">3</kbd> <kbd class="kbd">4</kbd> <kbd class="kbd">5</kbd></td><td>отбросить: вокал, музыка, шум, другое</td></tr>
+        <tr><td><kbd class="kbd">2</kbd> <kbd class="kbd">3</kbd> <kbd class="kbd">4</kbd> <kbd class="kbd">5</kbd></td><td>отбросить: вокал, музыка, шум, другое (в «Разборе»)</td></tr>
+        <tr><td><kbd class="kbd">R</kbd></td><td>изменить выбор в «Моих клипах», затем 1–5 и Enter</td></tr>
         <tr><td><kbd class="kbd">Пробел</kbd></td><td>играть / пауза</td></tr>
         <tr><td><kbd class="kbd">←</kbd> <kbd class="kbd">→</kbd></td><td>соседний клип</td></tr>
         <tr><td><kbd class="kbd">Shift</kbd>+<kbd class="kbd">←</kbd> <kbd class="kbd">→</kbd></td><td>перемотка на 5 с</td></tr>
