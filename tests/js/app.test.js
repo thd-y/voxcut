@@ -200,3 +200,18 @@ test("autoOpenTarget", () => {
   assert.equal(app.autoOpenTarget(list, "c"), null);  // tried once: no retry every poll
   assert.equal(app.autoOpenTarget([s("a", "imported"), s("b", "probs")], null), "a");
 });
+
+test("afterOpenError", () => {
+  const server = { message: "прогон не читается" };
+  const offline = { message: "нет связи с VoxCut", offline: true };
+  assert.deepEqual(app.afterOpenError(true, server), { loaded: true, openError: null });  // it stays
+  assert.deepEqual(app.afterOpenError(true, offline), { loaded: true, openError: null });
+  assert.deepEqual(app.afterOpenError(false, offline), { loaded: null, openError: null });  // skeleton + alert
+  assert.deepEqual(app.afterOpenError(false, server), { loaded: null, openError: "прогон не читается" });
+});
+
+test("rearmAuto", () => {
+  assert.equal(app.rearmAuto({ offline: true }), true);
+  assert.equal(app.rearmAuto({ offline: true, stale: true }), false);  // the owner chose another session meanwhile
+  assert.equal(app.rearmAuto({}), false);
+});

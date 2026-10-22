@@ -270,6 +270,16 @@ function autoOpenTarget(sessions, tried) {
   return id === tried ? null : id;
 }
 
+// A failed session open: the open session stays; without one, a server error explains itself
+// on an empty screen, while a lost link leaves the skeleton and the «нет связи» alert.
+function afterOpenError(hasView, e) {
+  if (hasView) return { loaded: true, openError: null };
+  return { loaded: null, openError: e.offline ? null : e.message };
+}
+
+// Auto-open tries again only after a lost link, and only if no newer open replaced it.
+const rearmAuto = (e) => !!e.offline && !e.stale;
+
 function fitWindow() {  // once, on a fresh launch code; Edge ignores --window-size when already running
   try {
     const r = launchRect({ width: screen.availWidth, height: screen.availHeight,
@@ -338,7 +348,7 @@ async function pollOnce() {
   if (auto) {
     autoTried = auto;
     await openSession(auto).catch((e) => {
-      if (e.offline) autoTried = null;  // the link came back: the next poll tries again
+      if (rearmAuto(e)) autoTried = null;  // the link came back: the next poll tries again
       fail(e);
     });
   } else if (sid !== null && view && !runId) {
@@ -349,6 +359,7 @@ async function pollOnce() {
 }
 
 function fail(e) {
+  if (e.stale) return;  // a newer open replaced this one: its outcome is what counts
   if (e.offline) $("conn-alert").hidden = false;
   else if (!ui.fatal) toast("Ошибка", e.message, true);
 }
@@ -375,9 +386,11 @@ async function openSession(id, run) {
   try {
     v = await api("GET", sessionPath(id, run));
   } catch (e) {
-    if (seq === openSeq) {
-      if (view) ui.loaded = true;  // the open session stays on screen
-      else ui.openError = e.message;  // an empty screen with the reason, not an endless skeleton
+    e.stale = seq !== openSeq;
+    if (!e.stale) {
+      const r = afterOpenError(!!view, e);
+      if (r.loaded !== null) ui.loaded = r.loaded;
+      ui.openError = r.openError;
       render();
     }
     throw e;
@@ -1430,7 +1443,8 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget };
+    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
+    afterOpenError, rearmAuto };
 } else {
   start();
 }
