@@ -106,7 +106,8 @@ def _session_row(lay: Layout, sdir: Path) -> dict:
         "session_id": sid,
         "name": sid.rsplit(".", 1)[0],
         "state": state,
-        "can_process": (pending and any(sdir.glob("originals*/*"))) or (state != "incomplete"
+        "can_process": (pending and all(_pending_files(lay, sdir, load_json(
+            sdir / "import.pending.json")).values())) or (state != "incomplete"
                                    and ((sdir / "originals").is_dir() or wav)),
         "duration_s": meta["n_samples"] / meta["sr"] if meta else None,
         "n_clips": len(read_jsonl(runs[0]["seg_dir"] / "clips" / "manifest.jsonl"))
@@ -235,7 +236,9 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
         audio.check_source(str(p))  # D18
     before = {p.name: audio.sha256_file(str(p)) for p in plan.files}
     shas = set(before.values())
-    for other in sorted(lay.sessions.glob("*/import.json")):
+    unfinished = [p for p in lay.sessions.glob("*/import.pending.json")
+                  if not (p.parent / "import.json").exists()]
+    for other in sorted([*lay.sessions.glob("*/import.json"), *unfinished]):
         if not SESSION_ID_RE.fullmatch(other.parent.name):
             continue
         try:
@@ -244,6 +247,10 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
             log(f"{other.parent.name}: import.json не читается ({type(exc).__name__}), "
                 f"проверка повторного импорта для неё пропущена")
             continue
+        if other.name == "import.pending.json" and shas & set(known):  # D65
+            raise SessionError(f"часть файлов уже в сессии {other.parent.name} (незавершённый "
+                               f"импорт): нажмите у неё «Обработать»; импорт отменён, файлы "
+                               f"на месте")
         if set(known) == shas:
             log(f"эти файлы уже импортированы: сессия {other.parent.name}")
             return {"session_id": other.parent.name, "existing": True}
@@ -293,6 +300,9 @@ def _rollback_import(sdir: Path, moved: list[Path], failed: Path, exc: OSError) 
     tmp = sdir / "originals.tmp"
     stuck = []
     for p in reversed(moved):
+        if p.exists():  # something new in its place: never overwrite it
+            stuck.append(p.name)
+            continue
         try:
             os.rename(tmp / p.name, p)
         except OSError:
@@ -306,6 +316,18 @@ def _rollback_import(sdir: Path, moved: list[Path], failed: Path, exc: OSError) 
     sdir.rmdir()
     raise SessionError(f"{failed.name}: перенос не удался ({exc}); файлы во входящих, "
                        f"ничего не тронуто") from exc
+
+
+def _pending_files(lay: Layout, sdir: Path, meta: dict) -> dict[str, Path | None]:
+    """D65: where each recording of an unfinished import is now: originals*, inbox/ or nowhere."""
+    dirs = [sdir / "originals", sdir / "originals.tmp"]
+    if meta.get("source") in _source_names(lay):  # the pending file may come from a backup
+        dirs.append(lay.inbox / meta["source"])
+    out = {}
+    for f in meta["files"]:
+        out[f["name"]] = next((d / f["name"] for d in dirs if (d / f["name"]).is_file()
+                               and not (d / f["name"]).is_symlink()), None)
+    return out
 
 
 def finish_import(lay: Layout, sid: str, log) -> None:
@@ -323,9 +345,22 @@ def finish_import(lay: Layout, sid: str, log) -> None:
         raise SessionError(f"{sid}: есть и originals, и originals.tmp; файлы записи внутри, "
                            f"не удаляйте их, нужна ручная проверка")
     before = {f["name"]: f["sha256"] for f in meta["files"]}
-    if not any((sdir / d / n).is_file() for d in ("originals", "originals.tmp") for n in before):
+    where = _pending_files(lay, sdir, meta)
+    missing = sorted(n for n, p in where.items() if p is None)
+    if len(missing) == len(before):
         raise SessionError(f"{sid}: файлов записи нет в originals: они во входящих или не "
                            f"восстановлены из бэкапа; ничего не тронуто")
+    if missing:
+        raise SessionError(f"{sid}: не найдены ни в originals, ни во входящих: "
+                           f"{', '.join(missing)}; ничего не тронуто")
+    incoming = {n: p for n, p in where.items() if p.parent != sdir / "originals"}
+    changed = sorted(n for n, p in incoming.items() if audio.sha256_file(str(p)) != before[n])
+    if changed:
+        raise SessionError(f"{', '.join(changed)}: во входящих другой файл (sha256 не совпадает "
+                           f"с началом импорта); ничего не тронуто")
+    (sdir / "originals").mkdir(exist_ok=True)
+    for n, p in incoming.items():  # D65, D39: the same rename as the import itself
+        os.rename(p, sdir / "originals" / n)
     after = {}
     for name in before:
         p = sdir / "originals" / name

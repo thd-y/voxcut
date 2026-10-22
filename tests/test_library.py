@@ -577,14 +577,13 @@ def test_import_rollback_failure_keeps_pending(lay, no_check, monkeypatch):
     assert after == before
 
 
-def test_import_sigterm_mid_move_left_for_process(lay, no_check, monkeypatch):
-    """SystemExit is not rolled back: the pending import stays for «Обработать» (finish_import)."""
-    paths = make_folder(lay.inbox, chain_starts(3))
+def _sigterm_mid_move(lay, monkeypatch, at=2):
+    """SIGTERM on the at-th inbox -> originals.tmp rename of a fresh import."""
     real, n = os.rename, [0]
 
     def rename(src, dst):
         n[0] += 1
-        if n[0] == 2:
+        if n[0] == at:
             raise SystemExit(143)
         return real(src, dst)
 
@@ -592,8 +591,70 @@ def test_import_sigterm_mid_move_left_for_process(lay, no_check, monkeypatch):
     with pytest.raises(SystemExit):
         import_originals(lay, "", 1, None, _quiet)
     monkeypatch.undo()
+
+
+def test_import_sigterm_mid_move_left_for_process(lay, no_check, monkeypatch):
+    """SystemExit is not rolled back: the pending import stays for «Обработать» (finish_import)."""
+    paths = make_folder(lay.inbox, chain_starts(3))
+    _sigterm_mid_move(lay, monkeypatch)
     sdir = next(lay.sessions.iterdir())
     assert (sdir / "import.pending.json").is_file()
+    assert [p.name for p in (sdir / "originals.tmp").iterdir()] == [paths[0].name]
+
+
+def test_sigterm_mid_move_finished_by_process(lay, no_check, monkeypatch):
+    """D65: «Обработать» brings the rest of the chain from inbox/, sha256-checked."""
+    paths = make_folder(lay.inbox, chain_starts(3))
+    before = _shas(paths)
+    _sigterm_mid_move(lay, monkeypatch)
+    row = list_sessions(lay)[0]
+    assert row["can_process"]
+    finish_import(lay, row["session_id"], _quiet)
+    sdir = lay.sessions / row["session_id"]
+    assert _shas(sorted((sdir / "originals").iterdir())) == before
+    assert (sdir / "import.json").is_file()
+    assert not any(p.exists() for p in paths)
+
+
+def test_finish_refuses_changed_inbox_file(lay, no_check, monkeypatch):
+    paths = make_folder(lay.inbox, chain_starts(3))
+    _sigterm_mid_move(lay, monkeypatch)
+    paths[2].write_bytes(paths[2].read_bytes()[:-1] + b"x")
+    sid = list_sessions(lay)[0]["session_id"]
+    with pytest.raises(SessionError, match=paths[2].name):
+        finish_import(lay, sid, _quiet)
+    assert paths[1].exists() and paths[2].exists()
+    assert not (lay.sessions / sid / "import.json").exists()
+
+
+def test_pending_session_blocks_reimport_of_rest(lay, no_check, monkeypatch):
+    paths = make_folder(lay.inbox, chain_starts(3))
+    _sigterm_mid_move(lay, monkeypatch)
+    with pytest.raises(SessionError, match="незавершённый импорт"):
+        import_originals(lay, "", 1, None, _quiet)
+    assert paths[1].exists() and paths[2].exists()
+    assert len(list(lay.sessions.iterdir())) == 1
+
+
+def test_rollback_never_overwrites_inbox(lay, no_check, monkeypatch):
+    paths = make_folder(lay.inbox, chain_starts(3))
+    import errno
+
+    real, n = os.rename, [0]
+
+    def rename(src, dst):
+        n[0] += 1
+        if n[0] == 2:
+            paths[0].write_bytes(b"new file in the inbox")  # appeared after the first move
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "rename", rename)
+    with pytest.raises(SessionError, match="originals.tmp"):
+        import_originals(lay, "", 1, None, _quiet)
+    monkeypatch.undo()
+    assert paths[0].read_bytes() == b"new file in the inbox"
+    sdir = next(lay.sessions.iterdir())
     assert [p.name for p in (sdir / "originals.tmp").iterdir()] == [paths[0].name]
 
 
