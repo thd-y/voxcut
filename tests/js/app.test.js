@@ -210,8 +210,9 @@ test("afterOpenError", () => {
   assert.deepEqual(app.afterOpenError(false, server), { loaded: null, openError: "прогон не читается" });
 });
 
-test("rearmAuto", () => {
-  assert.equal(app.rearmAuto({ offline: true }), true);
-  assert.equal(app.rearmAuto({ offline: true, stale: true }), false);  // the owner chose another session meanwhile
-  assert.equal(app.rearmAuto({}), false);
+test("retryAfter", () => {
+  assert.equal(app.retryAfter({ offline: true }, false), true);  // nothing on screen: retry on the next good poll
+  assert.equal(app.retryAfter({ offline: true }, true), false);  // the open session stays, the owner clicks again
+  assert.equal(app.retryAfter({ offline: true, stale: true }, false), false);  // a newer open replaced it
+  assert.equal(app.retryAfter({}, false), false);  // a server error: «Сессия не открылась», no hammering
 });

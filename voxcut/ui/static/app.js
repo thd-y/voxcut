@@ -156,6 +156,7 @@ let serverState = null;    // GET /api/state
 let view = null;           // GET /api/session/{sid}
 let sid = null;            // open session
 let autoTried = null;      // session id the automatic open already tried
+let retryOpen = null;      // [id, run] of the newest open lost with the link and nothing on screen
 let runId = null;          // explicit run, null = newest
 let openSeq = 0;           // only the newest session response is applied
 let queue = Promise.resolve();  // journal writes in key-press order
@@ -277,8 +278,8 @@ function afterOpenError(hasView, e) {
   return { loaded: null, openError: e.offline ? null : e.message };
 }
 
-// Auto-open tries again only after a lost link, and only if no newer open replaced it.
-const rearmAuto = (e) => !!e.offline && !e.stale;
+// Any open lost with the link, with nothing on screen and no newer open, retries on the next good poll.
+const retryAfter = (e, hasView) => !!e.offline && !e.stale && !hasView;
 
 function fitWindow() {  // once, on a fresh launch code; Edge ignores --window-size when already running
   try {
@@ -345,12 +346,13 @@ async function pollOnce() {
   }
   const sessions = serverState.sessions;
   const auto = sid === null ? autoOpenTarget(sessions, autoTried) : null;
-  if (auto) {
+  if (sid === null && retryOpen) {
+    const [id, run] = retryOpen;
+    retryOpen = null;
+    await openSession(id, run).catch(fail);
+  } else if (auto) {
     autoTried = auto;
-    await openSession(auto).catch((e) => {
-      if (rearmAuto(e)) autoTried = null;  // the link came back: the next poll tries again
-      fail(e);
-    });
+    await openSession(auto).catch(fail);
   } else if (sid !== null && view && !runId) {
     const row = sessions.find((s) => s.session_id === sid);
     if (row && row.n_clips !== null && row.n_clips !== view.clips.length) await reloadView();
@@ -387,6 +389,7 @@ async function openSession(id, run) {
     v = await api("GET", sessionPath(id, run));
   } catch (e) {
     e.stale = seq !== openSeq;
+    if (!e.stale) retryOpen = retryAfter(e, !!view) ? [id, run] : null;
     if (!e.stale) {
       const r = afterOpenError(!!view, e);
       if (r.loaded !== null) ui.loaded = r.loaded;
@@ -402,6 +405,7 @@ async function openSession(id, run) {
   view = v;
   ui.loaded = true;
   ui.openError = null;
+  retryOpen = null;
   if (changed) {
     closeNote();
     stopAudio();
@@ -1444,7 +1448,7 @@ function bind() {
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, rearmAuto };
+    afterOpenError, retryAfter };
 } else {
   start();
 }

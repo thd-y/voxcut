@@ -721,7 +721,11 @@ def test_drop_source_only_plain_inbox_folder(lay, tmp_path, source):
         target.symlink_to(tmp_path / "real")
     else:
         target.mkdir()
-    _drop_empty_source(lay, str(tmp_path / "abs") if source == "/abs" else source, _quiet)
+    if source == "link":
+        (tmp_path / "real" / "notes.txt").write_text("x")
+    logged = []
+    _drop_empty_source(lay, str(tmp_path / "abs") if source == "/abs" else source, logged.append)
+    assert not logged  # not even «удалите вручную» about what a link points to
     assert target.exists() or target.is_symlink()
     assert (tmp_path / "real").is_dir() or source != "link"
 
