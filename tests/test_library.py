@@ -17,6 +17,7 @@ from voxcut.library import (
     list_sessions,
     process_session,
     resolve_clip,
+    session_row,
     session_runs,
 )
 
@@ -173,6 +174,21 @@ def test_list_sessions_broken_session_does_not_hide_others(lay):
     assert got[SID]["state"] == "imported" and got[SID]["error"] is None
     assert got[SID2]["state"] == "incomplete" and not got[SID2]["can_process"]
     assert "run.json" in got[SID2]["error"]
+
+
+def test_session_row_matches_list(lay):
+    good = lay.sessions / SID
+    good.mkdir()
+    (good / "import.json").write_text("{}")
+    bad = make_seg(lay, SID2)
+    (lay.sessions / SID2 / "import.json").write_text("{}")
+    (bad / "run.json").unlink()
+    for r in list_sessions(lay):
+        assert session_row(lay, r["session_id"]) == r
+    assert "run.json" in session_row(lay, SID2)["error"]
+    (lay.data / "pilot").mkdir()  # a real dir outside sessions/
+    for sid in ("../pilot", "..", "2026-08-11_21-30_0h00m.00000000"):
+        assert session_row(lay, sid) is None
 
 
 # --- import from inbox/ (UI task 5, U4, D39) ---

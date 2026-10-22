@@ -157,8 +157,8 @@ class App:
 
     def _session(self, req: Request) -> dict:
         sid = req.params["sid"]
-        rows = {r["session_id"]: r for r in library.list_sessions(self.lay)}
-        if not library.SESSION_ID_RE.fullmatch(sid) or sid not in rows:
+        srow = library.session_row(self.lay, sid)
+        if srow is None:
             raise HttpError(404, "нет такой сессии")
         runs = library.session_runs(self.lay, sid)
         wanted = req.query.get("run", [None])[0]
@@ -184,7 +184,7 @@ class App:
         return {
             "session_id": sid,
             "start_local": files[0].get("start_local") if files else None,
-            "duration_s": rows[sid]["duration_s"],
+            "duration_s": srow["duration_s"],
             "runs": [{k: r[k] for k in ("run_id", "name", "created")} for r in runs],
             "run_id": run["run_id"] if run else None,
             "clips": clips,
@@ -223,8 +223,8 @@ class App:
             if not {"event_id", "kind", "value"} <= set(b) <= {"event_id", "kind", "value",
                                                               "session_id"}:
                 raise HttpError(400, "поля: event_id, kind, value, session_id?")
-            if "session_id" in b and b["session_id"] not in {
-                    r["session_id"] for r in library.list_sessions(self.lay)}:
+            if "session_id" in b and (not isinstance(b["session_id"], str)
+                                      or library.session_row(self.lay, b["session_id"]) is None):
                 raise HttpError(400, "нет такой сессии")
             event = dict(b)
         elif kind == "idea_deleted":  # D56

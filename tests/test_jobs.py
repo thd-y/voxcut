@@ -102,7 +102,8 @@ def test_one_heavy_at_a_time(lay):
     j.poll()
     assert len(run.started()) == 1
     finish(lay, a)
-    states = {v["job_id"]: v["state"] for v in j.poll()}
+    assert j.poll() is None
+    states = {v["job_id"]: v["state"] for v in j.list()}
     assert states == {a: "done", b: "running"}
     assert len(run.started()) == 2 and [x["job_id"] for x in done] == [a]
     j.poll()
@@ -119,7 +120,8 @@ def test_on_done_survives_restart(lay):
     j.poll()
     j.poll()
     assert [x["job_id"] for x in done] == [a]
-    assert Jobs(lay, run=run, on_done=done.append).poll() and len(done) == 1
+    Jobs(lay, run=run, on_done=done.append).poll()
+    assert len(done) == 1
 
 
 def test_submit_idempotent(lay):
@@ -259,7 +261,8 @@ def test_on_done_error_does_not_block_queue(lay):
     j.submit(a, "backup", {"mode": "light"})
     j.submit(b, "backup", {"mode": "light"})
     finish(lay, a)
-    views = {v["job_id"]: v for v in j.poll()}
+    j.poll()
+    views = {v["job_id"]: v for v in j.list()}
     assert views[b]["state"] == "running"
     assert views[a]["state"] == "failed" and "нет journal.jsonl" in views[a]["error"]
     Jobs(lay, run=run, on_done=boom).poll()  # not retried forever after a restart

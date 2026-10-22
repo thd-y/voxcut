@@ -58,8 +58,7 @@ def validate(kind: str, params: dict, lay: library.Layout) -> dict:
     elif kind == "process":
         if not isinstance(p["session_id"], str):
             raise ValueError("session_id: строка")
-        row = next((r for r in library.list_sessions(lay)
-                    if r["session_id"] == p["session_id"]), None)
+        row = library.session_row(lay, p["session_id"])
         if row is None:
             raise ValueError("нет такой сессии")
         if not row["can_process"]:
@@ -214,10 +213,9 @@ class Jobs:
                     rec["state"] = "cancelled"
             return self._view(job_id)
 
-    def poll(self) -> list[dict]:
+    def poll(self) -> None:
         with self._lock:
             self._step()
-            return [self._view(j) for j in self._jobs]
 
     def list(self) -> list[dict]:
         """Every queued or running job plus the newest finished ones; .run/jobs/ itself only grows."""

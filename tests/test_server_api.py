@@ -10,6 +10,7 @@ from test_jobs import FakeRun
 from test_server_security import SECURITY, Client
 
 from voxcut import journal as journal_mod
+from voxcut import library as library_mod
 from voxcut.jobs import Jobs
 from voxcut.journal import Journal
 from voxcut.library import Layout
@@ -120,6 +121,14 @@ def test_session_view_parses_journal_once(api, monkeypatch):
     monkeypatch.setattr(journal_mod, "_when", lambda e: calls.append(1) or real(e))
     assert session(api)["clips"][0]["heard"] is True
     assert len(calls) <= 10  # once per event, whatever the number of clips (3 here)
+
+
+def test_session_view_reads_one_row(api, monkeypatch):
+    def boom(lay):
+        raise AssertionError("list_sessions for one session")
+
+    monkeypatch.setattr(library_mod, "list_sessions", boom)
+    assert session(api)["session_id"] == SID
 
 
 def test_clip_bytes_with_key(api):
@@ -260,6 +269,20 @@ def test_idea_with_and_without_session(wapi):
         assert post(wapi, "/api/journal", e | ({"session_id": sid} if sid else {}))[0] == 200
     st = json.loads(get(wapi, "/api/state")[2])
     assert [i["value"] for i in st["ideas"]] == ["идея None", f"идея {SID}"]
+
+
+def test_idea_and_process_read_one_row(wapi, monkeypatch):
+    def boom(lay):
+        raise AssertionError("list_sessions for one session")
+
+    monkeypatch.setattr(library_mod, "list_sessions", boom)
+    e = {"event_id": uuid.uuid4().hex, "kind": "idea", "value": "x", "session_id": SID}
+    assert post(wapi, "/api/journal", e)[0] == 200
+    assert post(wapi, "/api/journal", e | {"event_id": uuid.uuid4().hex,
+                                          "session_id": SID[:-1] + "0"})[0] == 400
+    status, _, body = post(wapi, "/api/jobs", {"job_id": uuid.uuid4().hex, "kind": "process",
+                                               "params": {"session_id": SID}})
+    assert status == 200 and body["job"]["state"] == "running"
 
 
 def test_journal_requires_origin(wapi):

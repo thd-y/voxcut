@@ -116,19 +116,23 @@ def _session_row(lay: Layout, sdir: Path) -> dict:
     }
 
 
+def session_row(lay: Layout, sid: str) -> dict | None:
+    """One session's row as in list_sessions; None if `sid` is not a session dir."""
+    sdir = lay.sessions / sid
+    if not SESSION_ID_RE.fullmatch(sid) or not sdir.is_dir():
+        return None
+    try:
+        return _session_row(lay, sdir)
+    except (OSError, ValueError, KeyError, TypeError, RunError) as exc:
+        return {"session_id": sid, "name": sid.rsplit(".", 1)[0], "state": "incomplete",
+                "can_process": False, "duration_s": None, "n_clips": None,
+                "error": f"{type(exc).__name__}: {exc}"}
+
+
 def list_sessions(lay: Layout) -> list[dict]:
     """One broken session dir (hand-copied data/, half a restore) must not hide the others."""
-    out = []
-    for sdir in sorted(lay.sessions.iterdir()) if lay.sessions.is_dir() else []:
-        if not sdir.is_dir() or not SESSION_ID_RE.fullmatch(sdir.name):
-            continue
-        try:
-            out.append(_session_row(lay, sdir))
-        except (OSError, ValueError, KeyError, TypeError, RunError) as exc:
-            out.append({"session_id": sdir.name, "name": sdir.name.rsplit(".", 1)[0],
-                        "state": "incomplete", "can_process": False, "duration_s": None,
-                        "n_clips": None, "error": f"{type(exc).__name__}: {exc}"})
-    return out
+    names = sorted(p.name for p in lay.sessions.iterdir()) if lay.sessions.is_dir() else []
+    return [r for r in (session_row(lay, n) for n in names) if r is not None]
 
 
 def resolve_clip(seg_dir: Path, audio_path: str) -> Path | None:
