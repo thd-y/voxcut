@@ -12,10 +12,10 @@ FORBIDDEN = ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "
              "new Function", 'setAttribute("style"', "setAttribute('style'", "localStorage",
              "sessionStorage", "document.cookie", "http://", "https://", "localhost"]
 BASECOAT_SHA256 = "744bb04803c3480d1e79b3cfd38ecb6b103075400774cb89bf57b5e27e6d15a2"
-LUCIDE_SHA256 = "38b8bdb9efef8076bacdf3d273b700e9bf5172643d962ba61f8f8b7ef4c45ff4"
+LUCIDE_SHA256 = "eeeb8ec76ade50ef1e41547941836815006d4976366b33b7e1ab796ea38ccf24"  # lucide-static 1.52.0, D55/D58
 LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mic-vocal", "music",
                 "audio-waveform", "ellipsis", "notebook-pen", "lightbulb", "pencil", "folder-open",
-                "folder-input", "cog", "archive"]  # D55
+                "folder-input", "cog", "archive", "x", "maximize-2"]  # D55, D58
 LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt"}
 
 
