@@ -261,9 +261,9 @@ function launchRect(avail) {
 }
 
 function fitWindow() {  // once, on a fresh launch code; Edge ignores --window-size when already running
-  const r = launchRect({ width: screen.availWidth, height: screen.availHeight,
-    left: screen.availLeft, top: screen.availTop });
   try {
+    const r = launchRect({ width: screen.availWidth, height: screen.availHeight,
+      left: screen.availLeft, top: screen.availTop });
     resizeTo(r.width, r.height);
     moveTo(r.left, r.top);
   } catch {}  // a window Edge will not move is not an error
