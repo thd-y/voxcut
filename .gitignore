@@ -31,3 +31,6 @@ backups/
 # impeccable: локальное согласие на хук и кэш хука
 .impeccable/config.local.json
 .impeccable/hook.cache.json
+
+# Claude Code: личные настройки (разрешения, локальные пути) — только локально
+.claude/settings.local.json
