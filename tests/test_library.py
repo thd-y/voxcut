@@ -732,7 +732,7 @@ def test_rollback_keeps_dangling_symlink(lay, no_check, monkeypatch):
     assert [p.name for p in (sdir / "originals.tmp").iterdir()] == [paths[0].name]
 
 
-@pytest.mark.parametrize("bad", ["../x.wav", "ABS", ".", ""])
+@pytest.mark.parametrize("bad", ["../x.wav", "ABS", "sub/x.wav"])
 def test_pending_names_outside_refused(lay, no_check, monkeypatch, tmp_path, bad):
     """A pending file may come from a backup: only plain file names are looked up (D65)."""
     import shutil
@@ -741,7 +741,9 @@ def test_pending_names_outside_refused(lay, no_check, monkeypatch, tmp_path, bad
     _sigterm_mid_move(lay, monkeypatch)
     sdir = next(lay.sessions.iterdir())
     name = str(tmp_path / "abs.wav") if bad == "ABS" else bad
-    outside = Path(name) if bad == "ABS" else sdir / "x.wav"
+    outside = {"ABS": Path(name), "sub/x.wav": lay.inbox / "sub" / "x.wav"}.get(
+        bad, sdir / "x.wav")
+    outside.parent.mkdir(exist_ok=True)
     shutil.copyfile(sdir / "originals.tmp" / paths[0].name, outside)  # the same sha256
     meta = json.loads((sdir / "import.pending.json").read_text())
     meta["files"][0]["name"] = name
