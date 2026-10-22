@@ -817,7 +817,7 @@ function renderLibrary() {
         input.setAttribute("aria-label", "Начало записи, если часы диктофона сбиты");
         const row = el("div", null, "row");
         row.append(input, button("Импортировать", () => submit("import", {
-          source: src.source, chain: ch.chain, start: input.value.trim() || null,
+          source: src.source, chain: ch.chain, files: ch.files, start: input.value.trim() || null,
         }), undefined, "sm", "folder-input"));
         box.append(row);
       }

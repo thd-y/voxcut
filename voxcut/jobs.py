@@ -33,7 +33,7 @@ def _now() -> str:
 
 def validate(kind: str, params: dict, lay: library.Layout) -> dict:
     """Narrow contract (U9): no paths, commands or unit properties from the browser."""
-    keys = {"import": {"source", "chain", "start"}, "process": {"session_id"},
+    keys = {"import": {"source", "chain", "files", "start"}, "process": {"session_id"},
             "backup": {"mode"}, "restore": {"name"}}
     if kind not in keys:
         raise ValueError(f"неизвестный вид задачи: {kind!r}")
@@ -45,6 +45,9 @@ def validate(kind: str, params: dict, lay: library.Layout) -> dict:
             raise ValueError("нет такого источника во входящих")
         if type(p["chain"]) is not int or p["chain"] < 1:
             raise ValueError("chain: целое >= 1")
+        if (not isinstance(p["files"], list) or not p["files"]
+                or not all(isinstance(f, str) and f for f in p["files"])):
+            raise ValueError("files: непустой список имён файлов")
         if p["start"] is not None:
             if not isinstance(p["start"], str):
                 raise ValueError("start: строка или null")
@@ -255,7 +258,8 @@ def main(argv: list[str]) -> int:
 
         try:
             if job["kind"] == "import":
-                result = library.import_originals(lay, p["source"], p["chain"], p["start"], log)
+                result = library.import_originals(lay, p["source"], p["chain"], p["start"], log,
+                                                 files=p["files"])
             elif job["kind"] == "process":
                 result = str(library.process_session(lay, p["session_id"], stage, log)
                              .relative_to(lay.root))

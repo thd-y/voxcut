@@ -214,9 +214,18 @@ def _write_json(path: Path, obj) -> None:
     os.replace(tmp, path)
 
 
-def import_originals(lay: Layout, source: str, chain: int, start: str | None, log) -> dict:
-    """U4, D39: inbox/ -> data/sessions/<id>/originals/, unchanged; every refusal before the move."""
+def import_originals(lay: Layout, source: str, chain: int, start: str | None, log,
+                     files: list[str] | None = None) -> dict:
+    """U4, D39: inbox/ -> data/sessions/<id>/originals/, unchanged; every refusal before the move.
+
+    `files` pins the chain the owner clicked: numbers shift once an earlier chain leaves inbox/."""
     src = _source_dir(lay, source)
+    if files is not None:
+        chains = audio.list_chains(str(src))
+        if files not in chains:
+            raise SessionError(f"цепочки {', '.join(files)} нет во входящих (уже импортирована "
+                               f"или файлы изменились); ничего не тронуто")
+        chain = chains.index(files) + 1
     plan = audio.plan_session(str(src), chain, start)
     for p in plan.files:
         audio.check_source(str(p))  # D18

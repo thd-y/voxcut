@@ -257,6 +257,27 @@ def test_import_second_chain_left_without_warning(lay, no_check):
     assert [s["source"] for s in inbox_inventory(lay)["sources"]] == ["13_oct"]
 
 
+def test_import_pinned_to_files_not_position(lay, no_check):
+    """Review #1: chain numbers shift once an earlier chain leaves inbox/."""
+    make_folder(lay.inbox, chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    c1, c2 = [c["files"] for c in inbox_inventory(lay)["sources"][0]["chains"]]
+    import_originals(lay, "", 1, None, _quiet, files=c1)
+    res = import_originals(lay, "", 2, None, _quiet, files=c2)  # queued while chain 1 ran
+    sdir = lay.sessions / res["session_id"]
+    assert sorted(p.name for p in (sdir / "originals").iterdir()) == c2
+    assert json.loads((sdir / "import.json").read_text())["chain"] == 1  # the chain it now is
+
+
+def test_import_repeat_of_gone_chain_refused(lay, no_check):
+    make_folder(lay.inbox, chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    c1 = inbox_inventory(lay)["sources"][0]["chains"][0]["files"]
+    import_originals(lay, "", 1, None, _quiet, files=c1)
+    left = sorted(p.name for p in lay.inbox.iterdir())
+    with pytest.raises(SessionError, match="нет во входящих"):
+        import_originals(lay, "", 1, "2026-08-11 21:30", _quiet, files=c1)  # double click
+    assert sorted(p.name for p in lay.inbox.iterdir()) == left
+
+
 def test_inventory_unreadable_subfolder_skipped(lay, monkeypatch):
     make_folder(lay.inbox / "folder01", chain_starts(2))
     (lay.inbox / "locked").mkdir()

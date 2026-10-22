@@ -140,12 +140,16 @@ def test_dead_unit_without_status_is_failed(lay):
 
 @pytest.mark.parametrize("kind, params", [
     ("shell", {}),
-    ("import", {"source": "../data", "chain": 1, "start": None}),
-    ("import", {"source": "", "chain": 1, "start": None}),  # inbox/ holds no WAV
-    ("import", {"source": "s1", "chain": 0, "start": None}),
-    ("import", {"source": "s1", "chain": True, "start": None}),
-    ("import", {"source": "s1", "chain": 1, "start": "вчера"}),
-    ("import", {"source": "s1", "chain": 1, "start": None, "cmd": "rm"}),
+    ("import", {"source": "../data", "chain": 1, "files": ["a.wav"], "start": None}),
+    ("import", {"source": "", "chain": 1, "files": ["a.wav"], "start": None}),  # inbox/ holds no WAV
+    ("import", {"source": "s1", "chain": 0, "files": ["a.wav"], "start": None}),
+    ("import", {"source": "s1", "chain": True, "files": ["a.wav"], "start": None}),
+    ("import", {"source": "s1", "chain": 1, "files": ["a.wav"], "start": "вчера"}),
+    ("import", {"source": "s1", "chain": 1, "start": None}),  # review #1: files required
+    ("import", {"source": "s1", "chain": 1, "files": [], "start": None}),
+    ("import", {"source": "s1", "chain": 1, "files": "a.wav", "start": None}),
+    ("import", {"source": "s1", "chain": 1, "files": [1], "start": None}),
+    ("import", {"source": "s1", "chain": 1, "files": ["a.wav"], "start": None, "cmd": "rm"}),
     ("process", {"session_id": SID}),
     ("process", {"session_id": "../" + SID}),
     ("backup", {"mode": "all"}),
@@ -163,8 +167,9 @@ def test_validate_accepts(lay):
     (lay.inbox / "s1").mkdir()
     (lay.inbox / "s1" / "a.wav").write_bytes(b"")  # D50: a source folder holds WAV files
     (lay.inbox / "voxcut-backup_x_full.tar").write_bytes(b"")
-    assert validate("import", {"source": "s1", "chain": 2, "start": "2026-08-11 21:30"}, lay) == {
-        "source": "s1", "chain": 2, "start": "2026-08-11 21:30"}
+    assert validate("import", {"source": "s1", "chain": 2, "files": ["a.wav"],
+                               "start": "2026-08-11 21:30"}, lay) == {
+        "source": "s1", "chain": 2, "files": ["a.wav"], "start": "2026-08-11 21:30"}
     assert validate("restore", {"name": "voxcut-backup_x_full.tar"}, lay)
     assert validate("backup", {"mode": "full"}, lay) == {"mode": "full"}
 

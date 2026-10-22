@@ -264,8 +264,8 @@ def test_malicious_note_returned_as_json_text(wapi):
 
 def test_jobs_post_validated(wapi):
     jid = uuid.uuid4().hex
-    for params in ({"source": "../data", "chain": 1, "start": None},
-                   {"source": "/etc", "chain": 1, "start": None}):
+    for params in ({"source": "../data", "chain": 1, "files": ["a.wav"], "start": None},
+                   {"source": "/etc", "chain": 1, "files": ["a.wav"], "start": None}):
         assert post(wapi, "/api/jobs", {"job_id": jid, "kind": "import", "params": params})[0] \
             == 400
     assert post(wapi, "/api/jobs", {"job_id": jid, "kind": "shell", "params": {}})[0] == 400
