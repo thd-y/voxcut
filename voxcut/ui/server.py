@@ -170,14 +170,17 @@ class App:
         files = library.load_json(sj).get("files") if sj.is_file() else None
         spans = jr.session_spans(self.journal.events(), sid)
         clips = []
-        for row in library.clip_table(self.lay, run["seg_dir"]) if run else []:
-            s, e = float(row["start_s"]), float(row["end_s"])
-            with self._lock:
-                self.clips[row["clip_id"]] = (sid, s, e, row["path"])
-            clips.append({"clip_id": row["clip_id"], "n": row["n"], "start_s": s, "end_s": e,
-                          "start_local": row.get("start_local"),
-                          "duration_s": row.get("duration_s", e - s), "p_max": row.get("p_max")}
-                         | jr.span_view(spans, s, e))
+        try:  # one broken run must say why, as list_sessions does, not «внутренняя ошибка»
+            for row in library.clip_table(self.lay, run["seg_dir"]) if run else []:
+                s, e = float(row["start_s"]), float(row["end_s"])
+                with self._lock:
+                    self.clips[row["clip_id"]] = (sid, s, e, row["path"])
+                clips.append({"clip_id": row["clip_id"], "n": row["n"], "start_s": s,
+                              "end_s": e, "start_local": row.get("start_local"),
+                              "duration_s": row.get("duration_s", e - s),
+                              "p_max": row.get("p_max")} | jr.span_view(spans, s, e))
+        except (OSError, ValueError, KeyError, TypeError, library.RunError) as exc:
+            raise HttpError(409, f"прогон не читается: {type(exc).__name__}: {exc}") from None
         return {
             "session_id": sid,
             "start_local": files[0].get("start_local") if files else None,

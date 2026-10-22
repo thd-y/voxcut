@@ -102,6 +102,13 @@ def test_session_view_marks(api):
     assert [c["marks"] for c in clips] == [[], ["моё"], []]
 
 
+def test_broken_session_409_with_reason(api):
+    """Review #5: a broken manifest says why instead of «внутренняя ошибка сервера»."""
+    (api.seg / "clips" / "manifest.jsonl").write_text('{"start_s": 0, "end_s": 5}\n{oops\n')
+    status, _, body = get(api, f"/api/session/{SID}")
+    assert status == 409 and "JSONDecodeError" in json.loads(body)["error"]
+
+
 def test_session_view_parses_journal_once(api, monkeypatch):
     """Review #2: the view cost is events + clips, not events × clips."""
     j = Journal(api.lay.journal)
