@@ -191,3 +191,12 @@ test("launchRect", () => {
   const r = app.launchRect({ width: 1001, height: 701, left: 0, top: 0 });
   assert.ok(Object.values(r).every(Number.isInteger));
 });
+
+test("autoOpenTarget", () => {
+  const s = (id, state) => ({ session_id: id, state });
+  const list = [s("a", "imported"), s("b", "clips"), s("c", "clips")];
+  assert.equal(app.autoOpenTarget([], null), null);
+  assert.equal(app.autoOpenTarget(list, null), "c");
+  assert.equal(app.autoOpenTarget(list, "c"), null);  // tried once: no retry every poll
+  assert.equal(app.autoOpenTarget([s("a", "imported"), s("b", "probs")], null), "a");
+});

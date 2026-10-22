@@ -155,6 +155,7 @@ let KEY = null;
 let serverState = null;    // GET /api/state
 let view = null;           // GET /api/session/{sid}
 let sid = null;            // open session
+let autoTried = null;      // session id the automatic open already tried
 let runId = null;          // explicit run, null = newest
 let openSeq = 0;           // only the newest session response is applied
 let queue = Promise.resolve();  // journal writes in key-press order
@@ -168,7 +169,7 @@ const shownWarnings = new Set();
 const ui = {
   screen: "session", tab: "review", filter: "all", mineFilter: "mine", query: "", inOrder: false,
   selectedId: null, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,
-  loaded: false, audio: "idle", audioError: "", playWhenReady: false,
+  loaded: false, openError: null, audio: "idle", audioError: "", playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
   rechoose: null,  // D52: null | "menu" | the decision awaiting confirmation
   ideaDelete: null, ideaDeleting: false,  // D56: the idea asked about, a delete in flight
@@ -260,6 +261,15 @@ function launchRect(avail) {
     top: avail.top + Math.round((avail.height - height) / 2) };
 }
 
+// The session opened on its own: the newest processed one, else the first; once per session id,
+// so a session that fails to load is not re-requested on every 2 s poll.
+function autoOpenTarget(sessions, tried) {
+  if (!sessions.length) return null;
+  const ready = sessions.filter((s) => s.state === "clips");
+  const id = (ready[ready.length - 1] || sessions[0]).session_id;
+  return id === tried ? null : id;
+}
+
 function fitWindow() {  // once, on a fresh launch code; Edge ignores --window-size when already running
   try {
     const r = launchRect({ width: screen.availWidth, height: screen.availHeight,
@@ -324,9 +334,13 @@ async function pollOnce() {
     }
   }
   const sessions = serverState.sessions;
-  if (sid === null && sessions.length) {
-    const ready = sessions.filter((s) => s.state === "clips");
-    await openSession((ready[ready.length - 1] || sessions[0]).session_id).catch(fail);
+  const auto = sid === null ? autoOpenTarget(sessions, autoTried) : null;
+  if (auto) {
+    autoTried = auto;
+    await openSession(auto).catch((e) => {
+      ui.openError = e.message;  // an empty screen with the reason, not an endless skeleton
+      fail(e);
+    });
   } else if (sid !== null && view && !runId) {
     const row = sessions.find((s) => s.session_id === sid);
     if (row && row.n_clips !== null && row.n_clips !== view.clips.length) await reloadView();
@@ -364,6 +378,7 @@ async function openSession(id, run) {
   runId = run || null;
   view = v;
   ui.loaded = true;
+  ui.openError = null;
   if (changed) {
     closeNote();
     stopAudio();
@@ -472,6 +487,10 @@ function renderSession() {
   $("session-empty").hidden = true;
   if (serverState && !serverState.sessions.length) {
     showSessionEmpty("Сессий пока нет", "Положите записи в папку inbox и импортируйте их в Библиотеке.", true);
+    return;
+  }
+  if (!view && ui.openError) {
+    showSessionEmpty("Сессия не открылась", `${ui.openError}. Откройте другую сессию в Библиотеке.`, true);
     return;
   }
   if (!serverState || !ui.loaded || !view) {
@@ -1401,7 +1420,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect };
+    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget };
 } else {
   start();
 }
