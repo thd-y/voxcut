@@ -27,6 +27,71 @@ function fmtPos(s) {
   return t >= 3600 ? `${Math.floor(t / 3600)}:${String(mm).padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
 }
 
+const KEEP = "моё";
+const REASONS = ["вокал", "музыка", "шум", "другое"];
+
+// R1 + D47: an own decision on this clip's span wins; otherwise several values are a conflict.
+function status(clip) {
+  const own = clip.own_mark || "";
+  const value = own || (clip.marks.length === 1 ? clip.marks[0] : "");
+  if (!value) {
+    return { kind: clip.marks.length ? "conflict" : "undecided", value: "", others: false };
+  }
+  return { kind: value === KEEP ? "kept" : "rejected", value,
+    others: clip.marks.some((m) => m !== value) };
+}
+
+const isDecided = (clip) => ["kept", "rejected"].includes(status(clip).kind);
+
+function counts(clips) {
+  const c = { all: clips.length, undecided: 0, kept: 0, rejected: 0,
+    reasons: Object.fromEntries(REASONS.map((r) => [r, 0])) };
+  for (const clip of clips) {
+    const s = status(clip);
+    if (s.kind === "kept") c.kept++;
+    else if (s.kind === "rejected") {
+      c.rejected++;
+      c.reasons[REASONS.includes(s.value) ? s.value : "другое"]++;
+    } else c.undecided++;
+  }
+  return c;
+}
+
+function nextUndecided(clips, from) {
+  const after = clips.findIndex((c, i) => i > from && !isDecided(c));
+  return after >= 0 ? after : clips.findIndex((c) => !isDecided(c));
+}
+
+const norm = (text) => text.trim().toLocaleLowerCase("ru").replaceAll("ё", "е");
+
+function visibleClips(clips, { tab, filter, query }) {
+  if (tab === "mine") {
+    const q = norm(query || "");
+    return clips.filter((c) => status(c).kind === "kept"
+      && (filter !== "noted" || c.notes.length > 0)
+      && (!q || c.notes.some((n) => norm(n.value).includes(q))));
+  }
+  if (filter === "all") return clips;
+  return clips.filter((c) => {
+    const k = status(c).kind;
+    return filter === "undecided" ? !isDecided(c) : k === filter;
+  });
+}
+
+function gapBefore(clips, i, min = 30) {
+  if (i <= 0) return null;
+  const gap = clips[i].start_s - clips[i - 1].end_s;
+  return gap >= min ? gap : null;
+}
+
+const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
+
+function undoTarget(stack, clips) {
+  const entry = stack.pop();
+  if (!entry) return null;
+  return { entry, index: clips.findIndex((c) => c.clip_id === entry.clip_id) };
+}
+
 // --- screen ---
 
 let KEY = null;
@@ -395,7 +460,8 @@ function bind() {
 }
 
 if (typeof module === "object") {
-  module.exports = { parseSessionName, clockOf, fmtDur, fmtPos };
+  module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
+    counts, nextUndecided, visibleClips, gapBefore, undoEntry, undoTarget };
 } else {
   start();
 }
