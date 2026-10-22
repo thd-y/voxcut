@@ -268,6 +268,17 @@ def test_import_pinned_to_files_not_position(lay, no_check):
     assert json.loads((sdir / "import.json").read_text())["chain"] == 1  # the chain it now is
 
 
+def test_import_symlink_refused_before_move(lay, no_check, tmp_path):
+    """Review #3: os.rename would move only the link; the recording would stay outside data/."""
+    paths = make_folder(lay.inbox, chain_starts(2))
+    real = tmp_path / "elsewhere.WAV"
+    os.rename(paths[1], real)
+    paths[1].symlink_to(real)
+    with pytest.raises(SessionError, match="ссылка"):
+        import_originals(lay, "", 1, None, _quiet)
+    assert paths[0].is_file() and paths[1].is_symlink() and list(lay.sessions.iterdir()) == []
+
+
 def test_import_repeat_of_gone_chain_refused(lay, no_check):
     make_folder(lay.inbox, chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
     c1 = inbox_inventory(lay)["sources"][0]["chains"][0]["files"]

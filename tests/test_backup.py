@@ -181,6 +181,23 @@ def test_restore_sha_checked_before_extract(lay, lay2):
     assert tree(lay2.data) == {}
 
 
+@pytest.mark.parametrize("case", ["originals_tmp", "symlink"])
+def test_full_backup_refuses_recordings_it_would_skip(lay, tmp_path, case):
+    """Review #3: «full» must not silently leave out the only copies of recordings."""
+    make_data(lay)
+    s = lay.sessions / SID
+    if case == "originals_tmp":
+        (s / "originals.tmp").mkdir()
+        (s / "originals.tmp" / "20250301092922.WAV").write_bytes(b"orig")
+    else:
+        (tmp_path / "elsewhere.WAV").write_bytes(b"orig")
+        (s / "originals" / "20250301092922.WAV").symlink_to(tmp_path / "elsewhere.WAV")
+    with pytest.raises(RunError, match="20250301092922.WAV"):
+        make_backup(lay, "full", NOW)
+    assert list(lay.backups.iterdir()) == []
+    assert make_backup(lay, "light", NOW)  # light leaves originals out by design
+
+
 def test_backup_tmp_not_published_on_error(lay, monkeypatch):
     make_data(lay)
     calls = []

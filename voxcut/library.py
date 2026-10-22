@@ -228,6 +228,9 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
         chain = chains.index(files) + 1
     plan = audio.plan_session(str(src), chain, start)
     for p in plan.files:
+        if p.is_symlink():  # os.rename would move the link, not the recording
+            raise SessionError(f"{p.name}: ссылка, а не файл; положите во входящие сам файл "
+                               f"записи; ничего не тронуто")
         audio.check_source(str(p))  # D18
     before = {p.name: audio.sha256_file(str(p)) for p in plan.files}
     shas = set(before.values())
@@ -368,6 +371,13 @@ def make_backup(lay: Layout, mode: str, now: datetime) -> str:
     dst = lay.backups / name
     if dst.exists():
         raise RunError(f"{name} уже есть; бэкапы не перезаписываются")
+    if mode == "full":  # _backup_files skips these: «full» must not silently lose recordings
+        odd = sorted([*lay.sessions.glob("*/originals.tmp/*"),
+                      *(p for p in lay.sessions.glob("*/originals/*") if p.is_symlink())])
+        if odd:
+            raise RunError("full-бэкап отменён: записи вне originals/ или ссылки — "
+                           + ", ".join(str(p.relative_to(lay.data)) for p in odd)
+                           + " (originals.tmp — незавершённый импорт, его доделывает «Обработать»)")
     tmp = lay.backups / (name + ".tmp")
     files: dict[str, str] = {}
     try:
