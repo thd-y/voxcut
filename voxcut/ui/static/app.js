@@ -84,15 +84,18 @@ function gapBefore(clips, i, min = 30) {
   return gap >= min ? gap : null;
 }
 
-// D51: «22.10 04:25» in local time.
-function ideaTime(ts) {
+// Local time: «22.10 04:25» (D51), with the year «22.10.2026 04:25» (D61); "" if unparsable.
+function localTime(ts, withYear) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "";
   const two = (n) => String(n).padStart(2, "0");
-  return `${two(d.getDate())}.${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  const date = `${two(d.getDate())}.${two(d.getMonth() + 1)}${withYear ? `.${d.getFullYear()}` : ""}`;
+  return `${date} ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
-const backupTime = (value) => ideaTime(value) || value;  // D51 format; anything unparsable as is
+const ideaTime = (ts) => localTime(ts, false);
+
+const backupTime = (value) => localTime(value, true) || value;  // D61; anything unparsable as is
 
 const gapLabel = (seconds) => `пауза ${fmtPos(seconds)}`;  // D54
 
@@ -1377,7 +1380,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, undoEntry, undoTarget, DECISIONS, keyAction };
+    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction };
 } else {
   start();
 }

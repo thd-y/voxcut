@@ -79,11 +79,12 @@ test("gapLabel", () => {
   assert.equal(app.gapLabel(273), "пауза 4:33");
 });
 
-test("backupTime", () => {  // D51 format for «Последний бэкап»
+test("backupTime", () => {  // D61: «Последний бэкап» with the year
   const tz = process.env.TZ;
   process.env.TZ = "Europe/Moscow";
   try {
-    assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00"), "22.10 06:53");
+    assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00"), "22.10.2026 06:53");  // D61
+    assert.equal(app.ideaTime("2026-10-22T06:53:19.402+03:00"), "22.10 06:53");  // D51 unchanged
     assert.equal(app.backupTime(""), "");
     assert.equal(app.backupTime("мусор"), "мусор");
   } finally {
