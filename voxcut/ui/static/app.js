@@ -137,7 +137,7 @@ let scrolledId = null;
 const shownWarnings = new Set();
 const ui = {
   screen: "session", tab: "review", filter: "all", mineFilter: "mine", query: "", inOrder: false,
-  selectedId: null, undo: [], pending: new Set(), hideSummary: false, theme: null, fatal: false,
+  selectedId: null, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,
   loaded: false, audio: "idle", audioError: "", playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
 };
@@ -200,6 +200,10 @@ async function api(method, path, body) {
     throw e;
   }
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401 || r.status === 403) {  // the key is gone (server restarted): reopen the window
+    ui.fatal = true;
+    render();
+  }
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
 }
@@ -237,14 +241,19 @@ async function start() {
 
 // --- server state ---
 
+let polling = false;
 async function poll() {
+  if (polling || ui.fatal) return;  // a slow response must not stack polls (each would restart openSession)
+  polling = true;
   try {
     serverState = await api("GET", "/api/state");
     $("conn-alert").hidden = true;
   } catch (e) {
     if (e.offline) $("conn-alert").hidden = false;
-    else toast("Ошибка", e.message, true);
+    else if (!ui.fatal) toast("Ошибка", e.message, true);
     return;
+  } finally {
+    polling = false;
   }
   for (const w of serverState.journal_warnings) {
     if (!shownWarnings.has(w)) {
@@ -265,8 +274,11 @@ async function poll() {
 
 function fail(e) {
   if (e.offline) $("conn-alert").hidden = false;
-  else toast("Ошибка", e.message, true);
+  else if (!ui.fatal) toast("Ошибка", e.message, true);
 }
+
+const sessionPath = (id, run) =>
+  `/api/session/${encodeURIComponent(id)}${run ? `?run=${encodeURIComponent(run)}` : ""}`;
 
 function sessionRow(id) {
   return serverState && serverState.sessions.find((s) => s.session_id === id);
@@ -283,7 +295,7 @@ async function openSession(id, run) {
     ui.loaded = false;
     render();
   }
-  const v = await api("GET", `/api/session/${encodeURIComponent(id)}${run ? `?run=${run}` : ""}`);
+  const v = await api("GET", sessionPath(id, run));
   if (seq !== openSeq) return;
   const changed = id !== sid || (run || null) !== runId;
   sid = id;
@@ -309,9 +321,9 @@ async function openSession(id, run) {
 // After a write: re-read the session, unless another write is still in flight.
 async function reloadView() {
   if (!sid || ui.pending.size) return;
-  const seq = ++openSeq;
-  const v = await api("GET", `/api/session/${encodeURIComponent(sid)}${runId ? `?run=${runId}` : ""}`);
-  if (seq !== openSeq || ui.pending.size) return;
+  const seq = openSeq;  // not bumped: a reload must never cancel a newer openSession
+  const v = await api("GET", sessionPath(sid, runId));
+  if (seq !== openSeq || ui.pending.size || !ui.loaded) return;
   view = v;
   keepSelection();
   render();
@@ -319,6 +331,7 @@ async function reloadView() {
 
 function keepSelection() {
   if (ui.selectedId && !view.clips.some((c) => c.clip_id === ui.selectedId)) {
+    closeNote();
     ui.selectedId = null;  // the clip is not in this run
     stopAudio();
   }
@@ -428,6 +441,12 @@ function renderSkeleton() {
   setDecisionsEnabled(false);
 }
 
+function setKids(node, sig, build) {
+  if (node.dataset.sig === sig) return;
+  node.dataset.sig = sig;
+  node.replaceChildren(...build());
+}
+
 function chip(text, active, onClick) {
   const b = el("button", text, "badge");
   b.type = "button";
@@ -447,14 +466,14 @@ function renderFilters() {
   };
   if (mine) {
     const kept = view.clips.filter((x) => status(x).kind === "kept");
-    $("filters").replaceChildren(
+    const noted = kept.filter((x) => x.notes.length).length;
+    setKids($("filters"), JSON.stringify(["mine", kept.length, noted, ui.mineFilter]), () => [
       chip(`мои ${kept.length}`, ui.mineFilter === "mine", set("mineFilter", "mine")),
-      chip(`с заметкой ${kept.filter((x) => x.notes.length).length}`, ui.mineFilter === "noted",
-        set("mineFilter", "noted")));
+      chip(`с заметкой ${noted}`, ui.mineFilter === "noted", set("mineFilter", "noted"))]);
   } else {
     const f = [["all", "все", c.all], ["undecided", "не разобраны", c.undecided],
       ["kept", "оставлены", c.kept], ["rejected", "отброшены", c.rejected]];
-    $("filters").replaceChildren(...f.map(([k, label, n]) =>
+    setKids($("filters"), JSON.stringify(["review", f, ui.filter]), () => f.map(([k, label, n]) =>
       chip(`${label} ${n}`, ui.filter === k, set("filter", k))));
   }
 }
@@ -469,7 +488,8 @@ function statusBadge(clip) {
     b.dataset.variant = "secondary";
     b.textContent = s.value;
   } else if (s.kind === "conflict") {
-    b.dataset.variant = "destructive";
+    b.dataset.variant = "outline";
+    b.classList.add("conflict");
     b.textContent = "разные решения";
   } else {
     b.dataset.variant = "outline";
@@ -549,9 +569,18 @@ function setDecisionsEnabled(on) {
   $("note-btn").disabled = !on;
 }
 
+function summaryShown() {
+  if (!view || ui.screen !== "session" || ui.tab !== "review" || ui.hideSummary) return false;
+  const c = counts(view.clips);
+  return c.all > 0 && c.undecided === 0;
+}
+
+// Clip keys act only on a clip that is on screen: not behind the summary, not during a load.
+const clipOnScreen = () => ui.screen === "session" && ui.loaded && !summaryShown() && !!selected();
+
 function renderCard() {
   const c = counts(view.clips);
-  const summary = ui.tab === "review" && c.all > 0 && c.undecided === 0 && !ui.hideSummary;
+  const summary = summaryShown();
   $("summary").hidden = !summary;
   $("card-top").hidden = summary;
   $("card-body").hidden = summary;
@@ -588,19 +617,20 @@ function renderCard() {
   const own = ownNote(clip);
   $("note-btn").firstChild.textContent = own ? "заметка " : "+ заметка ";
   $("note-box").hidden = ui.noteClipId !== clip.clip_id;
-  const nv = $("note-view");
-  if (own && ui.noteClipId !== clip.clip_id) {
-    const p = el("p", own.value, `note-text${ui.expanded ? "" : " clamped"}`);
-    const parts = [p];
+  const showOwn = own && ui.noteClipId !== clip.clip_id;
+  setKids($("note-view"), JSON.stringify([clip.clip_id, showOwn && own.value, ui.expanded]), () => {
+    if (!showOwn) return [];
+    const parts = [el("p", own.value, `note-text${ui.expanded ? "" : " clamped"}`)];
     if (own.value.length > 160 || own.value.split("\n").length > 2) {
       parts.push(button(ui.expanded ? "свернуть" : "ещё", () => {
         ui.expanded = !ui.expanded;
         render();
       }, "link", "sm"));
     }
-    nv.replaceChildren(...parts);
-  } else nv.replaceChildren();
-  $("other-notes").replaceChildren(...clip.notes.filter((n) => !n.own).map((n) => {
+    return parts;
+  });
+  const others = clip.notes.filter((n) => !n.own);
+  setKids($("other-notes"), JSON.stringify(others.map((n) => n.value)), () => others.map((n) => {
     const box = el("div", null, "other-note");
     box.append(el("p", "с другого прогона", "muted small"), el("p", n.value, "note-text"));
     return box;
@@ -660,7 +690,8 @@ function drawTimeline() {
 function renderLibrary() {
   const st = serverState;
   if (!st) return;
-  $("sessions").replaceChildren(...(st.sessions.length ? st.sessions.map((s) => {
+  const runs = sid && view ? [sid, runId, view.run_id, view.runs] : null;
+  setKids($("sessions"), JSON.stringify([st.sessions, runs]), () => (st.sessions.length ? st.sessions.map((s) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
     head.append(el("strong", sessionLabel(s)),
@@ -731,7 +762,7 @@ function renderLibrary() {
     inbox.replaceChildren(...parts);
   }
 
-  $("jobs").replaceChildren(...(st.jobs.length ? st.jobs.slice().reverse().map((j) => {
+  setKids($("jobs"), JSON.stringify(st.jobs), () => (st.jobs.length ? st.jobs.slice().reverse().map((j) => {
     const box = el("div", null, "lib-row");
     box.append(el("strong", `${NAMES[j.kind] || j.kind}: ${JOB_STATES[j.state] || j.state}`
       + `${j.stage ? `, этап ${j.stage}` : ""}`));
@@ -746,7 +777,8 @@ function renderLibrary() {
 
   $("backup-info").textContent = st.last_backup
     ? `Последний бэкап: ${st.last_backup}` : "Бэкапов ещё не было.";
-  $("ideas").replaceChildren(...st.ideas.slice().reverse().map((i) => el("li", i.value)));
+  setKids($("ideas"), JSON.stringify(st.ideas.map((i) => i.event_id)),
+    () => st.ideas.slice().reverse().map((i) => el("li", i.value)));
 }
 
 async function submit(kind, params) {
@@ -811,7 +843,7 @@ async function loadAudio(clip, autoplay) {
 
 function togglePlay() {
   const clip = selected();
-  if (!clip) return;
+  if (!clipOnScreen()) return;
   const p = $("player");
   if (playingId === clip.clip_id && ui.audio === "loading") {
     ui.playWhenReady = !ui.playWhenReady;
@@ -828,6 +860,7 @@ function togglePlay() {
 }
 
 function seek(delta) {
+  if (!clipOnScreen()) return;
   const p = $("player");
   if (playingId !== ui.selectedId || !Number.isFinite(p.duration)) return;
   p.currentTime = Math.max(0, Math.min(p.duration, p.currentTime + delta));
@@ -839,6 +872,7 @@ function seek(delta) {
 function select(clipId, { play = false } = {}) {
   if (clipId !== ui.selectedId) {
     closeNote();
+    $("note-status").textContent = "";
     ui.expanded = false;
     ui.selectedId = clipId;
     $("player").pause();  // the old clip must not end (and become «heard») as the new one
@@ -849,7 +883,7 @@ function select(clipId, { play = false } = {}) {
 
 function step(delta) {
   const list = shown();
-  if (!list.length) return;
+  if (!list.length || !ui.loaded || summaryShown()) return;
   const pos = list.findIndex((c) => c.clip_id === ui.selectedId);
   const next = list[pos < 0 ? 0 : Math.max(0, Math.min(list.length - 1, pos + delta))];
   select(next.clip_id, { play: ui.tab === "mine" && ui.inOrder });
@@ -891,7 +925,7 @@ function setMark(clip, value) {
 
 function decide(value) {
   const clip = selected();
-  if (!clip || ui.screen !== "session") return;
+  if (!clipOnScreen()) return;
   const entry = undoEntry(clip);  // before setMark: it records the previous own decision
   ui.undo.push(entry);
   $("player").pause();
@@ -915,7 +949,7 @@ function decide(value) {
 }
 
 function undo() {
-  if (ui.screen !== "session" || !view) return;
+  if (ui.screen !== "session" || !view || !ui.loaded) return;
   const t = undoTarget(ui.undo, view.clips);
   if (!t) {
     toast("Отменять нечего");
@@ -959,15 +993,20 @@ function openNote() {
   if (ui.noteClipId !== clip.clip_id) {
     ui.noteClipId = clip.clip_id;
     const own = ownNote(clip);
-    $("note").value = own ? own.value : "";
-    $("note-status").textContent = "";
+    const draft = ui.drafts.get(clip.clip_id);
+    $("note").value = draft !== undefined ? draft : (own ? own.value : "");
   }
   $("note-box").hidden = false;
   render();
   $("note").focus();
 }
 
+// Closing never drops typed text: what differs from the saved note stays as this clip's draft.
 function closeNote() {
+  const id = ui.noteClipId;
+  const clip = id && view && view.clips.find((c) => c.clip_id === id);
+  const own = clip && ownNote(clip);
+  if (id && $("note").value !== (own ? own.value : "")) ui.drafts.set(id, $("note").value);
   ui.noteClipId = null;
   $("note-box").hidden = true;
 }
@@ -980,6 +1019,7 @@ async function saveNote() {
   const text = $("note").value;
   const own = clip && ownNote(clip);
   if (!clip || text === (own ? own.value : "")) {
+    if (clip) ui.drafts.delete(id);
     closeNote();
     render();
     return;
@@ -992,13 +1032,17 @@ async function saveNote() {
     const r = await journal("note", text, clip);
     clip.notes = clip.notes.filter((n) => !n.own);
     if (text) clip.notes.unshift({ event_id: r.event.event_id, value: text, own: true });
-    if (ui.noteClipId === id) closeNote();
+    if (ui.drafts.get(id) === text) ui.drafts.delete(id);
+    // typed on while saving: keep the field open, the next Esc saves the rest
+    if (ui.noteClipId === id && $("note").value === text) closeNote();
     st.textContent = "сохранено";
     noteTimer = setTimeout(() => { st.textContent = ""; }, 2000);
     render();
     reloadView().catch(fail);
   } catch (e) {
-    st.textContent = `не сохранено: ${e.message}`;  // the text stays in the field; Esc retries
+    if (ui.noteClipId !== id) ui.drafts.set(id, text);  // left the clip: N on it brings the text back
+    else st.textContent = `не сохранено: ${e.message}`;  // the text stays in the field; Esc retries
+    toast("Заметка не сохранена", `${e.message}. Текст сохранён в поле заметки этого клипа.`, true);
   } finally {
     ui.noteSaving = false;
   }
