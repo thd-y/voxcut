@@ -378,7 +378,7 @@ def process_session(lay: Layout, sid: str, stage, log) -> Path:
 
 
 JOURNAL_MEMBER = "data/journal/journal.jsonl"
-LAST_ON_RESTORE = ("run.json", "manifest.jsonl", "import.json")  # completion markers go last
+LAST_ON_RESTORE = ("run.json", "manifest.jsonl", "import.json", "probs.json")  # markers last
 
 
 def _backup_files(lay: Layout, mode: str) -> list[Path]:

@@ -92,6 +92,27 @@ def test_restore_into_empty_root(lay, lay2):
     assert (lay2.inbox / name).exists()  # the owner's archive is never removed
 
 
+def test_restore_interrupted_never_publishes_probs_json_alone(lay, lay2, monkeypatch):
+    """probs.json marks a finished probs dir: it goes into data/ after probs.npy."""
+    make_data(lay)
+    raw = lay.sessions / SID / "x.c0.raw"
+    (raw / "probs.npy").write_bytes(b"npy")
+    (raw / "probs.json").write_text("{}")
+    name = make_backup(lay, "full", NOW)
+    to_inbox(lay2, lay, name)
+    real = os.replace
+
+    def replace(src, dst):
+        if os.path.basename(dst) == "probs.npy":
+            raise SystemExit(143)  # SIGTERM between two moves
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    with pytest.raises(SystemExit):
+        restore_backup(lay2, name, lay2.run / "journal.in")
+    assert not (lay2.sessions / SID / "x.c0.raw" / "probs.json").exists()
+
+
 def _evil_tar(lay, kind):
     name = "voxcut-backup_2026-10-21_10-00_full.tar"
     files = {}
