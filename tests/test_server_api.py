@@ -88,7 +88,7 @@ def test_session_view(api):
         "run_id", "name", "created"}
     c0 = v["clips"][0]
     assert set(c0) == {"clip_id", "n", "start_s", "end_s", "start_local", "duration_s",
-                       "p_max", "marks", "notes", "heard"}
+                       "p_max", "marks", "notes", "heard", "own_mark"}
     assert "secret" not in json.dumps(v)  # no paths reach the client
     assert session(api, query=f"?run={v['run_id']}") == v
     assert get(api, f"/api/session/{SID}?run=ffffffffffff")[0] == 404
@@ -413,3 +413,94 @@ def test_stream_error_logged_by_type_only(api, capfd, tmp_path):
     err = capfd.readouterr().err
     assert "secret-dir" not in err and "Traceback" not in err
     assert "secret-dir" not in "\n".join(logs) and any("OSError" in x for x in logs)
+
+
+# --- D49: open inbox/ in Explorer ---
+
+@pytest.fixture
+def oapi(wapi):
+    calls = []
+    wapi.app.open_folder = calls.append
+    wapi.opened = calls
+    return wapi
+
+
+def test_inbox_open_calls_explorer_with_fixed_path(oapi):
+    assert post(oapi, "/api/inbox/open", {})[::2] == (200, {"ok": True})
+    assert oapi.opened == [oapi.lay.inbox]
+
+
+def test_inbox_open_rejects_body_fields(oapi):
+    assert post(oapi, "/api/inbox/open", {"path": "/etc"})[0] == 400
+    assert oapi.opened == []
+
+
+def test_inbox_open_without_key_is_401(oapi):
+    assert oapi.req("POST", "/api/inbox/open", {})[0] == 401
+    status, _, _ = oapi.req("POST", "/api/inbox/open", {}, key=oapi.k, origin=False,
+                            headers={"Sec-Fetch-Site": "same-origin"})
+    assert status == 403
+    assert oapi.opened == []
+
+
+def test_inbox_open_tool_missing_is_503(oapi):
+    def missing(path):
+        raise FileNotFoundError("wslpath")
+
+    oapi.app.open_folder = missing
+    status, _, body = post(oapi, "/api/inbox/open", {})
+    assert status == 503 and "проводник недоступен" in body["error"]
+
+
+def test_open_folder_argv(tmp_path):
+    runs, popens = [], []
+
+    def run(argv, **kw):
+        runs.append(argv)
+        return type("R", (), {"stdout": "\\\\wsl.localhost\\U\\inbox\n"})()
+
+    def popen(argv, **kw):
+        popens.append((argv, kw))
+
+    target = tmp_path / "inbox"
+    server_mod.open_folder(target, run=run, popen=popen)
+    assert target.is_dir()
+    assert runs == [["wslpath", "-w", str(target)]]
+    argv, kw = popens[0]
+    assert argv == ["explorer.exe", "\\\\wsl.localhost\\U\\inbox"]
+    assert kw["start_new_session"] is True and "shell" not in kw
+
+
+# --- D56: delete an idea ---
+
+def idea(c, value="идея"):
+    e = {"event_id": uuid.uuid4().hex, "kind": "idea", "value": value}
+    assert post(c, "/api/journal", e)[0] == 200
+    return e["event_id"]
+
+
+def lines(c):
+    return c.lay.journal.read_text().splitlines()
+
+
+def test_idea_delete_hides_from_state(wapi):
+    keep, gone = idea(wapi, "остаётся"), idea(wapi, "уходит")
+    d = {"event_id": uuid.uuid4().hex, "kind": "idea_deleted", "value": gone}
+    assert post(wapi, "/api/journal", d)[0] == 200
+    assert post(wapi, "/api/journal", d)[0] == 200  # the same event_id again: idempotent
+    st = json.loads(get(wapi, "/api/state")[2])
+    assert [i["event_id"] for i in st["ideas"]] == [keep]
+    assert sum('"idea_deleted"' in line for line in lines(wapi)) == 1
+
+
+@pytest.mark.parametrize("case", ["mark", "unknown", "extra_field"])
+def test_idea_delete_refused(wapi, case):
+    m = mark(wapi)
+    assert post(wapi, "/api/journal", m)[0] == 200
+    target = {"mark": m["event_id"], "unknown": uuid.uuid4().hex}.get(case, idea(wapi))
+    d = {"event_id": uuid.uuid4().hex, "kind": "idea_deleted", "value": target}
+    if case == "extra_field":
+        d["session_id"] = "x"
+    before = len(lines(wapi))
+    assert post(wapi, "/api/journal", d)[0] == 400
+    assert len(lines(wapi)) == before

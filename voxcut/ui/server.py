@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -45,6 +46,9 @@ STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
+    "/vendor/basecoat-luma.css": ("vendor/basecoat-luma.css", "text/css; charset=utf-8"),
+    "/vendor/lucide-sprite.svg": ("vendor/lucide-sprite.svg", "image/svg+xml"),
+    "/favicon.svg": ("img/favicon.svg", "image/svg+xml"),  # D60: Lucide audio-waveform
 }
 JSON_TYPE = "application/json; charset=utf-8"
 
@@ -79,9 +83,18 @@ def _log(line: str) -> None:
         pass  # a closed console must not cost the request its response
 
 
+def open_folder(path: Path, run=subprocess.run, popen=subprocess.Popen) -> None:
+    """D49: show a fixed folder in Windows Explorer; its exit code means nothing, so not awaited."""
+    path.mkdir(exist_ok=True)
+    win = run(["wslpath", "-w", str(path)], capture_output=True, text=True, check=True).stdout.strip()
+    popen(["explorer.exe", win], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+          stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 class App:
     def __init__(self, lay: Layout, port: int, jobs=None, journal: Journal | None = None):
         self.lay, self.port, self.jobs = lay, port, jobs
+        self.open_folder = open_folder
         self.journal = journal if journal is not None else Journal(lay.journal)
         self.clock = time.monotonic
         self.log = _log
@@ -98,6 +111,7 @@ class App:
         self.route("POST", "/api/journal")(self._journal_post)
         self.route("POST", "/api/jobs")(self._jobs_post)
         self.route("POST", "/api/jobs/{job_id}/cancel")(self._jobs_cancel)
+        self.route("POST", "/api/inbox/open")(self._inbox_open)
 
     def route(self, method: str, template: str):
         """Register a handler for templates like /api/session/{sid}; {x} matches one segment."""
@@ -210,13 +224,29 @@ class App:
                     r["session_id"] for r in library.list_sessions(self.lay)}:
                 raise HttpError(400, "нет такой сессии")
             event = dict(b)
+        elif kind == "idea_deleted":  # D56
+            if set(b) != {"event_id", "kind", "value"}:
+                raise HttpError(400, "поля: event_id, kind, value")
+            if not any(e["kind"] == "idea" and e["event_id"] == b["value"]
+                       for e in self.journal.events()):
+                raise HttpError(400, "нет такой идеи")
+            event = dict(b)
         else:
-            raise HttpError(400, "kind: mark, note, heard или idea")
+            raise HttpError(400, "kind: mark, note, heard, idea или idea_deleted")
         try:
             saved = self.journal.append(event)  # returns after fsync (U5)
         except jr.JournalError as exc:
             raise HttpError(400, str(exc)) from None
         return {"saved": True, "event": saved}
+
+    def _inbox_open(self, req: Request) -> dict:
+        if set(req.body) != set():
+            raise HttpError(400, "тело: {}")
+        try:
+            self.open_folder(self.lay.inbox)  # D49: the path is fixed here, never from the request
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise HttpError(503, f"проводник недоступен: {exc}") from None
+        return {"ok": True}
 
     def _jobs_post(self, req: Request) -> dict:
         b = req.body

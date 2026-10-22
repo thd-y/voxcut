@@ -1,3 +1,4 @@
+import hashlib
 import re
 import threading
 
@@ -10,15 +11,27 @@ from voxcut.ui.server import STATIC, STATIC_DIR, make_server
 FORBIDDEN = ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(",
              "new Function", 'setAttribute("style"', "setAttribute('style'", "localStorage",
              "sessionStorage", "document.cookie", "http://", "https://", "localhost"]
+BASECOAT_SHA256 = "744bb04803c3480d1e79b3cfd38ecb6b103075400774cb89bf57b5e27e6d15a2"
+LUCIDE_SHA256 = "eeeb8ec76ade50ef1e41547941836815006d4976366b33b7e1ab796ea38ccf24"  # lucide-static 1.52.0, D55/D58
+LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mic-vocal", "music",
+                "audio-waveform", "ellipsis", "notebook-pen", "lightbulb", "pencil", "folder-open",
+                "folder-input", "cog", "archive", "x", "maximize-2"]  # D55, D58
+LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt"}
 
 
-def static_files():
-    return sorted(p for p in STATIC_DIR.iterdir() if p.is_file())
+SVG_NS = 'xmlns="http://www.w3.org/2000/svg"'  # a standalone SVG needs it; not a request
 
 
-@pytest.mark.parametrize("path", static_files(), ids=lambda p: p.name)
+def static_files():  # our own files at any depth; vendor/ is pinned by sha256 instead
+    return sorted(p for p in STATIC_DIR.rglob("*")
+                  if p.is_file() and p.relative_to(STATIC_DIR).parts[0] != "vendor")
+
+
+@pytest.mark.parametrize("path", static_files(), ids=lambda p: p.relative_to(STATIC_DIR).as_posix())
 def test_static_rules(path):
     text = path.read_text()
+    if path.suffix == ".svg":
+        text = text.replace(SVG_NS, "")
     found = [w for w in FORBIDDEN if w in text]
     assert found == [], f"{path.name}: {found}"
     if path.suffix == ".html":
@@ -26,11 +39,43 @@ def test_static_rules(path):
         assert not re.search(r"\sstyle\s*=", text, re.IGNORECASE), "inline style"
         assert not re.search(r"<script[^>]*>\s*[^<\s]", text, re.IGNORECASE), "inline script body"
         assert re.findall(r'<script[^>]*src="([^"]+)"', text) == ["/app.js"]
-        assert re.findall(r'<link[^>]*href="([^"]+)"', text) == ["/app.css"]
+        assert re.findall(r'<link[^>]*href="([^"]+)"', text) == [
+            "/vendor/basecoat-luma.css", "/app.css", "/favicon.svg"]
+
+
+def test_light_tokens_scoped():
+    # Audit 2026-10-22: light-only overrides; on plain :root they would also win over Basecoat's .dark
+    css = (STATIC_DIR / "app.css").read_text()
+    blocks = re.findall(r"([^{}]+)\{([^}]*)\}", css)
+    for token in ("--muted-foreground:", "--destructive:"):
+        where = [sel.strip().split("\n")[-1].strip() for sel, body in blocks if token in body]
+        assert where == [":root:not(.dark)"], (token, where)
 
 
 def test_static_table_covers_all_files():
-    assert {name for name, _ in STATIC.values()} == {p.name for p in static_files()}
+    files = {p.relative_to(STATIC_DIR).as_posix() for p in STATIC_DIR.rglob("*") if p.is_file()}
+    assert {name for name, _ in STATIC.values()} == files - LICENSES
+
+
+def test_vendor_basecoat_pinned():
+    data = (STATIC_DIR / "vendor" / "basecoat-luma.css").read_bytes()
+    assert hashlib.sha256(data).hexdigest() == BASECOAT_SHA256
+    assert (STATIC_DIR / "vendor" / "LICENSE.md").is_file()
+
+
+def test_vendor_lucide_pinned():
+    data = (STATIC_DIR / "vendor" / "lucide-sprite.svg").read_bytes()
+    assert hashlib.sha256(data).hexdigest() == LUCIDE_SHA256
+    assert (STATIC_DIR / "vendor" / "LICENSE-lucide.txt").is_file()
+    assert re.findall(r'<symbol id="([^"]+)"', data.decode()) == LUCIDE_ICONS
+
+
+def test_icon_refs_exist_in_sprite():
+    refs = set()
+    for name in ("index.html", "app.js"):
+        refs |= set(re.findall(r"/vendor/lucide-sprite\.svg#([a-z0-9-]+)",
+                               (STATIC_DIR / name).read_text()))
+    assert refs and refs <= set(LUCIDE_ICONS)
 
 
 def test_index_served_with_csp(tmp_path):
@@ -41,9 +86,11 @@ def test_index_served_with_csp(tmp_path):
     threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True).start()
     try:
         c = Client(app)
-        for path in ("/", "/app.js", "/app.css"):
+        for path in ("/", "/app.js", "/app.css", "/vendor/basecoat-luma.css",
+                     "/vendor/lucide-sprite.svg", "/favicon.svg"):
             status, headers, _ = c.req("GET", path)
             assert status == 200 and {k: headers.get(k) for k in SECURITY} == SECURITY
+        assert c.req("GET", "/favicon.svg")[1].get("Content-Type") == "image/svg+xml"  # D60
     finally:
         server.shutdown()
         server.server_close()
