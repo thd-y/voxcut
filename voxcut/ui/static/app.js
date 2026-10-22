@@ -92,6 +92,33 @@ function undoTarget(stack, clips) {
   return { entry, index: clips.findIndex((c) => c.clip_id === entry.clip_id) };
 }
 
+const DECISIONS = [KEEP, ...REASONS];  // keys 1..5 (R2)
+
+// R10: physical keys (KeyboardEvent.code), the same in Russian and English layouts.
+function keyAction(ev, { inField, dialogOpen, screen }) {
+  const { code } = ev;
+  if (inField) {
+    if (code === "Escape") return "escape";
+    return dialogOpen && ev.ctrlKey && code === "Enter" ? "save-idea" : null;
+  }
+  if (dialogOpen) return code === "Escape" ? "escape" : null;
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) {
+    return ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey && code === "KeyZ" ? "undo" : null;
+  }
+  const work = screen !== "library";
+  const digit = /^(?:Digit|Numpad)([1-5])$/.exec(code);
+  if (digit) return work && !ev.repeat ? `mark:${DECISIONS[digit[1] - 1]}` : null;
+  if (code === "ArrowLeft" || code === "ArrowRight") {
+    if (!work) return null;
+    if (ev.shiftKey) return code === "ArrowLeft" ? "seek:-5" : "seek:5";
+    return code === "ArrowLeft" ? "prev" : "next";
+  }
+  if (code === "Slash") return ev.shiftKey ? "help" : (screen === "mine" ? "search" : null);
+  const simple = { Space: work && "play", KeyN: work && "note", KeyM: work && "tab",
+    KeyI: "idea", KeyG: "library", Escape: "escape" };
+  return (Object.hasOwn(simple, code) && simple[code]) || null;
+}
+
 // --- screen ---
 
 let KEY = null;
@@ -461,7 +488,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, undoEntry, undoTarget };
+    counts, nextUndecided, visibleClips, gapBefore, undoEntry, undoTarget, DECISIONS, keyAction };
 } else {
   start();
 }

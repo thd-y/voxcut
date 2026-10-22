@@ -92,3 +92,47 @@ test("undo", () => {
   assert.equal(app.undoTarget(stack, cs).index, -1);
   assert.equal(app.undoTarget(stack, cs), null);
 });
+
+test("keyAction", () => {
+  const ctx = { inField: false, dialogOpen: false, screen: "review" };
+  const cases = [
+    [{ code: "Digit2" }, {}, "mark:вокал"],
+    [{ code: "Digit1" }, {}, "mark:моё"],
+    [{ code: "Digit2", repeat: true }, {}, null],
+    [{ code: "Digit1" }, { inField: true }, null],
+    [{ code: "Escape" }, { inField: true }, "escape"],
+    [{ code: "Enter", ctrlKey: true }, { inField: true, dialogOpen: true }, "save-idea"],
+    [{ code: "Enter", ctrlKey: true }, { inField: true }, null],
+    [{ code: "Digit3" }, { dialogOpen: true }, null],
+    [{ code: "Escape" }, { dialogOpen: true }, "escape"],
+    [{ code: "KeyZ", ctrlKey: true }, {}, "undo"],
+    [{ code: "KeyZ", ctrlKey: true, shiftKey: true }, {}, null],
+    [{ code: "KeyC", ctrlKey: true }, {}, null],
+    [{ code: "Digit1", altKey: true }, {}, null],
+    [{ code: "Space" }, {}, "play"],
+    [{ code: "ArrowLeft" }, {}, "prev"],
+    [{ code: "ArrowRight" }, {}, "next"],
+    [{ code: "ArrowRight", shiftKey: true }, {}, "seek:5"],
+    [{ code: "ArrowLeft", shiftKey: true }, {}, "seek:-5"],
+    [{ code: "Slash" }, {}, null],
+    [{ code: "Slash" }, { screen: "mine" }, "search"],
+    [{ code: "Slash", shiftKey: true }, {}, "help"],
+    [{ code: "KeyT" }, {}, null],
+    [{ code: "KeyA" }, {}, null],
+    [{ code: "Space" }, { screen: "library" }, null],
+    [{ code: "Digit1" }, { screen: "library" }, null],
+    [{ code: "KeyN" }, { screen: "library" }, null],
+    [{ code: "KeyM" }, { screen: "library" }, null],
+    [{ code: "KeyG" }, { screen: "library" }, "library"],
+    [{ code: "KeyI" }, { screen: "library" }, "idea"],
+    [{ code: "KeyN" }, {}, "note"],
+    [{ code: "KeyM" }, {}, "tab"],
+    [{ code: "KeyG" }, {}, "library"],
+    [{ code: "Numpad5" }, {}, "mark:другое"],
+    [{ code: "Digit6" }, {}, null],
+  ];
+  for (const [ev, c, want] of cases) {
+    const e = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, ...ev };
+    assert.equal(app.keyAction(e, { ...ctx, ...c }), want, JSON.stringify([ev, c]));
+  }
+});
