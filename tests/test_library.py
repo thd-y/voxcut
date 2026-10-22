@@ -594,7 +594,7 @@ def test_import_rollback_failure_keeps_pending(lay, no_check, monkeypatch):
     assert after == before
 
 
-def _sigterm_mid_move(lay, monkeypatch, at=2):
+def _sigterm_mid_move(lay, monkeypatch, at=2, source=""):
     """SIGTERM on the at-th inbox -> originals.tmp rename of a fresh import."""
     real, n = os.rename, [0]
 
@@ -606,7 +606,7 @@ def _sigterm_mid_move(lay, monkeypatch, at=2):
 
     monkeypatch.setattr(os, "rename", rename)
     with pytest.raises(SystemExit):
-        import_originals(lay, "", 1, None, _quiet)
+        import_originals(lay, source, 1, None, _quiet)
     monkeypatch.undo()
 
 
@@ -631,6 +631,43 @@ def test_sigterm_mid_move_finished_by_process(lay, no_check, monkeypatch):
     assert _shas(sorted((sdir / "originals").iterdir())) == before
     assert (sdir / "import.json").is_file()
     assert not any(p.exists() for p in paths)
+
+
+def test_finish_move_failure_names_file(lay, no_check, monkeypatch):
+    import errno
+
+    paths = make_folder(lay.inbox, chain_starts(3))
+    before = _shas(paths)
+    _sigterm_mid_move(lay, monkeypatch)
+    sid = list_sessions(lay)[0]["session_id"]
+    real, n = os.rename, [0]
+
+    def rename(src, dst):
+        if str(lay.inbox) in str(src):
+            n[0] += 1
+            if n[0] == 2:
+                raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "rename", rename)
+    with pytest.raises(SessionError, match=paths[2].name) as e:
+        finish_import(lay, sid, _quiet)
+    assert "inbox" in str(e.value) and "originals" in str(e.value)
+    monkeypatch.undo()
+    finish_import(lay, sid, _quiet)
+    assert _shas(sorted((lay.sessions / sid / "originals").iterdir())) == before
+
+
+@pytest.mark.parametrize("leftover", [False, True])
+def test_finish_removes_empty_source_folder(lay, no_check, monkeypatch, leftover):
+    make_folder(lay.inbox / "rec", chain_starts(3))
+    _sigterm_mid_move(lay, monkeypatch, source="rec")
+    if leftover:
+        (lay.inbox / "rec" / "notes.txt").write_text("x")
+    logged = []
+    finish_import(lay, list_sessions(lay)[0]["session_id"], logged.append)
+    assert (lay.inbox / "rec").exists() is leftover
+    assert any("удалите вручную" in m for m in logged) is leftover
 
 
 def test_finish_refuses_changed_inbox_file(lay, no_check, monkeypatch):

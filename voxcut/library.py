@@ -285,18 +285,25 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
         _rollback_import(sdir, moved, p, exc)
     os.replace(tmp, sdir / "originals")
     finish_import(lay, plan.session_id, log)
-    if source:  # D50: only an empty source folder goes; inbox/ itself and any file stay
-        try:
-            os.rmdir(src)
-        except OSError:
-            if not _has_wav(src):  # WAVs left = another chain to import: never say «удалите»
-                try:
-                    names = sorted(p.name for p in src.iterdir())
-                except OSError:
-                    names = []
-                log(f"в inbox/{source}/ остались файлы: {', '.join(names)}; "
-                    f"папка скрыта, удалите вручную")
+    _drop_empty_source(lay, source, log)
     return {"session_id": plan.session_id, "existing": False}
+
+
+def _drop_empty_source(lay: Layout, source: str, log) -> None:
+    """D50: only an empty source folder goes; inbox/ itself and any file stay."""
+    if not source:
+        return
+    src = lay.inbox / source
+    try:
+        os.rmdir(src)
+    except OSError:
+        if not _has_wav(src):  # WAVs left = another chain to import: never say «удалите»
+            try:
+                names = sorted(p.name for p in src.iterdir())
+            except OSError:
+                names = []
+            log(f"в inbox/{source}/ остались файлы: {', '.join(names)}; "
+                f"папка скрыта, удалите вручную")
 
 
 def _rollback_import(sdir: Path, moved: list[Path], failed: Path, exc: OSError) -> None:
@@ -367,7 +374,14 @@ def finish_import(lay: Layout, sid: str, log) -> None:
                            f"с началом импорта); ничего не тронуто")
     (sdir / "originals").mkdir(exist_ok=True)
     for n, p in incoming.items():  # D65, D39: the same rename as the import itself
-        os.rename(p, sdir / "originals" / n)
+        try:
+            os.rename(p, sdir / "originals" / n)
+        except OSError as exc:
+            raise SessionError(f"{n}: перенос из inbox/{meta['source']} в originals не удался "
+                               f"({exc}); перенесённые остаются в originals, остальные во "
+                               f"входящих; «Обработать» продолжит с места") from exc
+    if incoming:  # files came from inbox/: its source passed _source_names in _pending_files
+        _drop_empty_source(lay, meta["source"], log)
     after = {}
     for name in before:
         p = sdir / "originals" / name
