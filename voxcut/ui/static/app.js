@@ -92,6 +92,8 @@ function ideaTime(ts) {
   return `${two(d.getDate())}.${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
+const backupTime = (value) => ideaTime(value) || value;  // D51 format; anything unparsable as is
+
 const gapLabel = (seconds) => `пауза ${fmtPos(seconds)}`;  // D54
 
 const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
@@ -600,7 +602,7 @@ function renderList() {
   if (scrolledId !== ui.selectedId) {
     scrolledId = ui.selectedId;
     const sel = $("clip-list").querySelector(".item.selected");
-    if (sel) sel.scrollIntoView({ block: "nearest" });
+    if (sel) sel.scrollIntoView({ block: "center" });  // D59: past and next clips both in view
   }
 }
 
@@ -831,7 +833,7 @@ function renderLibrary() {
   }) : [el("p", "Задач нет.", "muted")]));
 
   $("backup-info").textContent = st.last_backup
-    ? `Последний бэкап: ${st.last_backup}` : "Бэкапов ещё не было.";
+    ? `Последний бэкап: ${backupTime(st.last_backup)}` : "Бэкапов ещё не было.";
   renderIdeas();
 }
 
@@ -1365,7 +1367,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, gapLabel, undoEntry, undoTarget, DECISIONS, keyAction };
+    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, undoEntry, undoTarget, DECISIONS, keyAction };
 } else {
   start();
 }

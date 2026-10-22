@@ -79,6 +79,19 @@ test("gapLabel", () => {
   assert.equal(app.gapLabel(273), "пауза 4:33");
 });
 
+test("backupTime", () => {  // D51 format for «Последний бэкап»
+  const tz = process.env.TZ;
+  process.env.TZ = "Europe/Moscow";
+  try {
+    assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00"), "22.10 06:53");
+    assert.equal(app.backupTime(""), "");
+    assert.equal(app.backupTime("мусор"), "мусор");
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+});
+
 test("gapBefore", () => {
   const cs = [clip("a", [], "", [], 0, 10), clip("b", [], "", [], 39.9, 45), clip("c", [], "", [], 75, 80)];
   assert.equal(app.gapBefore(cs, 0), null);
