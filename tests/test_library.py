@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import os
 from datetime import timedelta
@@ -668,6 +669,25 @@ def test_finish_removes_empty_source_folder(lay, no_check, monkeypatch, leftover
     finish_import(lay, list_sessions(lay)[0]["session_id"], logged.append)
     assert (lay.inbox / "rec").exists() is leftover
     assert any("удалите вручную" in m for m in logged) is leftover
+
+
+def test_finish_failed_check_keeps_source_folder(lay, no_check, monkeypatch):
+    """The emptied source folder goes only once the import is complete."""
+    make_folder(lay.inbox / "rec", chain_starts(3))
+    _sigterm_mid_move(lay, monkeypatch, source="rec")
+    sid = list_sessions(lay)[0]["session_id"]
+    real = audio.plan_session
+
+    def other_session(src, chain, start):
+        plan = real(src, chain, start)
+        return dataclasses.replace(plan, session_id="2026-01-01_00-00_1h00m.00000000")
+
+    monkeypatch.setattr(audio, "plan_session", other_session)
+    logged = []
+    with pytest.raises(SessionError, match="ожидалась"):
+        finish_import(lay, sid, logged.append)
+    assert (lay.inbox / "rec").is_dir()
+    assert not any("удалите" in m for m in logged)
 
 
 def test_finish_refuses_changed_inbox_file(lay, no_check, monkeypatch):

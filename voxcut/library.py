@@ -380,8 +380,6 @@ def finish_import(lay: Layout, sid: str, log) -> None:
             raise SessionError(f"{n}: перенос из inbox/{meta['source']} в originals не удался "
                                f"({exc}); перенесённые остаются в originals, остальные во "
                                f"входящих; «Обработать» продолжит с места") from exc
-    if incoming:  # files came from inbox/: its source passed _source_names in _pending_files
-        _drop_empty_source(lay, meta["source"], log)
     after = {}
     for name in before:
         p = sdir / "originals" / name
@@ -398,6 +396,8 @@ def finish_import(lay: Layout, sid: str, log) -> None:
         "imported_at": datetime.now().astimezone().isoformat(timespec="seconds")})
     pending.unlink()  # our own bookkeeping file; import.json now holds the same facts
     log(f"импортировано {len(before)} файлов: сессия {sid}")
+    if incoming:  # files came from inbox/: its source passed _source_names in _pending_files
+        _drop_empty_source(lay, meta["source"], log)
 
 
 V1_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "v1.toml"  # U8: the only config
