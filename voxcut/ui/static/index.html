@@ -16,14 +16,14 @@
   <span id="session-label" class="muted"></span>
   <div class="tabs" id="tabs">
     <nav role="tablist" aria-orientation="horizontal">
-      <button type="button" role="tab" data-tab="review" aria-selected="true">Разбор</button>
-      <button type="button" role="tab" data-tab="mine" aria-selected="false">Мои клипы</button>
+      <button type="button" role="tab" id="tab-review" aria-controls="work" data-tab="review" aria-selected="true">Разбор</button>
+      <button type="button" role="tab" id="tab-mine" aria-controls="work" data-tab="mine" aria-selected="false">Мои клипы</button>
     </nav>
   </div>
   <span class="grow"></span>
   <span id="progress-label" class="muted"></span>
   <button type="button" id="job-badge" class="badge" hidden></button>
-  <button type="button" id="theme" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Светлая или тёмная тема" title="Тема">
+  <button type="button" id="theme" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Тёмная тема" aria-pressed="false" title="Тема">
     <svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#sun-moon"></use></svg>
   </button>
   <button type="button" id="help-btn" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Клавиши" title="Клавиши"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#keyboard"></use></svg></button>
@@ -42,7 +42,7 @@
 
 <main id="screen-session" hidden>
   <canvas id="timeline" aria-hidden="true"></canvas>
-  <div id="work">
+  <div id="work" role="tabpanel" aria-labelledby="tab-review">
     <section id="list-pane" aria-label="Клипы">
       <div id="filters" class="chips"></div>
       <div id="mine-tools" hidden>
@@ -56,7 +56,7 @@
       <div id="card-top">
         <header>
           <h2 id="clip-title" class="clip-title"></h2>
-          <p id="clip-sub"></p>
+          <p id="clip-sub" aria-live="polite"></p>
           <div data-slot="card-action">
             <button type="button" id="note-btn" class="btn" data-variant="ghost" data-size="sm"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#notebook-pen"></use></svg><span id="note-label">+ заметка</span> <kbd class="kbd">N</kbd></button>
           </div>

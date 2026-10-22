@@ -244,6 +244,7 @@ async function api(method, path, body) {
 function applyTheme() {
   const dark = ui.theme ? ui.theme === "dark" : !!(darkQuery && darkQuery.matches);
   document.documentElement.classList.toggle("dark", dark);
+  $("theme").setAttribute("aria-pressed", String(dark));
   if (view) drawTimeline();
 }
 
@@ -418,6 +419,7 @@ function renderHeader() {
   for (const b of $("tabs").querySelectorAll("[role=tab]")) {
     b.setAttribute("aria-selected", String(ui.screen === "session" && b.dataset.tab === ui.tab));
   }
+  $("work").setAttribute("aria-labelledby", `tab-${ui.tab}`);
   const c = view && ui.loaded ? counts(view.clips) : null;
   $("progress-label").textContent = c && c.all ? `разобрано ${c.all - c.undecided} из ${c.all}` : "";
   const badge = $("job-badge");
@@ -477,7 +479,7 @@ function renderSkeleton() {
   listSig = "";
   $("clip-list").replaceChildren(...Array.from({ length: 8 }, () => el("div", null, "skeleton skeleton-row")));
   $("clip-title").replaceChildren(el("div", null, "skeleton skeleton-title"));
-  $("clip-sub").textContent = "";
+  setKids($("clip-sub"), "", () => []);
   $("summary").hidden = true;
   $("card-top").hidden = false;
   $("card-body").hidden = true;
@@ -579,6 +581,7 @@ function renderList() {
     const gap = gapBefore(list, i, GAP_MIN_S);
     if (gap !== null) rows.push(el("p", gapLabel(gap), "gap"));
     const item = el("article", null, `item${c.clip_id === ui.selectedId ? " selected" : ""}`);
+    if (c.clip_id === ui.selectedId) item.setAttribute("aria-current", "true");
     item.dataset.size = "xs";
     item.setAttribute("role", "listitem");
     item.dataset.clip = c.clip_id;
@@ -649,7 +652,7 @@ function renderCard() {
   renderRechoose();  // also with no clip: a question must not outlive its clip
   if (!clip) {
     $("clip-title").textContent = ui.tab === "mine" ? "Нет оставленных клипов" : "Клип не выбран";
-    $("clip-sub").textContent = "";
+    setKids($("clip-sub"), "", () => []);
     $("note-view").replaceChildren();
     $("other-notes").replaceChildren();
     $("note-box").hidden = true;
@@ -659,8 +662,10 @@ function renderCard() {
   }
   const idx = view.clips.indexOf(clip);
   $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s)}`;
-  $("clip-sub").textContent = `клип ${idx + 1} из ${view.clips.length} · ${statusText(clip)}`;
-  if (ui.pending.has(clip.clip_id)) $("clip-sub").append(" ", el("span", null, "spinner"));
+  // aria-live: rewrite only on change, or every 2 s poll would be read out again
+  const sub = `клип ${idx + 1} из ${view.clips.length} · ${statusText(clip)}`;
+  const saving = ui.pending.has(clip.clip_id);
+  setKids($("clip-sub"), JSON.stringify([sub, saving]), () => (saving ? [sub, " ", el("span", null, "spinner")] : [sub]));
   const s = status(clip);
   for (const b of $("decisions").children) {
     const on = s.value === b.dataset.value && s.kind !== "conflict";
@@ -706,6 +711,7 @@ function renderPlayer() {
   $("bar").setAttribute("aria-valuenow", String(Math.round(pct)));
   const clip = selected();
   $("pos").textContent = clip ? `${fmtPos(t)} / ${fmtPos(dur || clip.duration_s)}` : "";
+  $("bar").setAttribute("aria-valuetext", clip ? `${fmtPos(t)} из ${fmtPos(dur || clip.duration_s)}` : "");
   $("spinner").hidden = !(mine && ui.audio === "loading");
   $("play-icon").hidden = mine && !p.paused;
   $("pause-icon").hidden = !$("play-icon").hidden;
