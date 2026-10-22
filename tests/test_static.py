@@ -1,3 +1,4 @@
+import hashlib
 import re
 import threading
 
@@ -10,6 +11,7 @@ from voxcut.ui.server import STATIC, STATIC_DIR, make_server
 FORBIDDEN = ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(",
              "new Function", 'setAttribute("style"', "setAttribute('style'", "localStorage",
              "sessionStorage", "document.cookie", "http://", "https://", "localhost"]
+BASECOAT_SHA256 = "744bb04803c3480d1e79b3cfd38ecb6b103075400774cb89bf57b5e27e6d15a2"
 
 
 def static_files():
@@ -26,11 +28,19 @@ def test_static_rules(path):
         assert not re.search(r"\sstyle\s*=", text, re.IGNORECASE), "inline style"
         assert not re.search(r"<script[^>]*>\s*[^<\s]", text, re.IGNORECASE), "inline script body"
         assert re.findall(r'<script[^>]*src="([^"]+)"', text) == ["/app.js"]
-        assert re.findall(r'<link[^>]*href="([^"]+)"', text) == ["/app.css"]
+        assert re.findall(r'<link[^>]*href="([^"]+)"', text) == [
+            "/vendor/basecoat-luma.css", "/app.css"]
 
 
 def test_static_table_covers_all_files():
-    assert {name for name, _ in STATIC.values()} == {p.name for p in static_files()}
+    files = {p.relative_to(STATIC_DIR).as_posix() for p in STATIC_DIR.rglob("*") if p.is_file()}
+    assert {name for name, _ in STATIC.values()} == files - {"vendor/LICENSE.md"}
+
+
+def test_vendor_basecoat_pinned():
+    data = (STATIC_DIR / "vendor" / "basecoat-luma.css").read_bytes()
+    assert hashlib.sha256(data).hexdigest() == BASECOAT_SHA256
+    assert (STATIC_DIR / "vendor" / "LICENSE.md").is_file()
 
 
 def test_index_served_with_csp(tmp_path):
@@ -41,7 +51,7 @@ def test_index_served_with_csp(tmp_path):
     threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True).start()
     try:
         c = Client(app)
-        for path in ("/", "/app.js", "/app.css"):
+        for path in ("/", "/app.js", "/app.css", "/vendor/basecoat-luma.css"):
             status, headers, _ = c.req("GET", path)
             assert status == 200 and {k: headers.get(k) for k in SECURITY} == SECURITY
     finally:
