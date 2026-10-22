@@ -161,6 +161,7 @@ def test_validate_rejects(lay, kind, params):
 
 def test_validate_accepts(lay):
     (lay.inbox / "s1").mkdir()
+    (lay.inbox / "s1" / "a.wav").write_bytes(b"")  # D50: a source folder holds WAV files
     (lay.inbox / "voxcut-backup_x_full.tar").write_bytes(b"")
     assert validate("import", {"source": "s1", "chain": 2, "start": "2026-08-11 21:30"}, lay) == {
         "source": "s1", "chain": 2, "start": "2026-08-11 21:30"}

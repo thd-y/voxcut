@@ -210,9 +210,56 @@ def test_import_from_subfolder(lay, no_check):
     make_folder(lay.inbox / "folder01", chain_starts(2))
     res = import_originals(lay, "folder01", 1, "2026-08-11 21:30", _quiet)
     assert res["session_id"].startswith("2026-08-11_21-30_")
-    assert list((lay.inbox / "folder01").iterdir()) == []
+    assert not (lay.inbox / "folder01").exists()  # D50: the emptied source folder is removed
     assert json.loads((lay.sessions / res["session_id"] / "import.json").read_text())[
         "start"] == "2026-08-11 21:30"
+
+
+def test_import_removes_empty_source_dir(lay, no_check):
+    make_folder(lay.inbox / "13_oct", chain_starts(2))
+    import_originals(lay, "13_oct", 1, None, _quiet)
+    assert not (lay.inbox / "13_oct").exists() and lay.inbox.is_dir()
+
+
+def test_import_keeps_leftovers_and_warns(lay, no_check):
+    make_folder(lay.inbox / "13_oct", chain_starts(2))
+    extra = {"desktop.ini": b"[x]", "x.wav:Zone.Identifier": b"zone"}
+    for name, data in extra.items():
+        (lay.inbox / "13_oct" / name).write_bytes(data)
+    msgs = []
+    import_originals(lay, "13_oct", 1, None, msgs.append)
+    assert {p.name: p.read_bytes() for p in (lay.inbox / "13_oct").iterdir()} == extra
+    warn = [m for m in msgs if m.startswith("в inbox/")]
+    assert warn == [("в inbox/13_oct/ остались файлы: desktop.ini, x.wav:Zone.Identifier; "
+                     "папка скрыта, удалите вручную")]
+
+
+def test_import_rmdir_race_is_not_failure(lay, no_check, monkeypatch):
+    make_folder(lay.inbox / "13_oct", chain_starts(2))
+
+    def busy(path, *a, **kw):
+        raise OSError(39, "Directory not empty")
+
+    monkeypatch.setattr(os, "rmdir", busy)
+    msgs = []
+    res = import_originals(lay, "13_oct", 1, None, msgs.append)
+    assert res["existing"] is False
+    assert any(m.startswith("в inbox/13_oct/ остались файлы") for m in msgs)
+
+
+def test_import_root_inbox_never_removed(lay, no_check):
+    make_folder(lay.inbox, chain_starts(2))
+    import_originals(lay, "", 1, None, _quiet)
+    assert lay.inbox.is_dir()
+
+
+@pytest.mark.parametrize("leftover", [[], ["desktop.ini"]])
+def test_inventory_hides_dir_without_wav(lay, leftover):
+    (lay.inbox / "13_oct").mkdir(parents=True)
+    for name in leftover:
+        (lay.inbox / "13_oct" / name).write_bytes(b"x")
+    make_folder(lay.inbox / "folder01", chain_starts(2))
+    assert [s["source"] for s in inbox_inventory(lay)["sources"]] == ["folder01"]
 
 
 @pytest.mark.parametrize("source", ["../data", "folder01/x", "nope", "/tmp"])
