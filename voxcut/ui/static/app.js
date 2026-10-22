@@ -607,7 +607,7 @@ function renderList() {
 function renderRechoose() {
   const mine = ui.tab === "mine";
   $("decisions").hidden = mine && ui.rechoose !== "menu";
-  $("rechoose").hidden = !mine;
+  $("rechoose").hidden = !mine || !selected();
   $("rechoose-btn").hidden = ui.rechoose !== null;
   $("rechoose-hint").hidden = ui.rechoose !== "menu";
   const asking = mine && ui.rechoose !== null && ui.rechoose !== "menu";
@@ -643,6 +643,7 @@ function renderCard() {
   }
   const clip = selected();
   setDecisionsEnabled(!!clip);
+  renderRechoose();  // also with no clip: a question must not outlive its clip
   if (!clip) {
     $("clip-title").textContent = ui.tab === "mine" ? "Нет оставленных клипов" : "Клип не выбран";
     $("clip-sub").textContent = "";
@@ -657,7 +658,6 @@ function renderCard() {
   $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s)}`;
   $("clip-sub").textContent = `клип ${idx + 1} из ${view.clips.length} · ${statusText(clip)}`;
   if (ui.pending.has(clip.clip_id)) $("clip-sub").append(" ", el("span", null, "spinner"));
-  renderRechoose();
   const s = status(clip);
   for (const b of $("decisions").children) {
     const on = s.value === b.dataset.value && s.kind !== "conflict";
