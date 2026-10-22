@@ -105,16 +105,16 @@ function keyAction(ev, { inField, dialogOpen, screen, rechoose = null }) {
   }
   const digit = /^(?:Digit|Numpad)([1-5])$/.exec(code);
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
-  if (rechoose === "menu") {  // D52: the re-choice menu takes only 1-5 and Esc
-    if (code === "Escape") return "escape";
-    return digit && plain && !ev.repeat ? `pick:${DECISIONS[digit[1] - 1]}` : null;
-  }
-  if (rechoose) {  // D52: confirming «rechoose»; a held key never confirms
+  if (rechoose) {
+    // D52: menu, then confirmation. Other plain keys are swallowed ("noop"), so Space or Enter
+    // never presses a focused «Да»; a held key never picks or confirms. Tab still moves focus.
     if (code === "Escape") return "cancel";
-    if (!plain || ev.repeat) return null;
+    if (!plain || code === "Tab") return null;
+    if (ev.repeat) return "noop";
+    if (rechoose === "menu") return digit ? `pick:${DECISIONS[digit[1] - 1]}` : "noop";
     if (code === "Enter") return "confirm";
     if (digit) return DECISIONS[digit[1] - 1] === rechoose ? "confirm" : "cancel";
-    return null;
+    return "noop";
   }
   if (dialogOpen) return code === "Escape" ? "escape" : null;
   if (ev.ctrlKey || ev.altKey || ev.metaKey) {
