@@ -223,8 +223,15 @@ class App:
                     r["session_id"] for r in library.list_sessions(self.lay)}:
                 raise HttpError(400, "нет такой сессии")
             event = dict(b)
+        elif kind == "idea_deleted":  # D56
+            if set(b) != {"event_id", "kind", "value"}:
+                raise HttpError(400, "поля: event_id, kind, value")
+            if not any(e["kind"] == "idea" and e["event_id"] == b["value"]
+                       for e in self.journal.events()):
+                raise HttpError(400, "нет такой идеи")
+            event = dict(b)
         else:
-            raise HttpError(400, "kind: mark, note, heard или idea")
+            raise HttpError(400, "kind: mark, note, heard, idea или idea_deleted")
         try:
             saved = self.journal.append(event)  # returns after fsync (U5)
         except jr.JournalError as exc:

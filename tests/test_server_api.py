@@ -469,3 +469,38 @@ def test_open_folder_argv(tmp_path):
     argv, kw = popens[0]
     assert argv == ["explorer.exe", "\\\\wsl.localhost\\U\\inbox"]
     assert kw["start_new_session"] is True and "shell" not in kw
+
+
+# --- D56: delete an idea ---
+
+def idea(c, value="идея"):
+    e = {"event_id": uuid.uuid4().hex, "kind": "idea", "value": value}
+    assert post(c, "/api/journal", e)[0] == 200
+    return e["event_id"]
+
+
+def lines(c):
+    return c.lay.journal.read_text().splitlines()
+
+
+def test_idea_delete_hides_from_state(wapi):
+    keep, gone = idea(wapi, "остаётся"), idea(wapi, "уходит")
+    d = {"event_id": uuid.uuid4().hex, "kind": "idea_deleted", "value": gone}
+    assert post(wapi, "/api/journal", d)[0] == 200
+    assert post(wapi, "/api/journal", d)[0] == 200  # the same event_id again: idempotent
+    st = json.loads(get(wapi, "/api/state")[2])
+    assert [i["event_id"] for i in st["ideas"]] == [keep]
+    assert sum('"idea_deleted"' in line for line in lines(wapi)) == 1
+
+
+@pytest.mark.parametrize("case", ["mark", "unknown", "extra_field"])
+def test_idea_delete_refused(wapi, case):
+    m = mark(wapi)
+    assert post(wapi, "/api/journal", m)[0] == 200
+    target = {"mark": m["event_id"], "unknown": uuid.uuid4().hex}.get(case, idea(wapi))
+    d = {"event_id": uuid.uuid4().hex, "kind": "idea_deleted", "value": target}
+    if case == "extra_field":
+        d["session_id"] = "x"
+    before = len(lines(wapi))
+    assert post(wapi, "/api/journal", d)[0] == 400
+    assert len(lines(wapi)) == before

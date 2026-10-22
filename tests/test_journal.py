@@ -209,3 +209,33 @@ def test_merge_rejects_events_without_valid_ts(tmp_path):
         with pytest.raises(JournalError):
             j.merge([bad])
     assert j.events() == []
+
+
+# --- D56: idea_deleted ---
+
+def test_idea_deleted_hides_idea(tmp_path):
+    j = Journal(tmp_path / "j.jsonl")
+    first = j.append(ev(kind="idea", value="первая", sid=None))
+    j.append(ev(kind="idea", value="вторая", sid=None))
+    j.append(ev(kind="idea_deleted", value=first["event_id"], sid=None))
+    events = j.events()
+    assert [e["value"] for e in journal.ideas(events)] == ["вторая"]
+    assert [e["value"] for e in events if e["kind"] == "idea"] == ["первая", "вторая"]  # text kept
+
+
+@pytest.mark.parametrize("extra", [{"value": "nothex"}, {"session_id": "s1"},
+                                   {"start_s": 1.0, "end_s": 2.0}])
+def test_idea_deleted_validation(tmp_path, extra):
+    j = Journal(tmp_path / "j.jsonl")
+    e = ev(kind="idea_deleted", value="a" * 32, sid=None) | extra
+    with pytest.raises(JournalError):
+        j.append(e)
+
+
+def test_idea_deleted_survives_reload(tmp_path):
+    p = tmp_path / "j.jsonl"
+    j = Journal(p)
+    idea = j.append(ev(kind="idea", value="x", sid=None))
+    j.append(ev(kind="idea_deleted", value=idea["event_id"], sid=None))
+    again = Journal(p)
+    assert journal.ideas(again.events()) == [] and again.warnings == []

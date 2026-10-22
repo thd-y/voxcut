@@ -11,7 +11,7 @@ from pathlib import Path
 
 from voxcut.intervals import intersect, total, union
 
-KINDS = ("mark", "note", "idea", "heard", "backup")
+KINDS = ("mark", "note", "idea", "heard", "backup", "idea_deleted")
 MARK_MAX = 32
 NOTE_MAX = 10_000
 SPAN_KINDS = ("mark", "note", "heard")  # bound to a moment of the recording
@@ -84,8 +84,10 @@ def _validate(event: dict, with_ts: bool = False) -> dict:
         )
         if not ok or not 0 <= span[0] < span[1]:
             raise JournalError("отрезок: нужны session_id и 0 <= start_s < end_s")
-    elif span != [None, None] or (e["kind"] == "backup" and sid is not None):
+    elif span != [None, None] or (e["kind"] in ("backup", "idea_deleted") and sid is not None):
         raise JournalError("у этого вида события нет отрезка")
+    if e["kind"] == "idea_deleted" and not EVENT_ID_RE.fullmatch(e["value"]):
+        raise JournalError("idea_deleted: value — event_id идеи")  # D56
     return e
 
 
@@ -202,7 +204,9 @@ def clip_view(events: list[dict], session_id: str, start_s: float, end_s: float)
 
 
 def ideas(events: list[dict]) -> list[dict]:
-    return [e for e in events if e.get("kind") == "idea"]
+    """Ideas without the ones an idea_deleted event hides (D56; the text stays in the journal)."""
+    gone = {e["value"] for e in events if e.get("kind") == "idea_deleted"}
+    return [e for e in events if e.get("kind") == "idea" and e["event_id"] not in gone]
 
 
 def last_backup(events: list[dict]) -> str | None:
