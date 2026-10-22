@@ -782,8 +782,10 @@ function renderLibrary() {
     }
     row.append(acts);
     if (s.session_id === sid && view && view.runs.length > 1) {
-      const runs = el("div", null, "row");
-      runs.append(el("span", "Прогон:", "muted small"), ...view.runs.map((r) => {
+      const runs = el("div", null, "row run-switch");
+      const list = el("div", null, "row");  // wrapped buttons line up under the first, not the label
+      runs.append(el("span", "Прогон:", "muted small"), list);
+      list.append(...view.runs.map((r) => {
         const active = (runId || view.run_id) === r.run_id;
         const b = button(`${r.name} (${r.created})`, () => openSession(sid, r.run_id).catch(fail),
           active ? "secondary" : "outline");
