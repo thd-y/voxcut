@@ -1,6 +1,8 @@
 /* Layout on top of Basecoat Luma (R8): own Grid/Flexbox, Basecoat semantic tokens only. */
-:root { --kept: oklch(0.6 0.15 150); --kept-foreground: oklch(0.99 0 0); }
+:root { --kept: oklch(0.52 0.15 150); --kept-foreground: oklch(0.99 0 0); }
 html.dark { --kept: oklch(0.7 0.15 150); --kept-foreground: oklch(0.2 0 0); }
+/* Audit 2026-10-22: light-theme text >= 4.5:1; :not(.dark) keeps Basecoat's dark tokens */
+:root:not(.dark) { --muted-foreground: oklch(0.52 0 0); --destructive: oklch(0.53 0.245 27.325); }
 
 html, body { height: 100%; }
 body { margin: 0; display: flex; flex-direction: column; background: var(--background);
@@ -36,6 +38,7 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 #clip-list { flex: 1; min-height: 0; overflow-y: auto; gap: 2px; }
 #clip-list .item { cursor: pointer; padding-block: 6px; }
 #clip-list .item.selected { background: var(--accent); }
+#clip-list .item.selected .snippet { color: var(--foreground); }  /* muted on --accent is 4.0:1 in dark */
 #clip-list .item h4 { font-variant-numeric: tabular-nums; }
 #clip-list .item .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   max-width: 100%; }
