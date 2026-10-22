@@ -10,70 +10,158 @@
 <script src="/app.js" defer></script>
 </head>
 <body>
-<header>
-  <strong>VoxCut</strong>
-  <label>Сессия <select id="session"></select></label>
-  <label id="run-box" hidden>Прогон <select id="run"></select></label>
-  <span id="backup-info"></span>
-  <span id="msg" role="status"></span>
+<header id="top">
+  <strong class="brand">VoxCut</strong>
+  <span id="session-label" class="muted"></span>
+  <div class="tabs" id="tabs">
+    <nav role="tablist" aria-orientation="horizontal">
+      <button type="button" role="tab" data-tab="review" aria-selected="true">Разбор</button>
+      <button type="button" role="tab" data-tab="mine" aria-selected="false">Мои клипы</button>
+    </nav>
+  </div>
+  <span class="grow"></span>
+  <span id="progress-label" class="muted"></span>
+  <button type="button" id="job-badge" class="badge" hidden></button>
+  <button type="button" id="theme" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Светлая или тёмная тема" title="Тема">
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20z" fill="currentColor"/></svg>
+  </button>
+  <button type="button" id="help-btn" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Клавиши" title="Клавиши">?</button>
+  <button type="button" id="library-btn" class="btn" data-variant="outline" data-size="sm">Библиотека <kbd class="kbd">G</kbd></button>
 </header>
-<div id="layout">
-  <main>
-    <section id="session-info"></section>
-    <canvas id="timeline" height="60"></canvas>
-    <div id="counter"></div>
-    <div id="player-box">
-      <div id="clip-title"></div>
-      <audio id="player" controls></audio>
-      <div id="clip-marks"></div>
-      <div id="note-box">
-        <textarea id="note" rows="2" maxlength="10000" placeholder="Заметка к отрезку текущего клипа"></textarea>
-        <button id="note-save" type="button">Сохранить заметку</button>
-        <span id="note-status"></span>
-      </div>
-      <div class="hint">Клавиши: 1 моё, 2 вокал, 3 шум, 0 снять, ← → предыдущий/следующий</div>
-    </div>
-    <div id="list-controls">
-      <label>Сортировка <select id="sort">
-        <option value="time">по времени</option>
-        <option value="p_max">по уверенности</option>
-      </select></label>
-      <label>Фильтр <select id="filter">
-        <option value="all">всё</option>
-        <option value="unheard">не слушал</option>
-        <option value="mine">моё</option>
-      </select></label>
-    </div>
-    <table id="clips">
-      <thead><tr><th>№</th><th>Начало</th><th>Длина, с</th><th>p_max</th><th>Отметка</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </main>
-  <aside>
-    <section>
-      <h2>Сессии</h2>
-      <ul id="sessions"></ul>
-    </section>
-    <section>
-      <h2>Входящие</h2>
-      <div id="inbox"></div>
-    </section>
-    <section>
-      <h2>Задачи</h2>
-      <div id="jobs"></div>
-    </section>
-    <section>
-      <h2>Бэкап</h2>
-      <button id="backup-full" type="button">Бэкап full</button>
-      <button id="backup-light" type="button">Бэкап light</button>
-    </section>
-    <section>
-      <h2>Идеи</h2>
-      <textarea id="idea" rows="2" maxlength="10000"></textarea>
-      <button id="idea-save" type="button">Записать идею</button>
-      <ul id="ideas"></ul>
-    </section>
-  </aside>
+
+<div id="conn-alert" class="alert" data-variant="destructive" role="alert" hidden>
+  <h2>Нет связи с VoxCut</h2>
+  <section>Окно продолжит работу, когда сервер ответит.</section>
 </div>
+
+<div id="fatal" class="empty" hidden>
+  <header><h3 id="fatal-title"></h3><p id="fatal-text"></p></header>
+  <section><button type="button" id="fatal-action" class="btn" hidden></button></section>
+</div>
+
+<main id="screen-session" hidden>
+  <canvas id="timeline" aria-hidden="true"></canvas>
+  <div id="work">
+    <section id="list-pane" aria-label="Клипы">
+      <div id="filters" class="chips"></div>
+      <div id="mine-tools" hidden>
+        <input id="search" class="input" type="search" maxlength="200" placeholder="Поиск по заметкам" aria-label="Поиск по заметкам">
+        <label class="switch-label"><input id="in-order" type="checkbox" role="switch" class="input"> подряд</label>
+      </div>
+      <div id="clip-list" class="item-group" role="list"></div>
+    </section>
+
+    <section id="card" class="card" tabindex="-1" aria-label="Клип">
+      <div id="card-top">
+        <header>
+          <h2 id="clip-title" class="clip-title"></h2>
+          <p id="clip-sub"></p>
+          <div data-slot="card-action">
+            <button type="button" id="note-btn" class="btn" data-variant="ghost" data-size="sm">+ заметка <kbd class="kbd">N</kbd></button>
+          </div>
+        </header>
+        <div id="clip-alert" class="alert" data-variant="destructive" role="alert" hidden>
+          <h2>Клип недоступен</h2>
+          <section id="clip-alert-text"></section>
+        </div>
+        <div id="player-row">
+          <button type="button" id="play-btn" class="btn" data-variant="outline" data-size="icon-sm" aria-label="Играть или пауза">▶</button>
+          <div id="bar" class="progress" role="progressbar" aria-label="Позиция в клипе" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="bar-fill"></span></div>
+          <span id="spinner" class="spinner" hidden></span>
+          <span id="pos" class="muted mono"></span>
+        </div>
+        <div id="decisions" class="decisions"></div>
+      </div>
+      <div id="card-body">
+        <div id="note-box" hidden>
+          <textarea id="note" class="textarea" rows="3" maxlength="10000" aria-label="Заметка к клипу"></textarea>
+        </div>
+        <p id="note-status" class="muted small" role="status"></p>
+        <div id="note-view"></div>
+        <div id="other-notes"></div>
+        <div id="modules" hidden></div>
+      </div>
+      <div id="summary" class="empty" hidden>
+        <header><h3>Сессия разобрана</h3><p id="summary-text"></p></header>
+        <section class="row">
+          <button type="button" id="open-mine" class="btn">Открыть мои клипы</button>
+          <button type="button" id="hide-summary" class="btn" data-variant="outline">Скрыть итог</button>
+        </section>
+      </div>
+    </section>
+  </div>
+  <div id="session-empty" class="empty" hidden>
+    <header><h3 id="session-empty-title"></h3><p id="session-empty-text"></p></header>
+    <section><button type="button" id="session-empty-action" class="btn" data-variant="outline">Открыть Библиотеку</button></section>
+  </div>
+</main>
+
+<main id="screen-library" hidden>
+  <section class="card">
+    <header><h2>Сессии</h2></header>
+    <section id="sessions"></section>
+  </section>
+  <section class="card">
+    <header><h2>Входящие</h2><p>Файлы диктофона из папки <span class="mono">inbox</span> продукта.</p></header>
+    <section id="inbox"></section>
+  </section>
+  <section class="card">
+    <header><h2>Задачи</h2></header>
+    <section id="jobs"></section>
+  </section>
+  <section class="card">
+    <header><h2>Бэкап</h2><p id="backup-info"></p></header>
+    <section class="row">
+      <button type="button" id="backup-full" class="btn" data-variant="outline">Бэкап full</button>
+      <button type="button" id="backup-light" class="btn" data-variant="outline">Бэкап light</button>
+    </section>
+  </section>
+  <section class="card">
+    <header><h2>Идеи</h2><p>Новая идея — клавиша <kbd class="kbd">I</kbd> на любом экране.</p></header>
+    <section><ul id="ideas"></ul></section>
+  </section>
+</main>
+
+<div id="toaster" class="toaster"></div>
+
+<dialog id="idea-dialog" class="dialog" aria-labelledby="idea-title">
+  <div>
+    <header><h2 id="idea-title">Идея</h2><p>Ctrl+Enter — записать, Esc — закрыть.</p></header>
+    <section>
+      <textarea id="idea" class="textarea" rows="4" maxlength="10000" aria-label="Текст идеи"></textarea>
+      <p id="idea-status" class="muted small" role="status"></p>
+    </section>
+    <footer>
+      <button type="button" id="idea-cancel" class="btn" data-variant="outline">Закрыть</button>
+      <button type="button" id="idea-save" class="btn">Записать</button>
+    </footer>
+  </div>
+</dialog>
+
+<dialog id="help-dialog" class="dialog" aria-labelledby="help-title">
+  <div>
+    <header><h2 id="help-title">Клавиши</h2><p>Работают в русской и английской раскладке.</p></header>
+    <section>
+      <table class="keys">
+        <tr><td><kbd class="kbd">1</kbd></td><td>оставить</td></tr>
+        <tr><td><kbd class="kbd">2</kbd> <kbd class="kbd">3</kbd> <kbd class="kbd">4</kbd> <kbd class="kbd">5</kbd></td><td>отбросить: вокал, музыка, шум, другое</td></tr>
+        <tr><td><kbd class="kbd">Пробел</kbd></td><td>играть / пауза</td></tr>
+        <tr><td><kbd class="kbd">←</kbd> <kbd class="kbd">→</kbd></td><td>соседний клип</td></tr>
+        <tr><td><kbd class="kbd">Shift</kbd>+<kbd class="kbd">←</kbd> <kbd class="kbd">→</kbd></td><td>перемотка на 5 с</td></tr>
+        <tr><td><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Z</kbd></td><td>отменить последнее решение</td></tr>
+        <tr><td><kbd class="kbd">N</kbd></td><td>заметка (Esc — сохранить и выйти)</td></tr>
+        <tr><td><kbd class="kbd">I</kbd></td><td>идея</td></tr>
+        <tr><td><kbd class="kbd">M</kbd></td><td>Разбор ↔ Мои клипы</td></tr>
+        <tr><td><kbd class="kbd">/</kbd></td><td>поиск по заметкам (Мои клипы)</td></tr>
+        <tr><td><kbd class="kbd">G</kbd></td><td>Библиотека ↔ сессия</td></tr>
+        <tr><td><kbd class="kbd">?</kbd></td><td>эта справка</td></tr>
+        <tr><td><kbd class="kbd">Esc</kbd></td><td>закрыть окно / выйти из поля</td></tr>
+      </table>
+    </section>
+    <footer><button type="button" id="help-close" class="btn" data-variant="outline">Закрыть</button></footer>
+  </div>
+</dialog>
+
+<audio id="player" preload="auto"></audio>
 </body>
 </html>

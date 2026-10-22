@@ -110,6 +110,7 @@ test("keyAction", () => {
     [{ code: "KeyC", ctrlKey: true }, {}, null],
     [{ code: "Digit1", altKey: true }, {}, null],
     [{ code: "Space" }, {}, "play"],
+    [{ code: "Space", repeat: true }, {}, null],
     [{ code: "ArrowLeft" }, {}, "prev"],
     [{ code: "ArrowRight" }, {}, "next"],
     [{ code: "ArrowRight", shiftKey: true }, {}, "seek:5"],
