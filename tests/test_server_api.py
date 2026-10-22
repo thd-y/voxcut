@@ -102,6 +102,19 @@ def test_session_view_marks(api):
     assert [c["marks"] for c in clips] == [[], ["моё"], []]
 
 
+def test_session_view_parses_journal_once(api, monkeypatch):
+    """Review #2: the view cost is events + clips, not events × clips."""
+    j = Journal(api.lay.journal)
+    for i in range(10):
+        j.append({"event_id": uuid.uuid4().hex, "kind": "heard", "value": "",
+                  "session_id": SID, "start_s": float(i), "end_s": i + 1.0})
+    calls = []
+    real = journal_mod._when
+    monkeypatch.setattr(journal_mod, "_when", lambda e: calls.append(1) or real(e))
+    assert session(api)["clips"][0]["heard"] is True
+    assert len(calls) <= 10  # once per event, whatever the number of clips (3 here)
+
+
 def test_clip_bytes_with_key(api):
     clip = session(api)["clips"][1]
     status, headers, body = get(api, f"/api/clip/{clip['clip_id']}")

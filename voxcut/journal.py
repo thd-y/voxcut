@@ -174,12 +174,20 @@ class Journal:
         self.warnings = []
 
 
+def session_spans(events: list[dict], session_id: str) -> list[dict]:
+    """One session's span events in time order; build once per view, not once per clip."""
+    spans = [e for e in events if e.get("session_id") == session_id and e.get("kind") in SPAN_KINDS]
+    return sorted(spans, key=_when)  # merged backup events are older than local ones
+
+
 def clip_view(events: list[dict], session_id: str, start_s: float, end_s: float) -> dict:
+    return span_view(session_spans(events, session_id), start_s, end_s)
+
+
+def span_view(spans: list[dict], start_s: float, end_s: float) -> dict:
     last: dict[tuple, dict] = {}
     heard = []
-    for e in sorted(events, key=_when):  # merged backup events are older than local ones
-        if e.get("session_id") != session_id or e.get("kind") not in SPAN_KINDS:
-            continue
+    for e in spans:
         if not (e["start_s"] < end_s and e["end_s"] > start_s):
             continue
         if e["kind"] == "heard":
