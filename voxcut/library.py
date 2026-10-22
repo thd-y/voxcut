@@ -162,7 +162,14 @@ def _source_names(lay: Layout) -> list[str]:
     entries = sorted(lay.inbox.iterdir()) if lay.inbox.is_dir() else []
     root = [""] if any(p.is_file() and p.suffix.lower() == ".wav" for p in entries) else []
     return root + [p.name for p in entries if p.is_dir() and not p.name.startswith(".")
-                   and any(f.is_file() and f.suffix.lower() == ".wav" for f in p.iterdir())]
+                   and _has_wav(p)]
+
+
+def _has_wav(folder: Path) -> bool:
+    try:
+        return any(f.is_file() and f.suffix.lower() == ".wav" for f in folder.iterdir())
+    except OSError:  # one unreadable folder must not take the whole inbox down
+        return False
 
 
 def _source_dir(lay: Layout, source: str) -> Path:
@@ -246,9 +253,13 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
         try:
             os.rmdir(src)
         except OSError:
-            names = sorted(p.name for p in src.iterdir()) if src.is_dir() else []
-            log(f"в inbox/{source}/ остались файлы: {', '.join(names)}; "
-                f"папка скрыта, удалите вручную")
+            if not _has_wav(src):  # WAVs left = another chain to import: never say «удалите»
+                try:
+                    names = sorted(p.name for p in src.iterdir())
+                except OSError:
+                    names = []
+                log(f"в inbox/{source}/ остались файлы: {', '.join(names)}; "
+                    f"папка скрыта, удалите вручную")
     return {"session_id": plan.session_id, "existing": False}
 
 

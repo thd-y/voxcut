@@ -247,6 +247,30 @@ def test_import_rmdir_race_is_not_failure(lay, no_check, monkeypatch):
     assert any(m.startswith("в inbox/13_oct/ остались файлы") for m in msgs)
 
 
+def test_import_second_chain_left_without_warning(lay, no_check):
+    make_folder(lay.inbox / "13_oct", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    msgs = []
+    import_originals(lay, "13_oct", 1, None, msgs.append)
+    left = sorted(p.name for p in (lay.inbox / "13_oct").iterdir())
+    assert len(left) == 1 and left[0].lower().endswith(".wav")  # chain 2 is still there
+    assert not any(m.startswith("в inbox/") for m in msgs)  # never «удалите вручную» on a WAV
+    assert [s["source"] for s in inbox_inventory(lay)["sources"]] == ["13_oct"]
+
+
+def test_inventory_unreadable_subfolder_skipped(lay, monkeypatch):
+    make_folder(lay.inbox / "folder01", chain_starts(2))
+    (lay.inbox / "locked").mkdir()
+    real = type(lay.inbox).iterdir
+
+    def iterdir(self):
+        if self.name == "locked":
+            raise PermissionError(13, "Permission denied")
+        return real(self)
+
+    monkeypatch.setattr(type(lay.inbox), "iterdir", iterdir)
+    assert [s["source"] for s in inbox_inventory(lay)["sources"]] == ["folder01"]
+
+
 def test_import_root_inbox_never_removed(lay, no_check):
     make_folder(lay.inbox, chain_starts(2))
     import_originals(lay, "", 1, None, _quiet)
