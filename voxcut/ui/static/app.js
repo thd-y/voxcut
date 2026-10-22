@@ -84,6 +84,14 @@ function gapBefore(clips, i, min = 30) {
   return gap >= min ? gap : null;
 }
 
+// D51: «22.10 04:25» in local time.
+function ideaTime(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  const two = (n) => String(n).padStart(2, "0");
+  return `${two(d.getDate())}.${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 const gapLabel = (seconds) => `пауза ${fmtPos(seconds)}`;  // D54
 
 const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
@@ -560,7 +568,7 @@ function renderList() {
   const rows = [];
   list.forEach((c, i) => {
     const gap = gapBefore(list, i, GAP_MIN_S);
-    if (gap !== null) rows.push(el("p", fmtPos(gap), "gap"));
+    if (gap !== null) rows.push(el("p", gapLabel(gap), "gap"));
     const item = el("article", null, `item${c.clip_id === ui.selectedId ? " selected" : ""}`);
     item.dataset.size = "xs";
     item.setAttribute("role", "listitem");
@@ -578,7 +586,7 @@ function renderList() {
     // in my clips every row is kept: only extra states earn a badge there
     if (ui.tab !== "mine" || status(c).others || ui.pending.has(c.clip_id)) aside.append(statusBadge(c));
     item.append(sec, aside);
-    item.addEventListener("click", () => select(c.clip_id, { play: ui.tab === "mine" && ui.inOrder }));
+    item.addEventListener("click", () => select(c.clip_id, { play: true }));  // D53
     rows.push(item);
   });
   $("clip-list").replaceChildren(...rows);
@@ -817,7 +825,11 @@ function renderLibrary() {
   $("backup-info").textContent = st.last_backup
     ? `Последний бэкап: ${st.last_backup}` : "Бэкапов ещё не было.";
   setKids($("ideas"), JSON.stringify(st.ideas.map((i) => i.event_id)),
-    () => st.ideas.slice().reverse().map((i) => el("li", i.value)));
+    () => st.ideas.slice().reverse().map((i) => {
+      const li = el("li");
+      li.append(el("time", ideaTime(i.ts)), el("p", i.value));
+      return li;
+    }));
 }
 
 async function submit(kind, params) {
@@ -926,7 +938,7 @@ function step(delta) {
   if (!list.length || !ui.loaded || summaryShown()) return;
   const pos = list.findIndex((c) => c.clip_id === ui.selectedId);
   const next = list[pos < 0 ? 0 : Math.max(0, Math.min(list.length - 1, pos + delta))];
-  select(next.clip_id, { play: ui.tab === "mine" && ui.inOrder });
+  select(next.clip_id, { play: true });  // D53
 }
 
 function journal(kind, value, clip) {
@@ -985,7 +997,7 @@ function decide(value) {
     const after = shown();  // the rejected clip has left the list
     next = after.length ? after[Math.min(pos, after.length - 1)].clip_id : null;
   }
-  select(next, { play: false });
+  select(next, { play: !!next && next !== clip.clip_id });  // D53: nothing left → silence
   $("card").focus({ preventScroll: true });
 }
 
@@ -1260,7 +1272,7 @@ function bind() {
     const mid = (c) => Math.abs((c.start_s + c.end_s) / 2 - t);
     const best = list.reduce((a, c) => (mid(c) < mid(a) ? c : a));
     if (!shown().includes(best)) ui.filter = "all";
-    select(best.clip_id, { play: ui.tab === "mine" && ui.inOrder });
+    select(best.clip_id, { play: false });  // D53, owner: the timeline only moves to a clip
   });
   const p = $("player");
   for (const ev of ["timeupdate", "play", "pause", "loadedmetadata"]) p.addEventListener(ev, renderPlayer);

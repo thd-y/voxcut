@@ -39,7 +39,8 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 #clip-list .item h4 { font-variant-numeric: tabular-nums; }
 #clip-list .item .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   max-width: 100%; }
-.gap { margin: 0; text-align: center; font-size: 11px; color: var(--muted-foreground); }
+.gap { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted-foreground); }
+.gap::before, .gap::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
 .dot { display: inline-block; width: 6px; height: 6px; border-radius: 99px;
   background: var(--muted-foreground); }
 .list-empty { padding: 16px 8px; text-align: center; color: var(--muted-foreground); }
@@ -89,8 +90,11 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 .lib-row:last-child { border-bottom: 0; }
 .lib-row .error { color: var(--destructive); white-space: pre-wrap; }
 .lib-row pre { white-space: pre-wrap; font-size: 12px; max-height: 160px; overflow: auto; margin: 0; }
-#ideas { margin: 0; padding-left: 18px; }
-#ideas li { white-space: pre-wrap; overflow-wrap: anywhere; }
+#ideas { margin: 0; padding: 0; list-style: none; }
+#ideas li { padding: 8px 0; }
+#ideas li + li { border-top: 1px solid var(--border); }
+#ideas time { display: block; font-size: 11px; color: var(--muted-foreground); }
+#ideas p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .dialog textarea { width: 100%; }
 .keys td { padding: 3px 8px 3px 0; vertical-align: top; }
