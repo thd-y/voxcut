@@ -311,7 +311,7 @@ def _rollback_import(sdir: Path, moved: list[Path], failed: Path, exc: OSError) 
     tmp = sdir / "originals.tmp"
     stuck = []
     for p in reversed(moved):
-        if p.exists():  # something new in its place: never overwrite it
+        if os.path.lexists(p):  # something new in its place, even a dangling link: keep it
             stuck.append(p.name)
             continue
         try:

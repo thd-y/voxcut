@@ -690,6 +690,28 @@ def test_pending_session_blocks_reimport_of_rest(lay, no_check, monkeypatch):
     assert len(list(lay.sessions.iterdir())) == 1
 
 
+def test_rollback_keeps_dangling_symlink(lay, no_check, monkeypatch):
+    import errno
+
+    paths = make_folder(lay.inbox, chain_starts(3))
+    real, n = os.rename, [0]
+
+    def rename(src, dst):
+        n[0] += 1
+        if n[0] == 2:
+            os.symlink("/nonexistent", paths[0])  # appeared in the slot after the first move
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "rename", rename)
+    with pytest.raises(SessionError, match="originals.tmp"):
+        import_originals(lay, "", 1, None, _quiet)
+    monkeypatch.undo()
+    assert os.path.islink(paths[0])
+    sdir = next(lay.sessions.iterdir())
+    assert [p.name for p in (sdir / "originals.tmp").iterdir()] == [paths[0].name]
+
+
 @pytest.mark.parametrize("bad", ["../x.wav", "ABS", ".", ""])
 def test_pending_names_outside_refused(lay, no_check, monkeypatch, tmp_path, bad):
     """A pending file may come from a backup: only plain file names are looked up (D65)."""

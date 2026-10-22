@@ -191,3 +191,16 @@ def test_envcheck_probe_exit_codes(monkeypatch, exc, code):
     with pytest.raises(SystemExit) as e:
         exec(PROBE, {})  # noqa: S102 - our own constant, the same code `python -c` runs
     assert e.value.code == code
+
+
+def test_envcheck_run_probe_timeout(monkeypatch, tmp_path):
+    """A unit that hangs past the timeout is a verdict input (None), not a traceback."""
+    import subprocess
+
+    from voxcut.ui import envcheck
+
+    def hang(*a, **k):
+        raise subprocess.TimeoutExpired(a[0], 60)
+
+    monkeypatch.setattr(envcheck.subprocess, "run", hang)
+    assert envcheck.run_probe(tmp_path, True) is None
