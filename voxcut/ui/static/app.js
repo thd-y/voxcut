@@ -2,6 +2,33 @@
 // Security (S2, S3, S7): the key lives only in this module, all data goes out via textContent.
 "use strict";
 
+// --- pure functions (no DOM; tested by node --test, D48) ---
+
+const MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+function parseSessionName(name) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})_(?:(\d+)h)?(?:(\d+)m)?$/.exec(name);
+  if (!m || (!m[6] && !m[7]) || !MONTHS[+m[2] - 1]) return null;
+  const length = [m[6] && `${+m[6]} ч`, m[7] && `${+m[7]} мин`].filter(Boolean).join(" ");
+  return { date: `${+m[3]} ${MONTHS[+m[2] - 1]}`, time: `${m[4]}:${m[5]}`, length };
+}
+
+const clockOf = (startLocal) => (startLocal ? startLocal.slice(11, 19) : "");
+
+function fmtDur(s) {
+  const t = Math.round(s);
+  return t < 60 ? `${t} с` : `${Math.floor(t / 60)} мин ${t % 60} с`;
+}
+
+function fmtPos(s) {
+  const t = Math.floor(s);
+  const mm = Math.floor((t % 3600) / 60);
+  const ss = String(t % 60).padStart(2, "0");
+  return t >= 3600 ? `${Math.floor(t / 3600)}:${String(mm).padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
+}
+
+// --- screen ---
+
 let KEY = null;
 let state = null;          // GET /api/state
 let view = null;           // GET /api/session/{sid}
@@ -367,4 +394,8 @@ function bind() {
   window.addEventListener("resize", () => view && drawTimeline());
 }
 
-start();
+if (typeof module === "object") {
+  module.exports = { parseSessionName, clockOf, fmtDur, fmtPos };
+} else {
+  start();
+}
