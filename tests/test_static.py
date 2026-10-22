@@ -34,7 +34,7 @@ def test_static_rules(path):
         assert not re.search(r"<script[^>]*>\s*[^<\s]", text, re.IGNORECASE), "inline script body"
         assert re.findall(r'<script[^>]*src="([^"]+)"', text) == ["/app.js"]
         assert re.findall(r'<link[^>]*href="([^"]+)"', text) == [
-            "/vendor/basecoat-luma.css", "/app.css"]
+            "/vendor/basecoat-luma.css", "/app.css", "/favicon.svg"]
 
 
 def test_static_table_covers_all_files():
@@ -72,9 +72,10 @@ def test_index_served_with_csp(tmp_path):
     try:
         c = Client(app)
         for path in ("/", "/app.js", "/app.css", "/vendor/basecoat-luma.css",
-                     "/vendor/lucide-sprite.svg"):
+                     "/vendor/lucide-sprite.svg", "/favicon.svg"):
             status, headers, _ = c.req("GET", path)
             assert status == 200 and {k: headers.get(k) for k in SECURITY} == SECURITY
+        assert c.req("GET", "/favicon.svg")[1].get("Content-Type") == "image/svg+xml"  # D60
     finally:
         server.shutdown()
         server.server_close()
