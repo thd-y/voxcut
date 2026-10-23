@@ -1,7 +1,7 @@
 // VoxCut screen (redesign R1–R10): review, my clips, library. Vanilla JS, no build step.
 // Security (S2, S3, S7): the key lives only in this module, all data goes out via textContent.
 "use strict";
-const { translate, errText } = typeof module === "object" ? require("./i18n.js") : globalThis.i18n;
+const { translate, errText, pickLang } = typeof module === "object" ? require("./i18n.js") : globalThis.i18n;
 
 // --- pure functions (no DOM; tested by node --test, D48) ---
 
@@ -197,6 +197,7 @@ const JOB_STATES = { queued: "в очереди", running: "идёт", done: "г
 const STATES = { imported: "импортирована", assembled: "собрана", probs: "вероятности посчитаны",
   segmented: "размечена", clips: "клипы готовы", incomplete: "неполная" };
 const $ = (id) => document.getElementById(id);
+const tr = (key, params) => translate(ui.lang, key, params);
 const newId = () => crypto.randomUUID().replaceAll("-", "");
 let darkQuery = null;       // matchMedia, set in start(): the pure part also loads in node
 
@@ -268,6 +269,24 @@ function applyTheme() {
   if (view) drawTimeline();
 }
 
+// L11: static text, placeholders and labels marked data-i18n* take the current language.
+function applyStatic() {
+  for (const n of document.querySelectorAll("[data-i18n]")) n.textContent = tr(n.dataset.i18n);
+  for (const attr of ["placeholder", "aria-label", "title"]) {
+    for (const n of document.querySelectorAll(`[data-i18n-${attr}]`)) {
+      n.setAttribute(attr, tr(n.getAttribute(`data-i18n-${attr}`)));
+    }
+  }
+}
+
+// D67, L13: a live switch; nothing typed, selected, open or playing is reset.
+function setLang(value) {
+  ui.lang = pickLang(value);
+  document.documentElement.lang = ui.lang;
+  applyStatic();
+  render();
+}
+
 // D62: canonical launch window, shrunk to 90% of a small screen, centred on its work area.
 const WINDOW_W = 1280, WINDOW_H = 800, WINDOW_MAX = 0.9;
 function launchRect(avail) {
@@ -311,6 +330,7 @@ async function start() {
   darkQuery.addEventListener("change", applyTheme);
   const code = location.hash.slice(1);
   history.replaceState(null, "", "/");
+  applyStatic();
   render();
   try {
     const r = await fetch("/api/exchange", {
@@ -1381,6 +1401,7 @@ function bind() {
   }
   $("library-btn").addEventListener("click", toggleLibrary);
   $("help-btn").addEventListener("click", () => $("help-dialog").showModal());
+  $("lang").addEventListener("click", () => setLang(ui.lang === "en" ? "ru" : "en"));
   $("help-close").addEventListener("click", () => $("help-dialog").close());
   $("theme").addEventListener("click", () => {
     ui.theme = document.documentElement.classList.contains("dark") ? "light" : "dark";

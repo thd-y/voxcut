@@ -7,15 +7,18 @@ const { I18N } = globalThis;
 
 const d = (code, params = {}) => ({ code, params });
 
-// A temporary key in both catalogs for the duration of fn.
+// A temporary value of key in both catalogs for the duration of fn; the catalogs are restored after.
 function withKey(key, ru, en, fn) {
+  const saved = { ru: Object.getOwnPropertyDescriptor(I18N.ru, key), en: Object.getOwnPropertyDescriptor(I18N.en, key) };
   I18N.ru[key] = ru;
   I18N.en[key] = en;
   try {
     fn();
   } finally {
-    delete I18N.ru[key];
-    delete I18N.en[key];
+    for (const lang of ["ru", "en"]) {
+      if (saved[lang]) Object.defineProperty(I18N[lang], key, saved[lang]);
+      else delete I18N[lang][key];
+    }
   }
 }
 
@@ -84,7 +87,7 @@ test("errText", () => {
 });
 
 test("label", () => {
-  withKey("mark.шум", "шум", "noise", () => {
+  withKey("mark.шум", "шум", "noise", () => {  // the real label, set explicitly
     assert.equal(i18n.label("en", "mark.", "шум"), "noise");
     assert.equal(i18n.label("ru", "mark.", "шум"), "шум");
   });
@@ -119,5 +122,32 @@ test("catalogs agree", () => {
     if (!EN_CYRILLIC_OK.includes(key)) {
       for (const t of texts) assert.doesNotMatch(t, /[а-яёА-ЯЁ]/, key);
     }
+  }
+});
+
+// Every key the UI asks for exists in both catalogs; every known server or journal value has a label.
+test("keys used exist", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const app = require("../../voxcut/ui/static/app.js");
+  const dir = path.join(__dirname, "../../voxcut/ui/static");
+  const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+  const js = fs.readFileSync(path.join(dir, "app.js"), "utf8");
+  const used = [...html.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g), ...js.matchAll(/\btr\("([^"]+)"/g)]
+    .map((m) => m[1]);
+  const labels = {
+    "job.kind.": ["process", "import", "backup", "restore"],
+    "job.state.": ["queued", "running", "done", "failed", "cancelled"],
+    "session.state.": ["imported", "assembled", "probs", "segmented", "clips", "incomplete"],
+    "mark.": app.DECISIONS,
+    "decision.": app.DECISIONS,
+  };
+  for (const [prefix, values] of Object.entries(labels)) used.push(...values.map((v) => prefix + v));
+  assert.ok(used.length > 60);
+  for (const lang of ["ru", "en"]) {
+    assert.deepEqual(used.filter((k) => typeof I18N[lang][k] !== "string" && typeof I18N[lang][k] !== "object"), [], lang);
+  }
+  for (const prefix of Object.keys(labels)) {  // label() returns these as text: never a plural form object
+    assert.ok(Object.keys(I18N.en).filter((k) => k.startsWith(prefix)).every((k) => typeof I18N.en[k] === "string"));
   }
 });
