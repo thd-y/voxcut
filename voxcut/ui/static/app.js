@@ -930,16 +930,15 @@ function renderLibrary() {
   }) : [el("p", tr("lib.no_sessions"), "muted")]));
 
   // Inputs being typed into are kept: re-render inbox only when its content or the language changed,
-  // and carry typed starts over by (source, chain) (L13).
+  // and carry typed starts over by (source, chain files) (L13).
   const inbox = $("inbox");
   const sig = JSON.stringify([ui.lang, st.inbox]);
   if (inbox.dataset.sig !== sig) {
     inbox.dataset.sig = sig;
-    const typed = new Map([...inbox.querySelectorAll("input[data-chain]")]
-      .map((i) => [`${i.dataset.source}\n${i.dataset.chain}`, i.value]));
+    const typed = new Map([...inbox.querySelectorAll("input[data-key]")].map((i) => [i.dataset.key, i.value]));
     const had = document.activeElement;  // the start being typed keeps focus and caret
-    const focused = had && had.dataset && had.dataset.chain !== undefined && inbox.contains(had)
-      ? { key: `${had.dataset.source}\n${had.dataset.chain}`, from: had.selectionStart, to: had.selectionEnd } : null;
+    const focused = had && had.dataset && had.dataset.key !== undefined && inbox.contains(had)
+      ? { key: had.dataset.key, from: had.selectionStart, to: had.selectionEnd } : null;
     const parts = [];
     for (const src of st.inbox.sources) {
       const box = el("div", null, "lib-row");
@@ -949,9 +948,8 @@ function renderLibrary() {
         box.append(el("div", chainText(ch, ui.lang)));
         const input = el("input", null, "input");
         input.type = "text";
-        input.dataset.source = src.source;
-        input.dataset.chain = String(ch.chain);
-        input.value = typed.get(`${src.source}\n${ch.chain}`) || "";
+        input.dataset.key = `${src.source}\n${ch.files.join("\n")}`;  // chain numbers shift after an import
+        input.value = typed.get(input.dataset.key) || "";
         input.placeholder = tr("inbox.start_placeholder");
         input.setAttribute("aria-label", tr("inbox.start_aria"));
         const row = el("div", null, "row");
@@ -971,8 +969,7 @@ function renderLibrary() {
     }
     if (!parts.length) parts.push(el("p", tr("inbox.empty"), "muted"));
     inbox.replaceChildren(...parts);
-    const again = focused && [...inbox.querySelectorAll("input[data-chain]")]
-      .find((i) => `${i.dataset.source}\n${i.dataset.chain}` === focused.key);
+    const again = focused && [...inbox.querySelectorAll("input[data-key]")].find((i) => i.dataset.key === focused.key);
     if (again) {
       again.focus({ preventScroll: true });
       again.setSelectionRange(focused.from, focused.to);
