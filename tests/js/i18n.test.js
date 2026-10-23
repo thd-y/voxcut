@@ -58,6 +58,7 @@ test("translate plural", () => {
         assert.equal(i18n.translate("en", "test.files", { n }), `${n} ${form}`);
       }
       assert.equal(i18n.translate("en", "test.files", {}), I18N.en["common.unknown"]);  // no n
+      assert.equal(i18n.translate("en", "test.files", null), I18N.en["common.unknown"]);  // never throws
     });
 });
 

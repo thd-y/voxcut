@@ -26,12 +26,13 @@
   function translate(lang, key, params = {}) {
     const cat = catalog(lang);
     const unknown = cat["common.unknown"];
+    if (!params || typeof params !== "object") return unknown;
     let value = own(cat, key);
     if (value && typeof value === "object") {  // plural: the form by params.n
       value = typeof params.n === "number"
         ? own(value, new Intl.PluralRules(pickLang(lang)).select(params.n)) : undefined;
     }
-    if (typeof value !== "string" || !params || typeof params !== "object") return unknown;
+    if (typeof value !== "string") return unknown;
     return fill(lang, value, params) ?? unknown;
   }
 
