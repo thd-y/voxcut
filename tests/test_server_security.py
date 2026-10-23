@@ -258,3 +258,32 @@ def test_dead_console_does_not_break_requests(tmp_path, monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.parametrize("method, path, body, kw, status, code", [
+    ("GET", "/", None, {"host": "evil.com"}, 421, "http_bad_host"),
+    ("OPTIONS", "/api/ping", None, {}, 405, "http_cors"),
+    ("POST", "/api/exchange", {}, {"origin": False}, 403, "http_foreign_origin"),
+    ("POST", "/api/exchange", None, {}, 400, "http_need_length"),
+    ("POST", "/api/exchange", b"x" * (64 * 1024 + 1), {}, 413, "http_body_too_large"),
+    ("POST", "/api/exchange", b"x", {}, 400, "http_not_json"),
+    ("POST", "/api/exchange", b"[1]", {}, 400, "http_not_object"),
+    ("POST", "/api/exchange", {}, {}, 400, "http_no_code"),
+    ("POST", "/api/exchange", {"code": "x" * 22}, {}, 403, "http_bad_code"),
+    ("GET", "/api/ping", None, {}, 401, "http_need_key"),
+    ("GET", "/nope", None, {}, 404, "http_not_found"),
+    ("POST", "/", {}, {}, 405, "http_method"),
+])
+def test_gate_refusals_carry_codes(served, method, path, body, kw, status, code):
+    c, _ = served
+    got, _, raw = c.req(method, path, body, **kw)
+    assert (got, json.loads(raw)["error"]) == (status, {"code": code, "params": {}})
+
+
+def test_error_body_shape(served):
+    """D66: the reply carries a code and params only; the UI renders the text."""
+    c, _ = served
+    _, _, raw = c.req("GET", "/api/ping")
+    body = json.loads(raw)
+    assert list(body) == ["error"] and set(body["error"]) == {"code", "params"}
+    assert "message" not in raw.decode()

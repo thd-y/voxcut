@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from voxcut import journal as jr
 from voxcut import library
+from voxcut.errors import Coded, descriptor
 from voxcut.jobs import JobError
 from voxcut.journal import Journal
 from voxcut.library import Layout
@@ -53,10 +54,16 @@ STATIC = {
 JSON_TYPE = "application/json; charset=utf-8"
 
 
-class HttpError(Exception):
-    def __init__(self, status: int, message: str = ""):
-        super().__init__(message)
-        self.status, self.message = status, message
+class HttpError(Coded, Exception):
+    def __init__(self, status: int, code: str, **params):
+        super().__init__(code, **params)
+        self.status = status
+
+    @classmethod
+    def of(cls, status: int, exc: BaseException) -> "HttpError":
+        """A refusal raised deeper (JournalError, JobParamsError, …) keeps its own code."""
+        d = descriptor(exc)
+        return cls(status, d["code"], **d["params"])
 
 
 @dataclass
@@ -134,12 +141,12 @@ class App:
     def _exchange(self, req: Request) -> dict:
         code = req.body.get("code")
         if not isinstance(code, str):
-            raise HttpError(400, "code")
+            raise HttpError(400, "http_no_code")
         with self._lock:  # the code dies at its first use, valid or late
             match = next((c for c in self._codes if hmac.compare_digest(c, code)), None)
             expires = self._codes.pop(match, None) if match else None
             if expires is None or self.clock() > expires:
-                raise HttpError(403, "код запуска недействителен")
+                raise HttpError(403, "http_bad_code")
             key = secrets.token_urlsafe(32)
             self._keys.append(key)
         return {"key": key}
@@ -159,13 +166,13 @@ class App:
         sid = req.params["sid"]
         srow = library.session_row(self.lay, sid)
         if srow is None:
-            raise HttpError(404, "нет такой сессии")
+            raise HttpError(404, "http_no_session")
         runs = library.session_runs(self.lay, sid)
         wanted = req.query.get("run", [None])[0]
         run = next((r for r in runs if r["run_id"] == wanted), None) if wanted else (
             runs[0] if runs else None)
         if wanted and run is None:
-            raise HttpError(404, "нет такого прогона")
+            raise HttpError(404, "http_no_run")
         sj = self.lay.sessions / sid / f"{sid}.session" / "session.json"
         files = library.load_json(sj).get("files") if sj.is_file() else None
         spans = jr.session_spans(self.journal.events(), sid)
@@ -180,7 +187,7 @@ class App:
                               "duration_s": row.get("duration_s", e - s),
                               "p_max": row.get("p_max")} | jr.span_view(spans, s, e))
         except (OSError, ValueError, KeyError, TypeError, library.RunError) as exc:
-            raise HttpError(409, f"прогон не читается: {type(exc).__name__}: {exc}") from None
+            raise HttpError(409, "run_unreadable", detail=f"{type(exc).__name__}: {exc}") from None
         return {
             "session_id": sid,
             "start_local": files[0].get("start_local") if files else None,
@@ -192,16 +199,16 @@ class App:
 
     def _clip(self, req: Request) -> Response:
         if req.method != "GET":
-            raise HttpError(405, "только GET")
+            raise HttpError(405, "http_get_only")
         with self._lock:
             known = self.clips.get(req.params["clip_id"])
         if known is None or known[3] is None:
-            raise HttpError(404, "нет такого клипа")
+            raise HttpError(404, "http_no_clip")
         path = known[3]
         try:
             f = open(path, "rb")  # noqa: SIM115 - _send streams and closes it
         except OSError:
-            raise HttpError(404, "нет такого клипа") from None  # no path in the reply or log
+            raise HttpError(404, "http_no_clip") from None  # no path in the reply or log
         ctype = "audio/flac" if path.suffix.lower() == ".flac" else "audio/wav"
         return Response(200, f, ctype)  # Range is ignored: always the whole file (S3)
 
@@ -210,67 +217,67 @@ class App:
         kind = b.get("kind")
         if kind in ("mark", "note", "heard"):
             if set(b) != {"event_id", "kind", "value", "clip_id"}:
-                raise HttpError(400, "поля: event_id, kind, value, clip_id")
+                raise HttpError(400, "http_clip_fields")
             with self._lock:
                 known = self.clips.get(b["clip_id"]) if isinstance(b["clip_id"], str) else None
             if known is None:
-                raise HttpError(400, "неизвестный clip_id")
+                raise HttpError(400, "http_unknown_clip")
             if kind == "heard" and b["value"] != "":
-                raise HttpError(400, "heard: value пустой")
+                raise HttpError(400, "http_heard_value")
             event = {"event_id": b["event_id"], "kind": kind, "value": b["value"],
                      "session_id": known[0], "start_s": known[1], "end_s": known[2]}
         elif kind == "idea":
             if not {"event_id", "kind", "value"} <= set(b) <= {"event_id", "kind", "value",
                                                               "session_id"}:
-                raise HttpError(400, "поля: event_id, kind, value, session_id?")
+                raise HttpError(400, "http_idea_fields")
             if "session_id" in b and (not isinstance(b["session_id"], str)
                                       or library.session_row(self.lay, b["session_id"]) is None):
-                raise HttpError(400, "нет такой сессии")
+                raise HttpError(400, "http_no_session")
             event = dict(b)
         elif kind == "idea_deleted":  # D56
             if set(b) != {"event_id", "kind", "value"}:
-                raise HttpError(400, "поля: event_id, kind, value")
+                raise HttpError(400, "http_idea_deleted_fields")
             if not any(e["kind"] == "idea" and e["event_id"] == b["value"]
                        for e in self.journal.events()):
-                raise HttpError(400, "нет такой идеи")
+                raise HttpError(400, "http_no_idea")
             event = dict(b)
         else:
-            raise HttpError(400, "kind: mark, note, heard, idea или idea_deleted")
+            raise HttpError(400, "http_journal_kind")
         try:
             saved = self.journal.append(event)  # returns after fsync (U5)
         except jr.JournalError as exc:
-            raise HttpError(400, str(exc)) from None
+            raise HttpError.of(400, exc) from None
         return {"saved": True, "event": saved}
 
     def _inbox_open(self, req: Request) -> dict:
         if set(req.body) != set():
-            raise HttpError(400, "тело: {}")
+            raise HttpError(400, "http_body_empty")
         try:
             self.open_folder(self.lay.inbox)  # D49: the path is fixed here, never from the request
         except (OSError, subprocess.CalledProcessError) as exc:
-            raise HttpError(503, f"проводник недоступен: {exc}") from None
+            raise HttpError(503, "inbox_open_failed", detail=str(exc)) from None
         return {"ok": True}
 
     def _jobs_post(self, req: Request) -> dict:
         b = req.body
         if self.jobs is None:
-            raise HttpError(503, "задачи недоступны")
+            raise HttpError(503, "http_jobs_unavailable")
         if set(b) != {"job_id", "kind", "params"}:
-            raise HttpError(400, "поля: job_id, kind, params")
+            raise HttpError(400, "http_job_fields")
         try:
             return {"job": self.jobs.submit(b["job_id"], b["kind"], b["params"])}
         except (ValueError, TypeError) as exc:
-            raise HttpError(400, str(exc)) from None
+            raise HttpError.of(400, exc) from None
         except JobError as exc:
-            raise HttpError(409, str(exc)) from None
+            raise HttpError.of(409, exc) from None
 
     def _jobs_cancel(self, req: Request) -> dict:
         if self.jobs is None:
-            raise HttpError(503, "задачи недоступны")
+            raise HttpError(503, "http_jobs_unavailable")
         try:
             return {"job": self.jobs.cancel(req.params["job_id"])}
         except KeyError:
-            raise HttpError(404, "нет такой задачи") from None
+            raise HttpError(404, "http_no_job") from None
 
     def on_done(self, job: dict) -> None:
         """Results of jobs that belong in the journal; the server is its only writer (U5)."""
@@ -354,37 +361,37 @@ class Handler(BaseHTTPRequestHandler):
         try:
             resp = self._gate()
         except HttpError as exc:
-            resp = self._json(exc.status, {"error": exc.message or str(exc.status)})
+            resp = self._json(exc.status, {"error": descriptor(exc)})
             self.close_connection = True  # an unread body must not leak into the next request
         except Exception as exc:  # noqa: BLE001 - the client gets a status, the log a type only
             self.app.log(f"{self.command} {self._template} error {type(exc).__name__}")
-            resp = self._json(500, {"error": "внутренняя ошибка сервера"})
+            resp = self._json(500, {"error": descriptor(exc)})
             self.close_connection = True
         self._send(resp)
 
     def _gate(self) -> Response:
         app = self.app
         if self.headers.get("Host") != f"{HOST}:{app.port}":
-            raise HttpError(421, "неверный Host")
+            raise HttpError(421, "http_bad_host")
         if self.command == "OPTIONS":
-            raise HttpError(405, "CORS не поддерживается")
+            raise HttpError(405, "http_cors")
         body = None
         if self.command == "POST":
             if (self.headers.get("Origin") != f"http://{HOST}:{app.port}"
                     or self.headers.get("Sec-Fetch-Site") != "same-origin"):
-                raise HttpError(403, "чужой источник запроса")
+                raise HttpError(403, "http_foreign_origin")
             body = self._read_body()
         url = urlsplit(self.path)
         path = url.path
         if path in STATIC:
             self._template = path
             if self.command not in ("GET", "HEAD"):
-                raise HttpError(405, "метод не поддерживается")
+                raise HttpError(405, "http_method")
             name, ctype = STATIC[path]
             return Response(200, (STATIC_DIR / name).read_bytes(), ctype)
         if (path.startswith("/api/") and path != "/api/exchange"
                 and not app.key_ok(self.headers.get("Authorization"))):
-            raise HttpError(401, "нужен ключ")
+            raise HttpError(401, "http_need_key")
         allowed = []
         for method, template, pattern, handler in app.routes:
             m = pattern.match(path)
@@ -397,26 +404,25 @@ class Handler(BaseHTTPRequestHandler):
             out = handler(Request(self.command, m.groupdict(), parse_qs(url.query), body,
                                   self.headers))
             return out if isinstance(out, Response) else self._json(200, out)
-        raise HttpError(405 if allowed else 404, "метод не поддерживается" if allowed
-                        else "не найдено")
+        raise HttpError(405, "http_method") if allowed else HttpError(404, "http_not_found")
 
     def _read_body(self) -> dict:
         if self.headers.get("Transfer-Encoding"):
-            raise HttpError(400, "нужен Content-Length")
+            raise HttpError(400, "http_need_length")
         raw = self.headers.get("Content-Length", "")
         if not (raw.isascii() and raw.isdigit()) or len(raw) > 18:  # int() takes "-1", "5_0"
-            raise HttpError(400, "нужен Content-Length")
+            raise HttpError(400, "http_need_length")
         n = int(raw)
         if n > BODY_MAX:
             if n <= DRAIN_MAX:  # read it away so the client sees 413, not a reset connection
                 self.rfile.read(n)
-            raise HttpError(413, "тело больше 64 КиБ")
+            raise HttpError(413, "http_body_too_large")
         try:
             body = json.loads(self.rfile.read(n))
         except ValueError:
-            raise HttpError(400, "тело не JSON") from None
+            raise HttpError(400, "http_not_json") from None
         if not isinstance(body, dict):
-            raise HttpError(400, "тело не JSON-объект")
+            raise HttpError(400, "http_not_object")
         return body
 
     do_GET = do_HEAD = do_POST = do_OPTIONS = do_PUT = do_DELETE = do_PATCH = _dispatch

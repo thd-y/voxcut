@@ -55,7 +55,8 @@ def test_descriptor_plain_exception():
 UI_MODULES = ["intervals", "audio", "cli", "library", "journal", "jobs", "ui/server"]
 EXEMPT = {"LabelsError", "ConfigError", "SystemExit"}
 INTERNAL = {("audio", "RuntimeError"),  # an invariant breach: internal_error in the UI
-            ("journal", "ValueError")}  # a bad line's reason, carried as detail of a warning
+            ("journal", "ValueError"),  # a bad line's reason, carried as detail of a warning
+            ("ui/server", "ValueError")}  # make_server before the server exists: console only
 CYR = re.compile("[а-яёА-ЯЁ]")
 
 
@@ -90,7 +91,6 @@ def russian_raises() -> list[str]:
     return found
 
 
-@pytest.mark.xfail(strict=True, reason="цикл 1, слой 2–3")
 def test_no_russian_raise_literals():
     assert russian_raises() == []
 

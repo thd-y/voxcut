@@ -107,7 +107,9 @@ def test_broken_session_409_with_reason(api):
     """Review #5: a broken manifest says why instead of «внутренняя ошибка сервера»."""
     (api.seg / "clips" / "manifest.jsonl").write_text('{"start_s": 0, "end_s": 5}\n{oops\n')
     status, _, body = get(api, f"/api/session/{SID}")
-    assert status == 409 and "JSONDecodeError" in json.loads(body)["error"]
+    err = json.loads(body)["error"]
+    assert status == 409 and err["code"] == "run_unreadable"
+    assert "JSONDecodeError" in err["params"]["detail"]
 
 
 def test_session_view_parses_journal_once(api, monkeypatch):
@@ -518,7 +520,8 @@ def test_inbox_open_tool_missing_is_503(oapi):
 
     oapi.app.open_folder = missing
     status, _, body = post(oapi, "/api/inbox/open", {})
-    assert status == 503 and "проводник недоступен" in body["error"]
+    assert status == 503 and body["error"]["code"] == "inbox_open_failed"
+    assert body["error"]["params"]["detail"]
 
 
 def test_open_folder_argv(tmp_path):
@@ -573,3 +576,16 @@ def test_idea_delete_refused(wapi, case):
     before = len(lines(wapi))
     assert post(wapi, "/api/journal", d)[0] == 400
     assert len(lines(wapi)) == before
+
+
+def test_cyrillic_param_raw(wapi):
+    """S7 is the page's job: params come as they are, Cyrillic not \\u-escaped (ensure_ascii)."""
+    status, _, raw = wapi.req("POST", "/api/jobs", {"job_id": uuid.uuid4().hex, "kind": "<b>вид",
+                                                    "params": {}}, key=wapi.k)
+    assert status == 400 and "'<b>вид'".encode() in raw
+    assert json.loads(raw)["error"] == {"code": "job_unknown_kind", "params": {"kind": "'<b>вид'"}}
+
+
+def test_journal_refusal_keeps_code(wapi):
+    status, _, body = post(wapi, "/api/journal", mark(wapi, value="x" * 10_000))
+    assert status == 400 and body["error"]["code"] == "journal_value_too_long"
