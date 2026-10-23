@@ -102,6 +102,8 @@ def test_append_rejects_bad_events(tmp_path):
         (ev(kind="exec"), "journal_unknown_kind"),
         (ev(value="x" * (journal.MARK_MAX + 1)), "journal_value_too_long"),
         (ev(kind="note", value="x" * (journal.NOTE_MAX + 1)), "journal_value_too_long"),
+        (ev(value=None), "journal_bad_value"),  # not a string: not "longer than N"
+        (ev(value=5), "journal_bad_value"),
         (ev(event_id="../x"), "journal_bad_event_id"),
         (ev(start=20.0, end=10.0), "journal_bad_span"),
     ):

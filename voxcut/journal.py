@@ -73,7 +73,9 @@ def _validate(event: dict, with_ts: bool = False) -> dict:
     if e.get("kind") not in KINDS:
         raise JournalError("journal_unknown_kind")
     limit = MARK_MAX if e["kind"] == "mark" else NOTE_MAX
-    if not isinstance(e.get("value"), str) or len(e["value"]) > limit:
+    if not isinstance(e.get("value"), str):
+        raise JournalError("journal_bad_value")
+    if len(e["value"]) > limit:
         raise JournalError("journal_value_too_long", limit=limit)
     sid = e.get("session_id")
     if sid is not None and (not isinstance(sid, str) or not sid or len(sid) > 200):

@@ -276,6 +276,7 @@
   "err.journal_bad_ts": "ts: нужна дата ISO с часовым поясом",
   "err.journal_bad_event_id": "event_id: нужны 32 hex",
   "err.journal_unknown_kind": "неизвестный вид события",
+  "err.journal_bad_value": "value: нужна строка",
   "err.journal_value_too_long": "текст длиннее {limit} символов",
   "err.journal_bad_session_id": "session_id",
   "err.journal_bad_span": "отрезок: нужны session_id и 0 <= start_s < end_s",

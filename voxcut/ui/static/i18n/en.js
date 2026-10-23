@@ -270,6 +270,7 @@
   "err.journal_bad_ts": "ts: an ISO date with a time zone is required",
   "err.journal_bad_event_id": "event_id: 32 hex digits required",
   "err.journal_unknown_kind": "unknown event kind",
+  "err.journal_bad_value": "value: a string is required",
   "err.journal_value_too_long": "text longer than {limit} characters",
   "err.journal_bad_session_id": "session_id",
   "err.journal_bad_span": "span: session_id and 0 <= start_s < end_s are required",

@@ -9,7 +9,7 @@ const LOCALE = { en: "en-GB", ru: "ru" };  // D71: English dates day first, 24 h
 
 function parseSessionName(name, lang) {
   const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})_(?:(\d+)h)?(?:(\d+)m)?$/.exec(name);
-  if (!m || (!m[6] && !m[7]) || +m[2] < 1 || +m[2] > 12) return null;
+  if (!m || (!m[6] && !m[7]) || +m[2] < 1 || +m[2] > 12 || +m[4] > 23 || +m[5] > 59) return null;
   const [h, min] = [+m[6], +m[7]];
   const length = m[6] && m[7] ? translate(lang, "dur.hm", { h, m: min })
     : m[6] ? translate(lang, "dur.h", { h }) : translate(lang, "dur.m", { m: min });

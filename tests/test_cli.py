@@ -110,6 +110,8 @@ def test_rm_hint_quotes_path_with_space(tmp_path):
     (lambda d: (d / "probs.json").unlink(), "нет .*probs.json", "run_missing"),
     (lambda d: np.save(d / "probs.npy", np.zeros(5, dtype=np.float32)), "5 кадров",
      "probs_frames_mismatch"),
+    (lambda d: (d / "probs.json").write_text(json.dumps(  # null in our own file: its error, not TypeError
+        json.loads((d / "probs.json").read_text()) | {"n_frames": None})), "None", "probs_frames_mismatch"),
 ])
 def test_incomplete_probs_dir_refused(tmp_path, damage, needle, code):
     d = make_probs_dir(tmp_path, SPEECH)

@@ -387,7 +387,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
         return dst
     info = check_source(src)
     if session and session["n_samples"] != info.n_samples:
-        raise RunError("run_session_samples", src=src, expected=session["n_samples"],
+        raise RunError("run_session_samples", src=src, expected=str(session["n_samples"]),
                        got=info.n_samples)
     af = vad_filter(channel, info.channels)
     tmp = fresh_tmp(dst)

@@ -62,7 +62,7 @@ def load_probs(probs_dir: Path) -> tuple[dict, np.ndarray]:
     probs = np.load(probs_dir / "probs.npy")
     if len(probs) != meta["n_frames"] or n_frames(meta["n16k"]) != meta["n_frames"]:
         raise RunError("probs_frames_mismatch", dir=str(probs_dir), frames=len(probs),
-                       n_frames=meta["n_frames"], n16k=meta["n16k"])
+                       n_frames=str(meta["n_frames"]), n16k=str(meta["n16k"]))
     return meta, probs
 
 

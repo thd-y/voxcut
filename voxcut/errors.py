@@ -182,6 +182,7 @@ CODES: dict[str, tuple[tuple[str, ...], str]] = {
     "journal_bad_ts": ((), "ts: нужна дата ISO с часовым поясом"),
     "journal_bad_event_id": ((), "event_id: нужны 32 hex"),
     "journal_unknown_kind": ((), "неизвестный вид события"),
+    "journal_bad_value": ((), "value: нужна строка"),
     "journal_value_too_long": (("limit",), "текст длиннее {limit} символов"),
     "journal_bad_session_id": ((), "session_id"),
     "journal_bad_span": ((), "отрезок: нужны session_id и 0 <= start_s < end_s"),

@@ -19,6 +19,7 @@ test("parseSessionName", () => {  // D68: the date through Intl, units from the 
     assert.equal(app.parseSessionName("2026-13-01_00-00_5h", lang), null);
     assert.equal(app.parseSessionName("2026-00-01_00-00_5h", lang), null);
     assert.equal(app.parseSessionName("2026-02-31_00-00_5h", lang), null);  // no roll-over into March
+    assert.equal(app.parseSessionName("2026-08-11_25-99_5h", lang), null);  // no «25:99»
   }
   assert.equal(app.sessionLabel({ name: "2026-08-11_21-30_4h16m" }, "ru"), "11 авг., 21:30 · 4 ч 16 мин");
   assert.equal(app.sessionLabel({ name: "folder01" }, "en"), "folder01");
