@@ -266,6 +266,16 @@ def render(code: str, params: dict) -> str:
     return _FIELD.sub(lambda m: _value(m[1], params[m[1]]), CODES[code][1])
 
 
+# A param is str, number, list of str or a nested descriptor: a Path breaks json.dumps of a job
+# status, None renders differently in Python and JS.
+def _param_ok(v) -> bool:
+    if isinstance(v, dict):
+        return isinstance(v.get("code"), str) and isinstance(v.get("params"), dict)
+    if isinstance(v, list):
+        return all(isinstance(x, str) for x in v)
+    return isinstance(v, (str, int, float)) and not isinstance(v, bool)
+
+
 class Coded(Exception):
     """First base of a UI-facing exception: class SessionError(Coded, ValueError)."""
 
@@ -275,6 +285,9 @@ class Coded(Exception):
         names = CODES[code][0]
         if set(params) != set(names):
             raise TypeError(f"{code}: params {sorted(params)} != {sorted(names)}")
+        for name, v in params.items():
+            if not _param_ok(v):
+                raise TypeError(f"{code}: param {name} has type {type(v).__name__}")
         self.code, self.params = code, params
         super().__init__(render(code, params))
 

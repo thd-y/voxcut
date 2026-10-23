@@ -41,6 +41,28 @@ def test_coded_rejects_unknown_code_and_params():
         E("legacy_error", detail="x", extra=1)
 
 
+@pytest.mark.parametrize("value", [None, Path("/x"), True, b"x"])
+def test_coded_rejects_param_types(value):  # a Path would kill json.dumps in jobs._write; None renders "None"/"null"
+    with pytest.raises(TypeError):
+        E("source_no_audio", src=value)
+
+
+def test_coded_rejects_list_items():
+    with pytest.raises(TypeError):
+        E("session_foreign_names", dir="d", files=["a", Path("b")])
+
+
+@pytest.mark.parametrize(("code", "params"), [
+    ("source_no_audio", {"src": "x"}),
+    ("journal_value_too_long", {"limit": 3}),
+    ("session_overlap", {"a": "1", "b": "2", "gap": 0.5, "tol": 0.1}),
+    ("session_foreign_names", {"dir": "d", "files": ["a"]}),
+    ("legacy_error", {"detail": {"code": "internal_error", "params": {}}}),
+])
+def test_coded_accepts_param_types(code, params):
+    assert E(code, **params).params == params
+
+
 def test_coded_is_its_base():
     with pytest.raises(ValueError) as ei:
         raise E("legacy_error", detail="x")
