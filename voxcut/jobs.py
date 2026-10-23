@@ -35,6 +35,13 @@ class JobParamsError(Coded, ValueError):
 LIST_MAX = 20  # (агент) jobs shown in /api/state; older finished ones stay on disk
 
 
+def _job_error(exc: BaseException) -> dict:
+    """An uncoded failure inside a job shows its type and text (user, 2026-10-23); HTTP 500 does not."""
+    if isinstance(exc, Coded):
+        return descriptor(exc)
+    return {"code": "job_unexpected", "params": {"detail": f"{type(exc).__name__}: {exc}"}}
+
+
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -184,7 +191,7 @@ class Jobs:
                     self.on_done(self._view(job_id))
                 except Exception as exc:  # noqa: BLE001 - one bad hook must not stall the queue
                     self._set_status(job_id, "failed", error={
-                        "code": "job_after_done_failed", "params": {"cause": descriptor(exc)}})
+                        "code": "job_after_done_failed", "params": {"cause": _job_error(exc)}})
                     rec["state"] = "failed"  # the badge flags it; the job's work is only partly in
                 finally:
                     marker.touch()
@@ -288,7 +295,7 @@ def main(argv: list[str]) -> int:
                 raise JobError("job_unit_unknown_kind", kind=repr(job["kind"]))
         except Exception as exc:  # noqa: BLE001 - every failure becomes a visible status
             log(traceback.format_exc())
-            _write(d / "status.json", status | {"state": "failed", "error": descriptor(exc),
+            _write(d / "status.json", status | {"state": "failed", "error": _job_error(exc),
                                                 "finished": _now()})
             return 1
     _write(d / "status.json", status | {"state": "done", "result": result, "finished": _now()})

@@ -208,6 +208,7 @@ CODES: dict[str, tuple[tuple[str, ...], str]] = {
         "лимит памяти на {slice} не применился ({detail}); задача не запущена"),
     "job_unit_failed": (("detail",), "systemd-run: {detail}"),
     "job_start_failed": (("detail",), "{detail}"),
+    "job_unexpected": (("detail",), "{detail}"),
     "job_dead": ((), "процесс задачи завершился без итога (возможно, OOM)"),
     "job_unit_unknown_kind": (("kind",), "неизвестный вид задачи {kind}"),
     "job_after_done_failed": (("cause",), "после завершения: {cause}"),

@@ -261,8 +261,8 @@ def test_on_done_error_does_not_block_queue(lay):
     views = {v["job_id"]: v for v in j.list()}
     assert views[b]["state"] == "running"
     assert views[a]["state"] == "failed" and views[a]["error"] == {
-        "code": "job_after_done_failed", "params": {"cause": {"code": "internal_error",
-                                                             "params": {}}}}
+        "code": "job_after_done_failed", "params": {"cause": {
+            "code": "job_unexpected", "params": {"detail": "ValueError: нет journal.jsonl"}}}}
     Jobs(lay, run=run, on_done=boom).poll()  # not retried forever after a restart
 
 
@@ -332,14 +332,15 @@ def test_unit_uncoded_exception(lay, monkeypatch):
     monkeypatch.setattr(jobs.library, "process_session", boom)
     assert jobs.main([str(lay.jobs / a)]) == 1
     st = json.loads((lay.jobs / a / "status.json").read_text())
-    assert st["error"] == {"code": "internal_error", "params": {}}
+    # user request 2026-10-23: show the exception text
+    assert st["error"] == {"code": "job_unexpected", "params": {"detail": "KeyError: 'n_samples'"}}
     assert "KeyError: 'n_samples'" in (lay.jobs / a / "log.txt").read_text()
 
 
 @pytest.mark.parametrize("exc, cause", [
     (JobError("restore_journal_broken", detail="x"),
      {"code": "restore_journal_broken", "params": {"detail": "x"}}),
-    (KeyError("p"), {"code": "internal_error", "params": {}}),
+    (KeyError("p"), {"code": "job_unexpected", "params": {"detail": "KeyError: 'p'"}}),
 ])
 def test_after_done_cause(lay, exc, cause):
     def boom(job):

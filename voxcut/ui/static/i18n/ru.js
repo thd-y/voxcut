@@ -103,6 +103,7 @@
   "err.job_slice_limit": "лимит памяти на {slice} не применился ({detail}); задача не запущена",
   "err.job_unit_failed": "systemd-run: {detail}",
   "err.job_start_failed": "{detail}",
+  "err.job_unexpected": "{detail}",
   "err.job_dead": "процесс задачи завершился без итога (возможно, OOM)",
   "err.job_unit_unknown_kind": "неизвестный вид задачи {kind}",
   "err.job_after_done_failed": "после завершения: {cause}",
