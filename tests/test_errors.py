@@ -131,7 +131,7 @@ def test_ru_text_unchanged(code, params, text):
 
 
 RU_JS = Path(__file__).parent.parent / "voxcut" / "ui" / "static" / "i18n" / "ru.js"
-FRONT_ONLY = {"unknown", "offline", "not_saved"}
+FRONT_ONLY = {"unknown", "offline", "not_saved", "http_status"}
 
 
 def test_ru_catalog_matches_registry():

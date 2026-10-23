@@ -1,7 +1,8 @@
-// Russian UI strings (D66). err.<code> are the templates of voxcut/errors.py, byte for byte
-// (test_ru_catalog_matches_registry); cycle 2 makes this the ru catalog of the whole UI.
+// Russian UI strings (D66, D67): the UI's former text. err.<code> are the templates of voxcut/errors.py,
+// byte for byte (test_ru_catalog_matches_registry); keys and {params} match en.js (tests/js/i18n.test.js).
 "use strict";
 (globalThis.I18N ??= {}).ru = {
+  "common.unknown": "(нет текста)",
   "err.internal_error": "внутренняя ошибка сервера",
   "err.legacy_error": "{detail}",
   "err.session_bad_start": "--start {text}: ожидается локальное время, например \"2025-03-01 09:00\" или \"2025-03-01 09:00:05\"",
@@ -142,5 +143,6 @@
   "err.unknown": "неизвестная ошибка",
   "err.offline": "нет связи с VoxCut",
   "err.not_saved": "не сохранено",
+  "err.http_status": "HTTP {status}",
 };
 if (typeof module === "object") module.exports = globalThis.I18N.ru;
