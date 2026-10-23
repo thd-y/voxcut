@@ -151,3 +151,19 @@ test("keys used exist", () => {
     assert.ok(Object.keys(I18N.en).filter((k) => k.startsWith(prefix)).every((k) => typeof I18N.en[k] === "string"));
   }
 });
+
+test("stage labels and wording (D70, D72, D73)", () => {
+  const stages = { import: ["импорт", "import"], assemble: ["склейка", "assembly"],
+    probs: ["поиск речи", "speech detection"], segment: ["разметка клипов", "clip boundaries"],
+    export: ["нарезка клипов", "cutting clips"] };
+  for (const [stage, [ru, en]] of Object.entries(stages)) {
+    assert.equal(i18n.translate("ru", `job.stage.${stage}`), ru);
+    assert.equal(i18n.translate("en", `job.stage.${stage}`), en);
+  }
+  assert.equal(i18n.errText("ru", d("http_no_code")), "нет кода запуска");
+  assert.equal(i18n.errText("en", d("http_no_code")), "no launch code");
+  assert.equal(i18n.errText("ru", d("journal_value_too_long", { limit: 500 })), "текст длиннее 500 символов");
+  assert.equal(i18n.errText("en", d("journal_value_too_long", { limit: 500 })), "text longer than 500 characters");
+  assert.equal(i18n.translate("en", "top.job_failed", { kind: "processing" }), "processing failed");
+  for (const code of ["backup_full_refused", "import_move_stuck"]) assert.ok(!I18N.en[`err.${code}`].includes("—"));
+});

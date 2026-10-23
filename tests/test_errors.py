@@ -119,6 +119,8 @@ RU_TEXT = [
      "(originals.tmp — незавершённый импорт, обычно его доделывает «Обработать»)")),
     ("restore_conflicts", {"lines": ["  data/a", "  data/b"]},
      "в data/ уже есть другие версии файлов, ничего не изменено:\n  data/a\n  data/b"),
+    ("journal_value_too_long", {"limit": 500}, "текст длиннее 500 символов"),  # D73
+    ("http_no_code", {}, "нет кода запуска"),  # D72
     ("run_no_reset_period", {"dir": "/r/p", "rm": "/r/p"},
      ("/r/p: probs посчитаны без второго прохода Silero (D31).\n"
      "Удалите каталог и запустите заново: rm -rf /r/p")),
