@@ -1,17 +1,18 @@
 import ast
 import re
-import string
 from pathlib import Path
 
 import pytest
 
+from voxcut.errors import _FIELD as FIELD
 from voxcut.errors import CODES, Coded, descriptor, render
 
 
 @pytest.mark.parametrize("code", sorted(CODES))
 def test_templates_match_params(code):
     names, template = CODES[code]
-    fields = {f for _, f, _, _ in string.Formatter().parse(template) if f is not None}
+    fields = set(FIELD.findall(template))
+    assert "{{" not in template and "}}" not in template  # render() has no escapes
     assert fields == set(names)
 
 
@@ -76,7 +77,9 @@ def russian_raises() -> list[str]:
             if (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)
                     and getattr(node.exc.func, "id", getattr(node.exc.func, "attr", None))
                     not in EXEMPT
-                    and any(_russian_literal(a) for a in node.exc.args)):
+                    and any(_russian_literal(x) for a in [*node.exc.args,
+                                                         *(k.value for k in node.exc.keywords)]
+                            for x in ast.walk(a))):
                 found.append(f"{mod}.py:{node.lineno}")
         if mod == "jobs":
             found += [f"{mod}.py:{n.lineno}" for n in tree.body

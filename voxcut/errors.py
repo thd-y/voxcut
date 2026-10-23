@@ -27,6 +27,8 @@ def render(code: str, params: dict) -> str:
 class Coded(Exception):
     """First base of a UI-facing exception: class SessionError(Coded, ValueError)."""
 
+    # shortcut: not picklable/copyable (args holds the rendered text); add __reduce__ if ever needed
+
     def __init__(self, code: str, **params):
         names = CODES[code][0]
         if set(params) != set(names):
