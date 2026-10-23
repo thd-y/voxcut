@@ -365,7 +365,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True  # an unread body must not leak into the next request
         except Exception as exc:  # noqa: BLE001 - the client gets a status, the log a type only
             self.app.log(f"{self.command} {self._template} error {type(exc).__name__}")
-            resp = self._json(500, {"error": descriptor(exc)})
+            resp = self._json(500, {"error": {"code": "internal_error", "params": {}}})
             self.close_connection = True
         self._send(resp)
 

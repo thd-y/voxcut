@@ -589,3 +589,19 @@ def test_cyrillic_param_raw(wapi):
 def test_journal_refusal_keeps_code(wapi):
     status, _, body = post(wapi, "/api/journal", mark(wapi, value="x" * 10_000))
     assert status == 400 and body["error"]["code"] == "journal_value_too_long"
+
+
+def test_500_is_internal_error_even_for_coded(api, monkeypatch):
+    """Layer-3 review: a coded exception escaping a handler must not leak its params (a path)."""
+    def broken():
+        raise journal_mod.JournalError("journal_broken_middle", where="/secret/j.jsonl", pos=5)
+
+    monkeypatch.setattr(api.app.journal, "events", broken)
+    status, _, body = get(api, "/api/state")
+    assert (status, json.loads(body)["error"]) == (500, {"code": "internal_error", "params": {}})
+
+
+def test_jobs_kind_not_a_string(wapi):
+    status, _, body = post(wapi, "/api/jobs", {"job_id": uuid.uuid4().hex, "kind": ["x"],
+                                               "params": {}})
+    assert status == 400 and body["error"]["code"] == "job_unknown_kind"

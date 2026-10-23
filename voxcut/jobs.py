@@ -43,7 +43,7 @@ def validate(kind: str, params: dict, lay: library.Layout) -> dict:
     """Narrow contract (U9): no paths, commands or unit properties from the browser."""
     keys = {"import": {"source", "chain", "files", "start"}, "process": {"session_id"},
             "backup": {"mode"}, "restore": {"name"}}
-    if kind not in keys:
+    if not isinstance(kind, str) or kind not in keys:
         raise JobParamsError("job_unknown_kind", kind=repr(kind))
     if not isinstance(params, dict) or set(params) != keys[kind]:
         raise JobParamsError("job_bad_params", kind=kind, keys=str(sorted(keys[kind])))
