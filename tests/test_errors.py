@@ -1,4 +1,7 @@
+import ast
+import re
 import string
+from pathlib import Path
 
 import pytest
 
@@ -46,3 +49,41 @@ def test_coded_is_its_base():
 
 def test_descriptor_plain_exception():
     assert descriptor(KeyError("p")) == {"code": "internal_error", "params": {}}
+
+
+UI_MODULES = ["intervals", "audio", "cli", "library", "journal", "jobs", "ui/server"]
+EXEMPT = {"LabelsError", "ConfigError", "SystemExit"}
+CYR = re.compile("[а-яёА-ЯЁ]")
+
+
+def _russian_literal(node) -> bool:
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str) and bool(CYR.search(node.value))
+    if isinstance(node, ast.JoinedStr):
+        return any(_russian_literal(v) for v in node.values)
+    return False
+
+
+def russian_raises() -> list[str]:
+    """`raise X("русский …")` in modules whose errors reach the UI, plus module-level Russian
+    string constants in jobs.py (DEAD is written into status.json)."""
+    root = Path(__file__).parent.parent / "voxcut"
+    found = []
+    for mod in UI_MODULES:
+        path = root / f"{mod}.py"
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)
+                    and getattr(node.exc.func, "id", getattr(node.exc.func, "attr", None))
+                    not in EXEMPT
+                    and any(_russian_literal(a) for a in node.exc.args)):
+                found.append(f"{mod}.py:{node.lineno}")
+        if mod == "jobs":
+            found += [f"{mod}.py:{n.lineno}" for n in tree.body
+                      if isinstance(n, ast.Assign) and _russian_literal(n.value)]
+    return found
+
+
+@pytest.mark.xfail(strict=True, reason="цикл 1, слой 2–3")
+def test_no_russian_raise_literals():
+    assert russian_raises() == []
