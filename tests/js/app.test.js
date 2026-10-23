@@ -2,17 +2,25 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const ru = require("../../voxcut/ui/static/i18n/ru.js");
 const app = require("../../voxcut/ui/static/app.js");
 
-test("parseSessionName", () => {
-  assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m"),
-    { date: "11 авг", time: "21:30", length: "4 ч 16 мин" });
-  assert.equal(app.parseSessionName("2026-01-02_08-05_45m").length, "45 мин");
-  assert.equal(app.parseSessionName("2026-01-02_08-05_45m").date, "2 янв");
-  assert.equal(app.parseSessionName("2026-12-31_00-00_5h").length, "5 ч");
-  assert.equal(app.parseSessionName("folder01"), null);
-  assert.equal(app.parseSessionName("2026-13-01_00-00_5h"), null);
+test("parseSessionName", () => {  // D68: the date through Intl, units from the catalog (L7)
+  assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "ru"),
+    { date: "11 авг.", time: "21:30", length: "4 ч 16 мин" });
+  assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "en"),
+    { date: "Aug 11", time: "21:30", length: "4 h 16 min" });
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").length, "45 мин");
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "en").length, "45 min");
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").date, "2 янв.");
+  assert.equal(app.parseSessionName("2026-12-31_00-00_5h", "ru").length, "5 ч");
+  assert.equal(app.parseSessionName("2026-12-31_00-00_5h", "en").length, "5 h");
+  for (const lang of ["ru", "en"]) {
+    assert.equal(app.parseSessionName("folder01", lang), null);
+    assert.equal(app.parseSessionName("2026-13-01_00-00_5h", lang), null);
+    assert.equal(app.parseSessionName("2026-00-01_00-00_5h", lang), null);
+  }
+  assert.equal(app.sessionLabel({ name: "2026-08-11_21-30_4h16m" }, "ru"), "11 авг., 21:30 · 4 ч 16 мин");
+  assert.equal(app.sessionLabel({ name: "folder01" }, "en"), "folder01");
 });
 
 test("clockOf", () => {
@@ -21,9 +29,11 @@ test("clockOf", () => {
 });
 
 test("fmtDur", () => {
-  assert.equal(app.fmtDur(7.4), "7 с");
-  assert.equal(app.fmtDur(111.2), "1 мин 51 с");
-  assert.equal(app.fmtDur(60), "1 мин 0 с");
+  assert.equal(app.fmtDur(7.4, "ru"), "7 с");
+  assert.equal(app.fmtDur(111.2, "ru"), "1 мин 51 с");
+  assert.equal(app.fmtDur(60, "ru"), "1 мин 0 с");
+  assert.equal(app.fmtDur(7.4, "en"), "7 s");
+  assert.equal(app.fmtDur(111.2, "en"), "1 min 51 s");
 });
 
 test("fmtPos", () => {
@@ -77,17 +87,20 @@ test("visibleClips", () => {
 });
 
 test("gapLabel", () => {
-  assert.equal(app.gapLabel(273), "пауза 4:33");
+  assert.equal(app.gapLabel(273, "ru"), "пауза 4:33");
+  assert.equal(app.gapLabel(273, "en"), "gap 4:33");
 });
 
-test("backupTime", () => {  // D61: «Последний бэкап» with the year
+test("backupTime", () => {  // D61: «Последний бэкап» with the year; D68: Intl of the UI language
   const tz = process.env.TZ;
   process.env.TZ = "Europe/Moscow";
   try {
-    assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00"), "22.10.2026 06:53");  // D61
-    assert.equal(app.ideaTime("2026-10-22T06:53:19.402+03:00"), "22.10 06:53");  // D51 unchanged
-    assert.equal(app.backupTime(""), "");
-    assert.equal(app.backupTime("мусор"), "мусор");
+    assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00", "ru"), "22.10.2026, 06:53");
+    assert.equal(app.ideaTime("2026-08-11T04:25:00+03:00", "ru"), "11.08, 04:25");
+    assert.equal(app.ideaTime("2026-08-11T04:25:00+03:00", "en"), "08/11, 04:25 AM");
+    assert.equal(app.ideaTime("мусор", "en"), "");
+    assert.equal(app.backupTime("", "ru"), "");
+    assert.equal(app.backupTime("garbage", "ru"), "garbage");
   } finally {
     if (tz === undefined) delete process.env.TZ;
     else process.env.TZ = tz;
@@ -202,13 +215,19 @@ test("autoOpenTarget", () => {
   assert.equal(app.autoOpenTarget([s("a", "imported"), s("b", "probs")], null), "a");
 });
 
-test("afterOpenError", () => {
-  const server = { message: "прогон не читается" };
-  const offline = { message: "нет связи с VoxCut", offline: true };
+test("afterOpenError", () => {  // the state keeps the descriptor, the screen renders it (D67)
+  const desc = { code: "run_unreadable", params: { detail: "x" } };
+  const server = { message: "прогон не читается: x", descriptor: desc };
+  const offline = { message: "нет связи с VoxCut", offline: true, descriptor: { code: "offline", params: {} } };
   assert.deepEqual(app.afterOpenError(true, server), { loaded: true, openError: null });  // it stays
   assert.deepEqual(app.afterOpenError(true, offline), { loaded: true, openError: null });
   assert.deepEqual(app.afterOpenError(false, offline), { loaded: null, openError: null });  // skeleton + alert
-  assert.deepEqual(app.afterOpenError(false, server), { loaded: null, openError: "прогон не читается" });
+  assert.deepEqual(app.afterOpenError(false, server), { loaded: null, openError: desc });
+  const d = (code, params = {}) => ({ code, params });
+  assert.deepEqual(app.afterOpenError(false, app.codedError(d("http_need_key"), "ru")),
+    { loaded: null, openError: d("http_need_key") });
+  assert.deepEqual(app.afterOpenError(false, new Error("boom")),  // a JS error: its text as is
+    { loaded: null, openError: d("legacy_error", { detail: "boom" }) });
 });
 
 test("retryAfter", () => {
@@ -218,26 +237,3 @@ test("retryAfter", () => {
   assert.equal(app.retryAfter({}, false), false);  // a server error: «Сессия не открылась», no hammering
 });
 
-
-test("errText", () => {
-  const d = (code, params = {}) => ({ code, params });
-  assert.equal(app.errText(d("http_need_key")), "нужен ключ");  // default catalog: ru
-  assert.equal(app.errText(d("session_foreign_names", { dir: "/in", files: ["a.WAV", "b.WAV"] }), ru),
-    "/in: имена не по правилу диктофона YYYYMMDDHHMMSS.wav: a.WAV, b.WAV");
-  assert.equal(app.errText(d("session_chain_range", { n: 3, total: 2, lines: ["  1: a", "  2: b"] })),
-    "--chain 3 вне диапазона 1..2:\n  1: a\n  2: b");
-  assert.equal(app.errText(d("job_after_done_failed", { cause: d("restore_journal_broken", { detail: "x" }) })),
-    "после завершения: журнал архива не читается (x); файлы восстановлены, журнал не слит, повтор не поможет");
-  assert.equal(app.errText(d("legacy_error", { detail: "<b>старый</b>" })), "<b>старый</b>");  // text, S7 is textContent
-  const unknown = ru["err.unknown"];
-  for (const bad of [d("no_such_code"), d("__proto__"), d("constructor"), d("toString"), null, "строка",
-    {}, d("legacy_error", null)]) {
-    assert.equal(app.errText(bad), unknown, JSON.stringify(bad));
-  }
-  assert.equal(app.errText(d("legacy_error", {})), unknown);  // a param the template needs is missing
-});
-
-test("afterOpenError with a descriptor", () => {
-  const e = { message: "нет такой сессии", descriptor: { code: "http_no_session", params: {} } };
-  assert.deepEqual(app.afterOpenError(false, e), { loaded: null, openError: "нет такой сессии" });
-});

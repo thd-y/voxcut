@@ -1,23 +1,27 @@
 // VoxCut screen (redesign R1–R10): review, my clips, library. Vanilla JS, no build step.
 // Security (S2, S3, S7): the key lives only in this module, all data goes out via textContent.
 "use strict";
+const { translate, errText } = typeof module === "object" ? require("./i18n.js") : globalThis.i18n;
 
 // --- pure functions (no DOM; tested by node --test, D48) ---
 
-const MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-
-function parseSessionName(name) {
+function parseSessionName(name, lang) {
   const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})_(?:(\d+)h)?(?:(\d+)m)?$/.exec(name);
-  if (!m || (!m[6] && !m[7]) || !MONTHS[+m[2] - 1]) return null;
-  const length = [m[6] && `${+m[6]} ч`, m[7] && `${+m[7]} мин`].filter(Boolean).join(" ");
-  return { date: `${+m[3]} ${MONTHS[+m[2] - 1]}`, time: `${m[4]}:${m[5]}`, length };
+  if (!m || (!m[6] && !m[7]) || +m[2] < 1 || +m[2] > 12) return null;
+  const [h, min] = [+m[6], +m[7]];
+  const length = m[6] && m[7] ? translate(lang, "dur.hm", { h, m: min })
+    : m[6] ? translate(lang, "dur.h", { h }) : translate(lang, "dur.m", { m: min });
+  const date = new Intl.DateTimeFormat(lang, { day: "numeric", month: "short" })
+    .format(new Date(+m[1], +m[2] - 1, +m[3]));  // D68
+  return { date, time: `${m[4]}:${m[5]}`, length };
 }
 
 const clockOf = (startLocal) => (startLocal ? startLocal.slice(11, 19) : "");
 
-function fmtDur(s) {
+function fmtDur(s, lang) {
   const t = Math.round(s);
-  return t < 60 ? `${t} с` : `${Math.floor(t / 60)} мин ${t % 60} с`;
+  return t < 60 ? translate(lang, "dur.s", { s: t })
+    : translate(lang, "dur.ms", { m: Math.floor(t / 60), s: t % 60 });
 }
 
 function fmtPos(s) {
@@ -84,46 +88,30 @@ function gapBefore(clips, i, min = 30) {
   return gap >= min ? gap : null;
 }
 
-// Local time: «22.10 04:25» (D51), with the year «22.10.2026 04:25» (D61); "" if unparsable.
-function localTime(ts, withYear) {
+// Local time through Intl of the UI language (D68): ru «22.10, 04:25» (D51), with the year
+// «22.10.2026, 04:25» (D61); "" if unparsable.
+function localTime(ts, withYear, lang) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "";
-  const two = (n) => String(n).padStart(2, "0");
-  const date = `${two(d.getDate())}.${two(d.getMonth() + 1)}${withYear ? `.${d.getFullYear()}` : ""}`;
-  return `${date} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  return new Intl.DateTimeFormat(lang, { day: "2-digit", month: "2-digit",
+    ...(withYear ? { year: "numeric" } : {}), hour: "2-digit", minute: "2-digit" }).format(d);
 }
 
-const ideaTime = (ts) => localTime(ts, false);
+const ideaTime = (ts, lang) => localTime(ts, false, lang);
 
-const backupTime = (value) => localTime(value, true) || value;  // D61; anything unparsable as is
+const backupTime = (value, lang) => localTime(value, true, lang) || value;  // D61; anything unparsable as is
 
-const gapLabel = (seconds) => `пауза ${fmtPos(seconds)}`;  // D54
+const gapLabel = (seconds, lang) => translate(lang, "card.gap", { t: fmtPos(seconds) });  // D54
 
-// D66: a server error is {code, params}; the text is the catalog's template. Own keys only: a code
-// from the server is never a path into the prototype; anything unknown gets one neutral phrase.
-function errText(desc, catalog = globalThis.I18N.ru) {
-  const unknown = catalog["err.unknown"];
-  const key = desc && typeof desc === "object" && typeof desc.code === "string" ? `err.${desc.code}` : null;
-  const params = key && desc.params;
-  if (!key || !Object.hasOwn(catalog, key) || !params || typeof params !== "object") return unknown;
-  let missing = false;
-  const text = catalog[key].replace(/\{(\w+)\}/g, (_, name) => {
-    if (!Object.hasOwn(params, name)) {
-      missing = true;
-      return "";
-    }
-    const v = params[name];
-    if (Array.isArray(v)) return v.join(name === "lines" ? "\n" : ", ");
-    return v && typeof v === "object" ? errText(v, catalog) : String(v);
-  });
-  return missing ? unknown : text;
-}
-
-function codedError(desc) {
-  const e = new Error(errText(desc));
+// D66: the state keeps the descriptor and renders it in the current language (D67).
+function codedError(desc, lang) {
+  const e = new Error(errText(lang, desc));
   e.descriptor = desc;
   return e;
 }
+
+// Any caught error as a descriptor; a JS error without one shows its text as is.
+const errDesc = (e) => e.descriptor || { code: "legacy_error", params: { detail: String(e.message) } };
 
 const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
 
@@ -196,6 +184,7 @@ const shownWarnings = new Set();
 const ui = {
   screen: "session", tab: "review", filter: "all", mineFilter: "mine", query: "", inOrder: false,
   selectedId: null, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,
+  lang: "en",  // D69: page memory only, every launch starts in English
   loaded: false, openError: null, audio: "idle", audioError: "", playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
   rechoose: null,  // D52: null | "menu" | the decision awaiting confirmation
@@ -259,7 +248,7 @@ async function api(method, path, body) {
   try {
     r = await fetch(path, opts);
   } catch {
-    const e = codedError({ code: "offline", params: {} });
+    const e = codedError({ code: "offline", params: {} }, ui.lang);
     e.offline = true;
     throw e;
   }
@@ -268,7 +257,7 @@ async function api(method, path, body) {
     ui.fatal = true;
     render();
   }
-  if (!r.ok) throw data.error ? codedError(data.error) : new Error(`HTTP ${r.status}`);
+  if (!r.ok) throw codedError(data.error || { code: "http_status", params: { status: r.status } }, ui.lang);
   return data;
 }
 
@@ -301,7 +290,7 @@ function autoOpenTarget(sessions, tried) {
 // on an empty screen, while a lost link leaves the skeleton and the «нет связи» alert.
 function afterOpenError(hasView, e) {
   if (hasView) return { loaded: true, openError: null };
-  return { loaded: null, openError: e.offline ? null : e.message };
+  return { loaded: null, openError: e.offline ? null : errDesc(e) };
 }
 
 // Any open lost with the link, with nothing on screen and no newer open, retries on the next good poll.
@@ -368,7 +357,7 @@ async function pollOnce() {
     const sig = JSON.stringify(w);
     if (!shownWarnings.has(sig)) {
       shownWarnings.add(sig);
-      toast("Журнал", errText(w), true);
+      toast("Журнал", errText(ui.lang, w), true);
     }
   }
   const sessions = serverState.sessions;
@@ -400,9 +389,9 @@ function sessionRow(id) {
   return serverState && serverState.sessions.find((s) => s.session_id === id);
 }
 
-function sessionLabel(row) {
-  const p = parseSessionName(row.name);
-  return p ? `${p.date}, ${p.time} · ${p.length}` : row.name;
+function sessionLabel(row, lang) {
+  const p = parseSessionName(row.name, lang);
+  return p ? translate(lang, "top.session", p) : row.name;
 }
 
 async function openSession(id, run) {
@@ -506,7 +495,7 @@ function render() {
 
 function renderHeader() {
   const row = sid && sessionRow(sid);
-  $("session-label").textContent = row ? sessionLabel(row) : "";
+  $("session-label").textContent = row ? sessionLabel(row, ui.lang) : "";
   for (const b of $("tabs").querySelectorAll("[role=tab]")) {
     b.setAttribute("aria-selected", String(ui.screen === "session" && b.dataset.tab === ui.tab));
   }
@@ -544,7 +533,7 @@ function renderSession() {
     return;
   }
   if (!view && ui.openError) {
-    showSessionEmpty("Сессия не открылась", `${ui.openError}. Откройте другую сессию в Библиотеке.`, true);
+    showSessionEmpty("Сессия не открылась", `${errText(ui.lang, ui.openError)}. Откройте другую сессию в Библиотеке.`, true);
     return;
   }
   if (!serverState || !ui.loaded || !view) {
@@ -675,14 +664,14 @@ function renderList() {
   const rows = [];
   list.forEach((c, i) => {
     const gap = gapBefore(list, i, GAP_MIN_S);
-    if (gap !== null) rows.push(el("p", gapLabel(gap), "gap"));
+    if (gap !== null) rows.push(el("p", gapLabel(gap, ui.lang), "gap"));
     const item = el("article", null, `item${c.clip_id === ui.selectedId ? " selected" : ""}`);
     if (c.clip_id === ui.selectedId) item.setAttribute("aria-current", "true");
     item.dataset.size = "xs";
     item.setAttribute("role", "listitem");
     item.dataset.clip = c.clip_id;
     const sec = el("section");
-    sec.append(el("h4", `${clockOf(c.start_local) || fmtPos(c.start_s)} · ${fmtDur(c.duration_s)}`));
+    sec.append(el("h4", `${clockOf(c.start_local) || fmtPos(c.start_s)} · ${fmtDur(c.duration_s, ui.lang)}`));
     const line = firstLine(c);
     if (line) sec.append(el("p", line, "snippet muted"));
     const aside = el("aside");
@@ -758,7 +747,7 @@ function renderCard() {
     return;
   }
   const idx = view.clips.indexOf(clip);
-  $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s)}`;
+  $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s, ui.lang)}`;
   // aria-live: rewrite only on change, or every 2 s poll would be read out again;
   // the save spinner sits outside the live region, so it never re-reads the same text
   const sub = `клип ${idx + 1} из ${view.clips.length} · ${statusText(clip)}`;
@@ -856,7 +845,7 @@ function renderLibrary() {
   setKids($("sessions"), JSON.stringify([st.sessions, runs]), () => (st.sessions.length ? st.sessions.map((s) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
-    head.append(el("strong", sessionLabel(s)),
+    head.append(el("strong", sessionLabel(s, ui.lang)),
       el("span", `${STATES[s.state] || s.state}${s.n_clips !== null ? `, клипов ${s.n_clips}` : ""}`, "muted"));
     row.append(head);
     const acts = el("div", null, "row");
@@ -886,7 +875,7 @@ function renderLibrary() {
       }));
       row.append(runs);
     }
-    if (s.error) row.append(el("div", errText(s.error), "error"));
+    if (s.error) row.append(el("div", errText(ui.lang, s.error), "error"));
     return row;
   }) : [el("p", "Сессий пока нет.", "muted")]));
 
@@ -899,7 +888,7 @@ function renderLibrary() {
     for (const src of st.inbox.sources) {
       const box = el("div", null, "lib-row");
       box.append(el("strong", src.source === "" ? "inbox/ (корень)" : `inbox/${src.source}/`));
-      if (src.error) box.append(el("div", errText(src.error), "error"));
+      if (src.error) box.append(el("div", errText(ui.lang, src.error), "error"));
       for (const ch of src.chains) {
         box.append(el("div", `цепочка ${ch.chain}: ${ch.files.length} файлов, начало ${ch.start_local}, `
           + `${(ch.duration_s / 60).toFixed(1)} мин${ch.imported ? ", уже импортирована" : ""}`));
@@ -930,7 +919,7 @@ function renderLibrary() {
     const box = el("div", null, "lib-row");
     box.append(el("strong", `${NAMES[j.kind] || j.kind}: ${JOB_STATES[j.state] || j.state}`
       + `${j.stage ? `, этап ${j.stage}` : ""}`));
-    if (j.error) box.append(el("div", errText(j.error), "error"));
+    if (j.error) box.append(el("div", errText(ui.lang, j.error), "error"));
     if (j.log_tail.length) box.append(el("pre", j.log_tail.join("\n")));
     if (j.state === "queued" || j.state === "running") {
       box.append(button("Отменить", () => api("POST", `/api/jobs/${j.job_id}/cancel`, {})
@@ -940,7 +929,7 @@ function renderLibrary() {
   }) : [el("p", "Задач нет.", "muted")]));
 
   $("backup-info").textContent = st.last_backup
-    ? `Последний бэкап: ${backupTime(st.last_backup)}` : "Бэкапов ещё не было.";
+    ? `Последний бэкап: ${backupTime(st.last_backup, ui.lang)}` : "Бэкапов ещё не было.";
   renderIdeas();
 }
 
@@ -958,7 +947,7 @@ function ideaRow(idea) {
   const li = el("li");
   li.dataset.id = idea.event_id;
   const head = el("div", null, "idea-head");
-  head.append(el("time", ideaTime(idea.ts)));
+  head.append(el("time", ideaTime(idea.ts, ui.lang)));
   if (ui.ideaDelete === idea.event_id) {
     const ask = el("span", null, "idea-ask");
     const yes = button("Да", () => deleteIdea(idea.event_id), "destructive");
@@ -1116,7 +1105,7 @@ function journal(kind, value, clip) {
   if (clip) body.clip_id = clip.clip_id;
   const p = queue.then(async () => {
     const r = await api("POST", "/api/journal", body);
-    if (!r.saved) throw codedError({ code: "not_saved", params: {} });
+    if (!r.saved) throw codedError({ code: "not_saved", params: {} }, ui.lang);
     return r;
   });
   queue = p.catch(() => {});
@@ -1473,9 +1462,9 @@ function bind() {
 }
 
 if (typeof module === "object") {
-  module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
+  module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, errText };
+    afterOpenError, retryAfter, codedError };
 } else {
   start();
 }

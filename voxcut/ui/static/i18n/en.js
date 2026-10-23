@@ -3,6 +3,13 @@
 "use strict";
 (globalThis.I18N ??= {}).en = {
   "common.unknown": "(no text)",
+  "top.session": "{date}, {time} · {length}",
+  "card.gap": "gap {t}",
+  "dur.s": "{s} s",
+  "dur.ms": "{m} min {s} s",
+  "dur.h": "{h} h",
+  "dur.m": "{m} min",
+  "dur.hm": "{h} h {m} min",
   "err.internal_error": "internal server error",
   "err.legacy_error": "{detail}",
   "err.session_bad_start": "--start {text}: expected local time, e.g. \"2025-03-01 09:00\" or \"2025-03-01 09:00:05\"",

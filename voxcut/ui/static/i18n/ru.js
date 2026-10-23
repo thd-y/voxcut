@@ -3,6 +3,13 @@
 "use strict";
 (globalThis.I18N ??= {}).ru = {
   "common.unknown": "(нет текста)",
+  "top.session": "{date}, {time} · {length}",
+  "card.gap": "пауза {t}",
+  "dur.s": "{s} с",
+  "dur.ms": "{m} мин {s} с",
+  "dur.h": "{h} ч",
+  "dur.m": "{m} мин",
+  "dur.hm": "{h} ч {m} мин",
   "err.internal_error": "внутренняя ошибка сервера",
   "err.legacy_error": "{detail}",
   "err.session_bad_start": "--start {text}: ожидается локальное время, например \"2025-03-01 09:00\" или \"2025-03-01 09:00:05\"",
