@@ -237,3 +237,28 @@ test("retryAfter", () => {
   assert.equal(app.retryAfter({}, false), false);  // a server error: «Сессия не открылась», no hammering
 });
 
+
+test("statusText", () => {  // D67: the status line from the catalog, marks through mark.* (L14)
+  const cases = [
+    [clip("a", ["моё"]), "оставлен", "kept"],
+    [clip("a", ["вокал", "моё"], "моё"), "оставлен · есть другие решения", "kept · other decisions exist"],
+    [clip("a", ["вокал"]), "отброшен: вокал", "rejected: vocals"],
+    [clip("a", ["вокал", "моё"], "вокал"), "отброшен: вокал · есть другие решения",
+      "rejected: vocals · other decisions exist"],
+    [clip("a", ["смех"]), "отброшен: смех", "rejected: смех"],  // a value without a label: as is (U5)
+    [clip("a", ["вокал", "моё"]), "разные решения: вокал, моё", "different decisions: vocals, mine"],
+    [clip("a", ["смех", "шум"]), "разные решения: смех, шум", "different decisions: смех, noise"],
+    [clip("a"), "не разобран", "not reviewed"],
+  ];
+  for (const [c, ru, en] of cases) {
+    assert.equal(app.statusText(c, "ru"), ru);
+    assert.equal(app.statusText(c, "en"), en);
+  }
+});
+
+test("summaryText", () => {
+  const c = app.counts([clip("a", ["моё"]), clip("b", ["моё"]), clip("c", ["моё"]), clip("d", ["вокал"]),
+    clip("e", ["музыка"])]);
+  assert.equal(app.summaryText(c, "ru"), "Оставлено 3 · Отброшено 2: вокал 1, музыка 1, шум 0, другое 0");
+  assert.equal(app.summaryText(c, "en"), "Kept 3 · Rejected 2: vocals 1, music 1, noise 0, other 0");
+});
