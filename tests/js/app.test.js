@@ -4,14 +4,25 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const app = require("../../voxcut/ui/static/app.js");
 
-test("parseSessionName", () => {
-  assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m"),
-    { date: "11 авг", time: "21:30", length: "4 ч 16 мин" });
-  assert.equal(app.parseSessionName("2026-01-02_08-05_45m").length, "45 мин");
-  assert.equal(app.parseSessionName("2026-01-02_08-05_45m").date, "2 янв");
-  assert.equal(app.parseSessionName("2026-12-31_00-00_5h").length, "5 ч");
-  assert.equal(app.parseSessionName("folder01"), null);
-  assert.equal(app.parseSessionName("2026-13-01_00-00_5h"), null);
+test("parseSessionName", () => {  // D68: the date through Intl, units from the catalog (L7)
+  assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "ru"),
+    { date: "11 авг.", time: "21:30", length: "4 ч 16 мин" });
+  assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "en"),
+    { date: "11 Aug", time: "21:30", length: "4 h 16 min" });  // D71: en-GB
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").length, "45 мин");
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "en").length, "45 min");
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").date, "2 янв.");
+  assert.equal(app.parseSessionName("2026-12-31_00-00_5h", "ru").length, "5 ч");
+  assert.equal(app.parseSessionName("2026-12-31_00-00_5h", "en").length, "5 h");
+  for (const lang of ["ru", "en"]) {
+    assert.equal(app.parseSessionName("folder01", lang), null);
+    assert.equal(app.parseSessionName("2026-13-01_00-00_5h", lang), null);
+    assert.equal(app.parseSessionName("2026-00-01_00-00_5h", lang), null);
+    assert.equal(app.parseSessionName("2026-02-31_00-00_5h", lang), null);  // no roll-over into March
+    assert.equal(app.parseSessionName("2026-08-11_25-99_5h", lang), null);  // no «25:99»
+  }
+  assert.equal(app.sessionLabel({ name: "2026-08-11_21-30_4h16m" }, "ru"), "11 авг., 21:30 · 4 ч 16 мин");
+  assert.equal(app.sessionLabel({ name: "folder01" }, "en"), "folder01");
 });
 
 test("clockOf", () => {
@@ -20,9 +31,11 @@ test("clockOf", () => {
 });
 
 test("fmtDur", () => {
-  assert.equal(app.fmtDur(7.4), "7 с");
-  assert.equal(app.fmtDur(111.2), "1 мин 51 с");
-  assert.equal(app.fmtDur(60), "1 мин 0 с");
+  assert.equal(app.fmtDur(7.4, "ru"), "7 с");
+  assert.equal(app.fmtDur(111.2, "ru"), "1 мин 51 с");
+  assert.equal(app.fmtDur(60, "ru"), "1 мин 0 с");
+  assert.equal(app.fmtDur(7.4, "en"), "7 s");
+  assert.equal(app.fmtDur(111.2, "en"), "1 min 51 s");
 });
 
 test("fmtPos", () => {
@@ -76,17 +89,21 @@ test("visibleClips", () => {
 });
 
 test("gapLabel", () => {
-  assert.equal(app.gapLabel(273), "пауза 4:33");
+  assert.equal(app.gapLabel(273, "ru"), "пауза 4:33");
+  assert.equal(app.gapLabel(273, "en"), "gap 4:33");
 });
 
-test("backupTime", () => {  // D61: «Последний бэкап» with the year
+test("backupTime", () => {  // D61: «Последний бэкап» with the year; D68: Intl of the UI language
   const tz = process.env.TZ;
   process.env.TZ = "Europe/Moscow";
   try {
-    assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00"), "22.10.2026 06:53");  // D61
-    assert.equal(app.ideaTime("2026-10-22T06:53:19.402+03:00"), "22.10 06:53");  // D51 unchanged
-    assert.equal(app.backupTime(""), "");
-    assert.equal(app.backupTime("мусор"), "мусор");
+    assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00", "ru"), "22.10.2026, 06:53");
+    assert.equal(app.ideaTime("2026-08-11T04:25:00+03:00", "ru"), "11.08, 04:25");
+    assert.equal(app.ideaTime("2026-08-11T04:25:00+03:00", "en"), "11/08, 04:25");  // D71: en-GB, 24 h
+    assert.equal(app.backupTime("2026-10-22T13:28:00+03:00", "en"), "22/10/2026, 13:28");
+    assert.equal(app.ideaTime("мусор", "en"), "");
+    assert.equal(app.backupTime("", "ru"), "");
+    assert.equal(app.backupTime("garbage", "ru"), "garbage");
   } finally {
     if (tz === undefined) delete process.env.TZ;
     else process.env.TZ = tz;
@@ -201,13 +218,19 @@ test("autoOpenTarget", () => {
   assert.equal(app.autoOpenTarget([s("a", "imported"), s("b", "probs")], null), "a");
 });
 
-test("afterOpenError", () => {
-  const server = { message: "прогон не читается" };
-  const offline = { message: "нет связи с VoxCut", offline: true };
+test("afterOpenError", () => {  // the state keeps the descriptor, the screen renders it (D67)
+  const desc = { code: "run_unreadable", params: { detail: "x" } };
+  const server = { message: "прогон не читается: x", descriptor: desc };
+  const offline = { message: "нет связи с VoxCut", offline: true, descriptor: { code: "offline", params: {} } };
   assert.deepEqual(app.afterOpenError(true, server), { loaded: true, openError: null });  // it stays
   assert.deepEqual(app.afterOpenError(true, offline), { loaded: true, openError: null });
   assert.deepEqual(app.afterOpenError(false, offline), { loaded: null, openError: null });  // skeleton + alert
-  assert.deepEqual(app.afterOpenError(false, server), { loaded: null, openError: "прогон не читается" });
+  assert.deepEqual(app.afterOpenError(false, server), { loaded: null, openError: desc });
+  const d = (code, params = {}) => ({ code, params });
+  assert.deepEqual(app.afterOpenError(false, app.codedError(d("http_need_key"))),
+    { loaded: null, openError: d("http_need_key") });
+  assert.deepEqual(app.afterOpenError(false, new Error("boom")),  // a JS error: its text as is
+    { loaded: null, openError: d("legacy_error", { detail: "boom" }) });
 });
 
 test("retryAfter", () => {
@@ -215,4 +238,61 @@ test("retryAfter", () => {
   assert.equal(app.retryAfter({ offline: true }, true), false);  // the open session stays, the owner clicks again
   assert.equal(app.retryAfter({ offline: true, stale: true }, false), false);  // a newer open replaced it
   assert.equal(app.retryAfter({}, false), false);  // a server error: «Сессия не открылась», no hammering
+});
+
+
+test("statusText", () => {  // D67: the status line from the catalog, marks through mark.* (L14)
+  const cases = [
+    [clip("a", ["моё"]), "оставлен", "kept"],
+    [clip("a", ["вокал", "моё"], "моё"), "оставлен · есть другие решения", "kept · other decisions exist"],
+    [clip("a", ["вокал"]), "отброшен: вокал", "rejected: vocals"],
+    [clip("a", ["вокал", "моё"], "вокал"), "отброшен: вокал · есть другие решения",
+      "rejected: vocals · other decisions exist"],
+    [clip("a", ["смех"]), "отброшен: смех", "rejected: смех"],  // a value without a label: as is (U5)
+    [clip("a", ["вокал", "моё"]), "разные решения: вокал, моё", "different decisions: vocals, kept"],
+    [clip("a", ["смех", "шум"]), "разные решения: смех, шум", "different decisions: смех, noise"],
+    [clip("a"), "не разобран", "not reviewed"],
+  ];
+  for (const [c, ru, en] of cases) {
+    assert.equal(app.statusText(c, "ru"), ru);
+    assert.equal(app.statusText(c, "en"), en);
+  }
+});
+
+test("summaryText", () => {
+  const c = app.counts([clip("a", ["моё"]), clip("b", ["моё"]), clip("c", ["моё"]), clip("d", ["вокал"]),
+    clip("e", ["музыка"])]);
+  assert.equal(app.summaryText(c, "ru"), "Оставлено 3 · Отброшено 2: вокал 1, музыка 1, шум 0, другое 0");
+  assert.equal(app.summaryText(c, "en"), "Kept 3 · Rejected 2: vocals 1, music 1, noise 0, other 0");
+});
+
+test("chainText", () => {  // plural «файл/файла/файлов» (decision 4); ISO start and minutes as is (L8)
+  const ch = (n, imported = false) => ({ chain: 1, files: Array.from({ length: n }, (_, i) => `${i}.WAV`),
+    start_local: "2025-03-01T08:29:21", duration_s: 3600, imported });
+  assert.equal(app.chainText(ch(1), "ru"), "цепочка 1: 1 файл, начало 2025-03-01T08:29:21, 60.0 мин");
+  assert.equal(app.chainText(ch(2), "ru"), "цепочка 1: 2 файла, начало 2025-03-01T08:29:21, 60.0 мин");
+  assert.equal(app.chainText(ch(5), "ru"), "цепочка 1: 5 файлов, начало 2025-03-01T08:29:21, 60.0 мин");
+  assert.equal(app.chainText(ch(21, true), "ru"),
+    "цепочка 1: 21 файл, начало 2025-03-01T08:29:21, 60.0 мин, уже импортирована");
+  assert.equal(app.chainText(ch(1), "en"), "chain 1: 1 file, start 2025-03-01T08:29:21, 60.0 min");
+  assert.equal(app.chainText(ch(2, true), "en"),
+    "chain 1: 2 files, start 2025-03-01T08:29:21, 60.0 min, already imported");
+});
+
+test("jobText", () => {
+  const job = (kind, state, stage = null) => ({ kind, state, stage });
+  assert.equal(app.jobText(job("import", "done"), "ru"), "импорт: готово");
+  assert.equal(app.jobText(job("process", "running", "probs"), "ru"), "обработка: поиск речи");  // D70, D75
+  assert.equal(app.jobText(job("process", "running", "segment"), "en"), "processing: clip boundaries");
+  assert.equal(app.jobText(job("process", "running", "newstage"), "ru"), "обработка: newstage");
+  assert.equal(app.jobText(job("process", "done", "export"), "ru"), "обработка: готово");  // the stage only while running
+  assert.equal(app.jobText(job("process", "failed", "probs"), "en"), "processing: failed");
+  assert.equal(app.jobText(job("__proto__", "новое"), "en"), "__proto__: новое");  // unknown: as is
+});
+
+test("errDesc", () => {  // a thrown null or a body without a descriptor still gives a descriptor
+  assert.deepEqual(app.errDesc(null), { code: "legacy_error", params: { detail: "null" } });
+  assert.deepEqual(app.errDesc(new Error("x")), { code: "legacy_error", params: { detail: "x" } });
+  const desc = { code: "offline", params: {} };
+  assert.equal(app.errDesc({ descriptor: desc }), desc);
 });

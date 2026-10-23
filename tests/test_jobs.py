@@ -84,11 +84,12 @@ def test_unit_argv_exact(tmp_path):
 
 def test_ensure_slice_refuses_when_not_applied(lay):
     run = FakeRun(show="MemoryMax=infinity\nMemorySwapMax=infinity\n")
-    with pytest.raises(JobError, match="лимит"):
+    with pytest.raises(JobError, match="лимит") as e:
         ensure_slice(run)
+    assert e.value.code == "job_slice_limit"
     j = Jobs(lay, run=run)
     view = j.submit(jid(), "backup", {"mode": "light"})
-    assert view["state"] == "failed" and "лимит" in view["error"]
+    assert view["state"] == "failed" and view["error"]["code"] == "job_slice_limit"
     assert run.started() == []
 
 
@@ -158,7 +159,7 @@ def test_dead_unit_without_status_is_failed(lay):
                                                           "error": None}))
     run.active = "failed"
     view = Jobs(lay, run=run).list()[0]
-    assert view["state"] == "failed" and "OOM" in view["error"]
+    assert view["state"] == "failed" and view["error"] == {"code": "job_dead", "params": {}}
     run.active = "activating"
     b = jid()
     Jobs(lay, run=run).submit(b, "backup", {"mode": "light"})
@@ -186,8 +187,9 @@ def test_dead_unit_without_status_is_failed(lay):
 ])
 def test_validate_rejects(lay, kind, params):
     (lay.inbox / "s1").mkdir()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as e:
         validate(kind, params, lay)
+    assert e.value.code.startswith(("job_", "session_bad_start"))
 
 
 def test_validate_accepts(lay):
@@ -202,8 +204,9 @@ def test_validate_accepts(lay):
 
 
 def test_submit_rejects_bad_job_id(lay):
-    with pytest.raises(ValueError):
+    with pytest.raises(jobs.JobParamsError) as e:
         Jobs(lay, run=FakeRun()).submit("../x", "backup", {"mode": "light"})
+    assert e.value.code == "job_bad_id"
 
 
 def test_main_runs_backup_and_writes_status(lay):
@@ -223,7 +226,7 @@ def test_main_failure_recorded(lay):
     (lay.jobs / a / "job.json").write_text(json.dumps(job))
     assert jobs.main([str(lay.jobs / a)]) == 1
     st = json.loads((lay.jobs / a / "status.json").read_text())
-    assert st["state"] == "failed" and "нет сессии" in st["error"]
+    assert st["state"] == "failed" and st["error"]["code"] == "process_no_session"
 
 
 @pytest.mark.slow
@@ -257,7 +260,9 @@ def test_on_done_error_does_not_block_queue(lay):
     j.poll()
     views = {v["job_id"]: v for v in j.list()}
     assert views[b]["state"] == "running"
-    assert views[a]["state"] == "failed" and "нет journal.jsonl" in views[a]["error"]
+    assert views[a]["state"] == "failed" and views[a]["error"] == {
+        "code": "job_after_done_failed", "params": {"cause": {
+            "code": "job_unexpected", "params": {"detail": "ValueError: нет journal.jsonl"}}}}
     Jobs(lay, run=run, on_done=boom).poll()  # not retried forever after a restart
 
 
@@ -299,5 +304,51 @@ def test_validate_process_needs_can_process(lay):
     d = lay.sessions / SID
     d.mkdir()
     (d / "import.json").write_text("{}")  # light: no originals, no WAV
-    with pytest.raises(ValueError, match="обработ"):
+    with pytest.raises(ValueError, match="обработ") as e:
         validate("process", {"session_id": SID}, lay)
+    assert e.value.code == "job_cannot_process"
+
+
+def test_legacy_string_error(lay):
+    """Jobs from before D66 keep a Russian string in status.json: shown as is, not a crash."""
+    a = jid()
+    Jobs(lay, run=FakeRun()).submit(a, "backup", {"mode": "light"})
+    (lay.jobs / a / "status.json").write_text(json.dumps(
+        {"state": "failed", "stage": None, "error": "старый текст"}))
+    view = Jobs(lay, run=FakeRun()).list()[0]
+    assert view["error"] == {"code": "legacy_error", "params": {"detail": "старый текст"}}
+
+
+def test_unit_uncoded_exception(lay, monkeypatch):
+    a = jid()
+    Jobs(lay, run=FakeRun()).submit(a, "backup", {"mode": "light"})
+    job = json.loads((lay.jobs / a / "job.json").read_text())
+    job["kind"], job["params"] = "process", {"session_id": SID}
+    (lay.jobs / a / "job.json").write_text(json.dumps(job))
+
+    def boom(*a, **kw):
+        raise KeyError("n_samples")
+
+    monkeypatch.setattr(jobs.library, "process_session", boom)
+    assert jobs.main([str(lay.jobs / a)]) == 1
+    st = json.loads((lay.jobs / a / "status.json").read_text())
+    # user request 2026-10-23: show the exception text
+    assert st["error"] == {"code": "job_unexpected", "params": {"detail": "KeyError: 'n_samples'"}}
+    assert "KeyError: 'n_samples'" in (lay.jobs / a / "log.txt").read_text()
+
+
+@pytest.mark.parametrize("exc, cause", [
+    (JobError("restore_journal_broken", detail="x"),
+     {"code": "restore_journal_broken", "params": {"detail": "x"}}),
+    (KeyError("p"), {"code": "job_unexpected", "params": {"detail": "KeyError: 'p'"}}),
+])
+def test_after_done_cause(lay, exc, cause):
+    def boom(job):
+        raise exc
+
+    j = Jobs(lay, run=FakeRun(), on_done=boom)
+    a = jid()
+    j.submit(a, "backup", {"mode": "light"})
+    finish(lay, a)
+    j.poll()
+    assert j.list()[0]["error"] == {"code": "job_after_done_failed", "params": {"cause": cause}}

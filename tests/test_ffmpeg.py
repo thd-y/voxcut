@@ -35,10 +35,12 @@ def consume_and_publish(tmp_path, args):
 def test_missing_ffmpeg_message(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     msg = "ffmpeg не найден, установите: sudo apt install ffmpeg"
-    with pytest.raises(FFmpegError, match=msg):
+    with pytest.raises(FFmpegError, match=msg) as e:
         find_ffmpeg()
-    with pytest.raises(FFmpegError, match=msg), ffmpeg_stream(["-i", "x"]):
+    assert e.value.code == "ffmpeg_missing"
+    with pytest.raises(FFmpegError, match=msg) as e, ffmpeg_stream(["-i", "x"]):
         pass
+    assert e.value.code == "ffmpeg_missing"
 
 
 def test_version_line(fake_ffmpeg):
@@ -52,8 +54,9 @@ def test_version_line(fake_ffmpeg):
 ])
 def test_failure_after_partial_output_publishes_nothing(tmp_path, fake_ffmpeg, body):
     fake_ffmpeg(body)
-    with pytest.raises(FFmpegError):
+    with pytest.raises(FFmpegError) as e:
         consume_and_publish(tmp_path, ["-i", "x"])
+    assert e.value.code == "ffmpeg_failed"
     assert not (tmp_path / "out").exists()
 
 
@@ -72,6 +75,7 @@ def test_real_ffmpeg_decode_error_is_refusal(tmp_path):
         == 3 * 44100 * 2
     (tmp_path / "out").unlink()
     src.write_bytes(src.read_bytes()[:30000])  # обрезанный FLAC: ffmpeg 6.1 выходит с кодом 0
-    with pytest.raises(FFmpegError, match="Decoding error|decode_frame"):
+    with pytest.raises(FFmpegError, match="Decoding error|decode_frame") as e:
         consume_and_publish(tmp_path, ["-i", str(src), "-f", "s16le", "-"])
+    assert e.value.code == "ffmpeg_failed"
     assert not (tmp_path / "out").exists()

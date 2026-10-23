@@ -10,6 +10,8 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta
 
+from voxcut.errors import Coded
+
 FRAME_SAMPLES = 512  # Silero frame at 16 kHz, 32 ms
 VAD_SR = 16000
 RESET_PERIOD_FRAMES = 3750  # D31: second Silero pass resets every 120 s at 16 kHz, frame 512
@@ -387,10 +389,9 @@ MTIME_TOL_S = 5.0  # D25 (X7): mtime − name start vs duration
 RIFF_MAX = 0xFFFFFFFF
 WAV_HEADER = 44
 START_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S")
-_START_EXAMPLE = '"2025-03-01 09:00" или "2025-03-01 09:00:05"'
 
 
-class SessionError(ValueError):
+class SessionError(Coded, ValueError):
     pass
 
 
@@ -411,7 +412,7 @@ def parse_start(text: str) -> datetime:
             return datetime.strptime(text, f)
         except ValueError:
             pass
-    raise SessionError(f"--start {text!r}: ожидается локальное время, например {_START_EXAMPLE}")
+    raise SessionError("session_bad_start", text=repr(text))
 
 
 def session_name(start: datetime, n_samples: int, sr: int) -> str:
@@ -434,12 +435,11 @@ def split_chains(parts: list[tuple[str, datetime, int]], sr: int) -> list[list[i
             prev = parts[chains[-1][-1]]
             gap = gap_s(prev, parts[i], sr)
             if gap < GAP_MIN_S:
-                raise SessionError(f"файлы {prev[0]} и {parts[i][0]} перекрываются по времени "
-                                   f"на {-gap:.2f} с (допуск {-GAP_MIN_S:g} с)")
+                raise SessionError("session_overlap", a=prev[0], b=parts[i][0], gap=f"{-gap:.2f}",
+                                   tol=f"{-GAP_MIN_S:g}")
             if GAP_MAX_S < gap <= PAUSE_MAX_S:
-                raise SessionError(f"между частями пауза {gap / 60:.1f} мин "
-                                   f"({prev[0]} → {parts[i][0]}); "
-                                   "склейка пауз пока не поддерживается")
+                raise SessionError("session_pause", minutes=f"{gap / 60:.1f}", a=prev[0],
+                                   b=parts[i][0])
             if gap <= GAP_MAX_S:
                 chains[-1].append(i)
                 continue
@@ -449,15 +449,13 @@ def split_chains(parts: list[tuple[str, datetime, int]], sr: int) -> list[list[i
 
 def pick_chain(chains: list[list[int]], n: int | None, names: list[str]) -> list[int]:
     """One chain, or the N-th (1-based) by --chain; otherwise refuse with a numbered list."""
-    listing = "\n".join(f"  {k}: {', '.join(names[i] for i in c)}"
-                        for k, c in enumerate(chains, 1))
+    lines = [f"  {k}: {', '.join(names[i] for i in c)}" for k, c in enumerate(chains, 1)]
     if n is None:
         if len(chains) == 1:
             return chains[0]
-        raise SessionError(f"в папке {len(chains)} цепочки файлов, выберите одну через "
-                           f"--chain N:\n{listing}")
+        raise SessionError("session_chain_choose", n=len(chains), lines=lines)
     if not 1 <= n <= len(chains):
-        raise SessionError(f"--chain {n} вне диапазона 1..{len(chains)}:\n{listing}")
+        raise SessionError("session_chain_range", n=n, total=len(chains), lines=lines)
     return chains[n - 1]
 
 

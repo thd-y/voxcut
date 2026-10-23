@@ -107,7 +107,9 @@ def test_broken_session_409_with_reason(api):
     """Review #5: a broken manifest says why instead of «внутренняя ошибка сервера»."""
     (api.seg / "clips" / "manifest.jsonl").write_text('{"start_s": 0, "end_s": 5}\n{oops\n')
     status, _, body = get(api, f"/api/session/{SID}")
-    assert status == 409 and "JSONDecodeError" in json.loads(body)["error"]
+    err = json.loads(body)["error"]
+    assert status == 409 and err["code"] == "run_unreadable"
+    assert "JSONDecodeError" in err["params"]["detail"]
 
 
 def test_session_view_parses_journal_once(api, monkeypatch):
@@ -354,8 +356,8 @@ def test_restore_merges_journal_once(wapi):
 
 
 @pytest.mark.parametrize("case, advice", [
-    ("transient", "восстановите этот архив ещё раз"),  # review #4: on_done runs once
-    ("broken", "повтор не поможет"),  # the archive's journal itself: retrying loops
+    ("transient", "restore_journal_not_merged"),  # review #4: on_done runs once
+    ("broken", "restore_journal_broken"),  # the archive's journal itself: retrying loops
 ])
 def test_restore_merge_failure_advice(wapi, monkeypatch, case, advice):
     (wapi.lay.inbox / "voxcut-backup_x_full.tar").write_bytes(b"")
@@ -375,7 +377,8 @@ def test_restore_merge_failure_advice(wapi, monkeypatch, case, advice):
     wapi.jobs.poll()
     wapi.jobs.poll()
     job = next(j for j in wapi.jobs.list() if j["job_id"] == jid)
-    assert advice in job["error"] and job["state"] == "failed"  # the badge shows «failed»
+    cause = job["error"]["params"]["cause"]
+    assert cause["code"] == advice and job["state"] == "failed"  # the badge shows «failed»
 
 
 def test_get_state_does_not_start_jobs(wapi):
@@ -517,7 +520,8 @@ def test_inbox_open_tool_missing_is_503(oapi):
 
     oapi.app.open_folder = missing
     status, _, body = post(oapi, "/api/inbox/open", {})
-    assert status == 503 and "проводник недоступен" in body["error"]
+    assert status == 503 and body["error"]["code"] == "inbox_open_failed"
+    assert body["error"]["params"]["detail"]
 
 
 def test_open_folder_argv(tmp_path):
@@ -572,3 +576,32 @@ def test_idea_delete_refused(wapi, case):
     before = len(lines(wapi))
     assert post(wapi, "/api/journal", d)[0] == 400
     assert len(lines(wapi)) == before
+
+
+def test_cyrillic_param_raw(wapi):
+    """S7 is the page's job: params come as they are, Cyrillic not \\u-escaped (ensure_ascii)."""
+    status, _, raw = wapi.req("POST", "/api/jobs", {"job_id": uuid.uuid4().hex, "kind": "<b>вид",
+                                                    "params": {}}, key=wapi.k)
+    assert status == 400 and "'<b>вид'".encode() in raw
+    assert json.loads(raw)["error"] == {"code": "job_unknown_kind", "params": {"kind": "'<b>вид'"}}
+
+
+def test_journal_refusal_keeps_code(wapi):
+    status, _, body = post(wapi, "/api/journal", mark(wapi, value="x" * 10_000))
+    assert status == 400 and body["error"]["code"] == "journal_value_too_long"
+
+
+def test_500_is_internal_error_even_for_coded(api, monkeypatch):
+    """Layer-3 review: a coded exception escaping a handler must not leak its params (a path)."""
+    def broken():
+        raise journal_mod.JournalError("journal_broken_middle", where="/secret/j.jsonl", pos=5)
+
+    monkeypatch.setattr(api.app.journal, "events", broken)
+    status, _, body = get(api, "/api/state")
+    assert (status, json.loads(body)["error"]) == (500, {"code": "internal_error", "params": {}})
+
+
+def test_jobs_kind_not_a_string(wapi):
+    status, _, body = post(wapi, "/api/jobs", {"job_id": uuid.uuid4().hex, "kind": ["x"],
+                                               "params": {}})
+    assert status == 400 and body["error"]["code"] == "job_unknown_kind"

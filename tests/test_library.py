@@ -176,7 +176,8 @@ def test_list_sessions_broken_session_does_not_hide_others(lay):
     got = {r["session_id"]: r for r in list_sessions(lay)}
     assert got[SID]["state"] == "imported" and got[SID]["error"] is None
     assert got[SID2]["state"] == "incomplete" and not got[SID2]["can_process"]
-    assert "run.json" in got[SID2]["error"]
+    assert got[SID2]["error"]["code"] == "session_unreadable"
+    assert "run.json" in got[SID2]["error"]["params"]["detail"]
 
 
 def test_session_row_matches_list(lay):
@@ -188,7 +189,7 @@ def test_session_row_matches_list(lay):
     (bad / "run.json").unlink()
     for r in list_sessions(lay):
         assert session_row(lay, r["session_id"]) == r
-    assert "run.json" in session_row(lay, SID2)["error"]
+    assert "run.json" in session_row(lay, SID2)["error"]["params"]["detail"]
     (lay.data / "pilot").mkdir()  # a real dir outside sessions/
     for sid in ("../pilot", "..", "2026-08-11_21-30_0h00m.00000000"):
         assert session_row(lay, sid) is None
@@ -293,16 +294,18 @@ def test_import_symlink_refused_before_move(lay, no_check, tmp_path):
     real = tmp_path / "elsewhere.WAV"
     os.rename(paths[1], real)
     paths[1].symlink_to(real)
-    with pytest.raises(SessionError, match="ссылка"):
+    with pytest.raises(SessionError, match="ссылка") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_symlink"
     assert paths[0].is_file() and paths[1].is_symlink() and list(lay.sessions.iterdir()) == []
 
 
 def test_import_inbox_changed_between_reads_refused(lay, no_check, monkeypatch):
     make_folder(lay.inbox, chain_starts(2))
     monkeypatch.setattr(audio, "list_chains", lambda src: [["20250301082921.WAV"]])  # stale read
-    with pytest.raises(SessionError, match="входящие изменились"):
+    with pytest.raises(SessionError, match="входящие изменились") as e:
         import_originals(lay, "", 1, None, _quiet, files=["20250301082921.WAV"])
+    assert e.value.code == "import_inbox_changed"
     assert list(lay.sessions.iterdir()) == []
 
 
@@ -311,8 +314,9 @@ def test_import_repeat_of_gone_chain_refused(lay, no_check):
     c1 = inbox_inventory(lay)["sources"][0]["chains"][0]["files"]
     import_originals(lay, "", 1, None, _quiet, files=c1)
     left = sorted(p.name for p in lay.inbox.iterdir())
-    with pytest.raises(SessionError, match="нет во входящих"):
+    with pytest.raises(SessionError, match="нет во входящих") as e:
         import_originals(lay, "", 1, "2026-08-11 21:30", _quiet, files=c1)  # double click
+    assert e.value.code == "import_chain_gone"
     assert sorted(p.name for p in lay.inbox.iterdir()) == left
 
 
@@ -348,8 +352,9 @@ def test_inventory_hides_dir_without_wav(lay, leftover):
 @pytest.mark.parametrize("source", ["../data", "folder01/x", "nope", "/tmp"])
 def test_import_unknown_source_refused(lay, no_check, source):
     make_folder(lay.inbox / "folder01", chain_starts(2))
-    with pytest.raises(SessionError, match="источник"):
+    with pytest.raises(SessionError, match="источник") as e:
         import_originals(lay, source, 1, None, _quiet)
+    assert e.value.code == "inbox_no_source"
 
 
 def test_import_same_sha_existing(lay, no_check):
@@ -385,8 +390,9 @@ def test_import_partial_overlap_refused(lay, no_check):
     import_originals(lay, "", 1, None, _quiet)
     make_folder(lay.inbox, chain_starts(2), seed=7)
     (lay.inbox / paths[0].name).write_bytes(keep)
-    with pytest.raises(SessionError, match=paths[0].name):
+    with pytest.raises(SessionError, match=paths[0].name) as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_partly_imported"
     assert len(list(lay.inbox.iterdir())) == 2
 
 
@@ -413,8 +419,9 @@ def test_import_sha_mismatch_after_move(lay, no_check, monkeypatch):
         return real(p)
 
     monkeypatch.setattr(audio, "sha256_file", flaky)
-    with pytest.raises(SessionError, match="sha256"):
+    with pytest.raises(SessionError, match="sha256") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "finish_sha_mismatch"
     sid = next(lay.sessions.iterdir()).name
     assert sorted(p.name for p in (lay.sessions / sid / "originals").iterdir()) == sorted(
         p.name for p in paths)
@@ -425,8 +432,9 @@ def test_import_unfinished_tmp_refused(lay, no_check):
     make_folder(lay.inbox, chain_starts(2))
     sid = inbox_inventory(lay)["sources"][0]["chains"][0]["session_id"]
     (lay.sessions / sid / "originals.tmp").mkdir(parents=True)
-    with pytest.raises(SessionError, match="originals.tmp"):
+    with pytest.raises(SessionError, match="originals.tmp") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_dir_unfinished"
     assert len(list(lay.inbox.iterdir())) == 2
 
 
@@ -439,7 +447,7 @@ def test_inventory_two_chains_and_backup(lay):
     assert inv["backups"] == ["voxcut-backup_2026-10-21_10-00_full.tar"]
     src = {s["source"]: s for s in inv["sources"]}
     assert set(src) == {"folder01", "broken"}  # inbox/ root has no WAV
-    assert "склейка пауз" in src["broken"]["error"] and src["broken"]["chains"] == []
+    assert src["broken"]["error"]["code"] == "session_pause" and src["broken"]["chains"] == []
     s1 = src["folder01"]
     assert s1["error"] is None
     assert [c["chain"] for c in s1["chains"]] == [1, 2]
@@ -479,8 +487,9 @@ def test_process_light_refused(lay):
     sid = "2026-08-11_21-30_0h00m.12345678"
     (lay.sessions / sid).mkdir()
     (lay.sessions / sid / "import.json").write_text(json.dumps({"start": None}))
-    with pytest.raises(RunError, match="light"):
+    with pytest.raises(RunError, match="light") as e:
         process_session(lay, sid, lambda s: None, _quiet)
+    assert e.value.code == "process_light"
 
 
 def test_process_exports_from_own_session(lay, monkeypatch):
@@ -503,8 +512,9 @@ def test_process_exports_from_own_session(lay, monkeypatch):
 
 @pytest.mark.parametrize("sid", ["../x", "2026-08-11_21-30_0h00m.00000000"])
 def test_process_unknown_session_refused(lay, sid):
-    with pytest.raises(RunError, match="нет сессии"):
+    with pytest.raises(RunError, match="нет сессии") as e:
         process_session(lay, sid, lambda s: None, _quiet)
+    assert e.value.code == "process_no_session"
 
 
 @pytest.mark.slow
@@ -548,8 +558,9 @@ def test_import_never_copies_across_filesystems(lay, no_check, monkeypatch):
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
     monkeypatch.setattr(os, "rename", exdev)
-    with pytest.raises(SessionError, match="во входящих"):
+    with pytest.raises(SessionError, match="во входящих") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_move_failed"
     assert sorted(p.name for p in lay.inbox.iterdir()) == sorted(p.name for p in paths)
     assert not any(lay.sessions.iterdir())
 
@@ -575,8 +586,9 @@ def test_import_rollback_after_partial_move(lay, no_check, monkeypatch):
     paths = make_folder(lay.inbox, chain_starts(3))
     before = _shas(paths)
     _rename_failing(monkeypatch, 2)
-    with pytest.raises(SessionError, match="во входящих"):
+    with pytest.raises(SessionError, match="во входящих") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_move_failed"
     assert _shas(paths) == before
     assert not any(lay.sessions.iterdir())
 
@@ -585,8 +597,9 @@ def test_import_rollback_failure_keeps_pending(lay, no_check, monkeypatch):
     paths = make_folder(lay.inbox, chain_starts(3))
     before = _shas(paths)
     _rename_failing(monkeypatch, 2, fail_back=True)
-    with pytest.raises(SessionError, match="originals.tmp"):
+    with pytest.raises(SessionError, match="originals.tmp") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_move_stuck"
     monkeypatch.undo()
     sdir = next(lay.sessions.iterdir())
     moved = sorted(p.name for p in (sdir / "originals.tmp").iterdir())
@@ -654,6 +667,7 @@ def test_finish_move_failure_names_file(lay, no_check, monkeypatch):
     monkeypatch.setattr(os, "rename", rename)
     with pytest.raises(SessionError, match=paths[2].name) as e:
         finish_import(lay, sid, _quiet)
+    assert e.value.code == "finish_move_failed"
     assert "inbox" in str(e.value) and "originals" in str(e.value)
     monkeypatch.undo()
     finish_import(lay, sid, _quiet)
@@ -686,8 +700,9 @@ def test_finish_failed_check_keeps_source_folder(lay, no_check, monkeypatch):
     monkeypatch.setattr(audio, "plan_session", other_session)
     (lay.inbox / "rec" / "notes.txt").write_text("x")  # the old order logged «удалите» here
     logged = []
-    with pytest.raises(SessionError, match="ожидалась"):
+    with pytest.raises(SessionError, match="ожидалась") as e:
         finish_import(lay, sid, logged.append)
+    assert e.value.code == "finish_session_mismatch"
     assert (lay.inbox / "rec").is_dir()
     assert not any("удалите" in m for m in logged)
 
@@ -735,8 +750,9 @@ def test_finish_refuses_changed_inbox_file(lay, no_check, monkeypatch):
     _sigterm_mid_move(lay, monkeypatch)
     paths[2].write_bytes(paths[2].read_bytes()[:-1] + b"x")
     sid = list_sessions(lay)[0]["session_id"]
-    with pytest.raises(SessionError, match=paths[2].name):
+    with pytest.raises(SessionError, match=paths[2].name) as e:
         finish_import(lay, sid, _quiet)
+    assert e.value.code == "finish_changed"
     assert paths[1].exists() and paths[2].exists()
     assert not (lay.sessions / sid / "import.json").exists()
 
@@ -744,8 +760,9 @@ def test_finish_refuses_changed_inbox_file(lay, no_check, monkeypatch):
 def test_pending_session_blocks_reimport_of_rest(lay, no_check, monkeypatch):
     paths = make_folder(lay.inbox, chain_starts(3))
     _sigterm_mid_move(lay, monkeypatch)
-    with pytest.raises(SessionError, match="незавершённый импорт"):
+    with pytest.raises(SessionError, match="незавершённый импорт") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_unfinished_elsewhere"
     assert paths[1].exists() and paths[2].exists()
     assert len(list(lay.sessions.iterdir())) == 1
 
@@ -764,8 +781,9 @@ def test_rollback_keeps_dangling_symlink(lay, no_check, monkeypatch):
         return real(src, dst)
 
     monkeypatch.setattr(os, "rename", rename)
-    with pytest.raises(SessionError, match="originals.tmp"):
+    with pytest.raises(SessionError, match="originals.tmp") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_move_stuck"
     monkeypatch.undo()
     assert os.path.islink(paths[0])
     sdir = next(lay.sessions.iterdir())
@@ -808,8 +826,9 @@ def test_rollback_never_overwrites_inbox(lay, no_check, monkeypatch):
         return real(src, dst)
 
     monkeypatch.setattr(os, "rename", rename)
-    with pytest.raises(SessionError, match="originals.tmp"):
+    with pytest.raises(SessionError, match="originals.tmp") as e:
         import_originals(lay, "", 1, None, _quiet)
+    assert e.value.code == "import_move_stuck"
     monkeypatch.undo()
     assert paths[0].read_bytes() == b"new file in the inbox"
     sdir = next(lay.sessions.iterdir())
@@ -827,8 +846,9 @@ def test_pending_without_files_not_processable(lay, no_check, monkeypatch):
     for p in (sdir / "originals").iterdir():  # as after a light restore: no recordings
         p.unlink()
     assert list_sessions(lay)[0]["can_process"] is False
-    with pytest.raises(SessionError, match="нет в originals"):
+    with pytest.raises(SessionError, match="нет в originals") as e:
         finish_import(lay, sid, _quiet)
+    assert e.value.code == "finish_none_in_originals"
     assert not (sdir / "import.json").exists() and (sdir / "import.pending.json").is_file()
 
 
@@ -854,7 +874,7 @@ def test_interrupted_import_finished_by_process(lay, no_check, monkeypatch):
     monkeypatch.undo()
     row = list_sessions(lay)[0]
     assert row["state"] == "incomplete" and row["can_process"]
-    assert "не удаляйте" in row["error"]
+    assert row["error"] == {"code": "session_import_pending", "params": {"session": row["session_id"]}}
     sid = row["session_id"]
     finish_import(lay, sid, _quiet)
     meta = json.loads((lay.sessions / sid / "import.json").read_text())
@@ -871,6 +891,20 @@ def test_interrupted_import_sha_mismatch_not_finished(lay, no_check, monkeypatch
     monkeypatch.undo()
     sid = list_sessions(lay)[0]["session_id"]
     (lay.sessions / sid / "originals" / paths[0].name).write_bytes(b"changed")
-    with pytest.raises(SessionError, match="sha256"):
+    with pytest.raises(SessionError, match="sha256") as e:
         finish_import(lay, sid, _quiet)
+    assert e.value.code == "finish_sha_mismatch"
     assert not (lay.sessions / sid / "import.json").exists()
+
+
+def test_inventory_unreadable_source_keeps_reason(lay, monkeypatch):
+    """Layer-2 review: an OSError in one inbox folder still names its cause, as before D66."""
+    (lay.inbox / "rec").mkdir()
+    (lay.inbox / "rec" / "a.wav").write_bytes(b"")
+
+    def denied(src):
+        raise PermissionError(13, "Permission denied", src)
+
+    monkeypatch.setattr(audio, "plan_chains", denied)
+    err = inbox_inventory(lay)["sources"][0]["error"]
+    assert err["code"] == "inbox_unreadable" and "Permission denied" in err["params"]["detail"]

@@ -1,23 +1,30 @@
 // VoxCut screen (redesign R1–R10): review, my clips, library. Vanilla JS, no build step.
 // Security (S2, S3, S7): the key lives only in this module, all data goes out via textContent.
 "use strict";
+const { translate, errText, pickLang, label } = typeof module === "object" ? require("./i18n.js") : globalThis.i18n;
 
 // --- pure functions (no DOM; tested by node --test, D48) ---
 
-const MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+const LOCALE = { en: "en-GB", ru: "ru" };  // D71: English dates day first, 24 h
 
-function parseSessionName(name) {
+function parseSessionName(name, lang) {
   const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})_(?:(\d+)h)?(?:(\d+)m)?$/.exec(name);
-  if (!m || (!m[6] && !m[7]) || !MONTHS[+m[2] - 1]) return null;
-  const length = [m[6] && `${+m[6]} ч`, m[7] && `${+m[7]} мин`].filter(Boolean).join(" ");
-  return { date: `${+m[3]} ${MONTHS[+m[2] - 1]}`, time: `${m[4]}:${m[5]}`, length };
+  if (!m || (!m[6] && !m[7]) || +m[2] < 1 || +m[2] > 12 || +m[4] > 23 || +m[5] > 59) return null;
+  const [h, min] = [+m[6], +m[7]];
+  const length = m[6] && m[7] ? translate(lang, "dur.hm", { h, m: min })
+    : m[6] ? translate(lang, "dur.h", { h }) : translate(lang, "dur.m", { m: min });
+  const day = new Date(+m[1], +m[2] - 1, +m[3]);
+  if (day.getDate() !== +m[3]) return null;  // 02-31 would roll over into March
+  const date = new Intl.DateTimeFormat(LOCALE[lang], { day: "numeric", month: "short" }).format(day);  // D68
+  return { date, time: `${m[4]}:${m[5]}`, length };
 }
 
 const clockOf = (startLocal) => (startLocal ? startLocal.slice(11, 19) : "");
 
-function fmtDur(s) {
+function fmtDur(s, lang) {
   const t = Math.round(s);
-  return t < 60 ? `${t} с` : `${Math.floor(t / 60)} мин ${t % 60} с`;
+  return t < 60 ? translate(lang, "dur.s", { s: t })
+    : translate(lang, "dur.ms", { m: Math.floor(t / 60), s: t % 60 });
 }
 
 function fmtPos(s) {
@@ -41,6 +48,18 @@ function status(clip) {
     others: clip.marks.some((m) => m !== value) };
 }
 
+// The status line of a clip (D67): whole templates, a mark through its label or as is (L14).
+function statusText(clip, lang) {
+  const s = status(clip);
+  const mark = (v) => label(lang, "mark.", v);
+  if (s.kind === "kept") return translate(lang, s.others ? "status.kept_others" : "status.kept");
+  if (s.kind === "rejected") {
+    return translate(lang, s.others ? "status.rejected_others" : "status.rejected", { mark: mark(s.value) });
+  }
+  if (s.kind === "conflict") return translate(lang, "status.conflict", { marks: clip.marks.map(mark) });
+  return translate(lang, "status.undecided");
+}
+
 const isDecided = (clip) => ["kept", "rejected"].includes(status(clip).kind);
 
 function counts(clips) {
@@ -55,6 +74,22 @@ function counts(clips) {
     } else c.undecided++;
   }
   return c;
+}
+
+function summaryText(c, lang) {
+  const reasons = REASONS.map((r) => translate(lang, "summary.reason", { mark: label(lang, "mark.", r), n: c.reasons[r] }));
+  return translate(lang, "summary.text", { kept: c.kept, rejected: c.rejected, reasons });
+}
+
+function chainText(ch, lang) {
+  return translate(lang, ch.imported ? "inbox.chain_imported" : "inbox.chain", { chain: ch.chain,
+    n: ch.files.length, start: ch.start_local, minutes: (ch.duration_s / 60).toFixed(1) });
+}
+
+function jobText(j, lang) {
+  const params = { kind: label(lang, "job.kind.", j.kind), state: label(lang, "job.state.", j.state),
+    stage: label(lang, "job.stage.", j.stage) };
+  return translate(lang, j.state === "running" && j.stage ? "jobs.row_stage" : "jobs.row", params);  // D75
 }
 
 function nextUndecided(clips, from) {
@@ -84,20 +119,30 @@ function gapBefore(clips, i, min = 30) {
   return gap >= min ? gap : null;
 }
 
-// Local time: «22.10 04:25» (D51), with the year «22.10.2026 04:25» (D61); "" if unparsable.
-function localTime(ts, withYear) {
+// Local time through Intl of the UI language (D68): ru «22.10, 04:25» (D51), with the year
+// «22.10.2026, 04:25» (D61); "" if unparsable.
+function localTime(ts, withYear, lang) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "";
-  const two = (n) => String(n).padStart(2, "0");
-  const date = `${two(d.getDate())}.${two(d.getMonth() + 1)}${withYear ? `.${d.getFullYear()}` : ""}`;
-  return `${date} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  return new Intl.DateTimeFormat(LOCALE[lang], { day: "2-digit", month: "2-digit",
+    ...(withYear ? { year: "numeric" } : {}), hour: "2-digit", minute: "2-digit" }).format(d);
 }
 
-const ideaTime = (ts) => localTime(ts, false);
+const ideaTime = (ts, lang) => localTime(ts, false, lang);
 
-const backupTime = (value) => localTime(value, true) || value;  // D61; anything unparsable as is
+const backupTime = (value, lang) => localTime(value, true, lang) || value;  // D61; anything unparsable as is
 
-const gapLabel = (seconds) => `пауза ${fmtPos(seconds)}`;  // D54
+const gapLabel = (seconds, lang) => translate(lang, "card.gap", { t: fmtPos(seconds) });  // D54
+
+// D66: the state keeps the descriptor and renders it in the current language (D67).
+function codedError(desc) {  // the message is the code, for the console; the UI renders errDesc(e)
+  const e = new Error(desc.code);
+  e.descriptor = desc;
+  return e;
+}
+
+// Any caught error as a descriptor; a JS error without one shows its text as is.
+const errDesc = (e) => (e && e.descriptor) || { code: "legacy_error", params: { detail: String(e?.message ?? e) } };
 
 const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
 
@@ -170,18 +215,16 @@ const shownWarnings = new Set();
 const ui = {
   screen: "session", tab: "review", filter: "all", mineFilter: "mine", query: "", inOrder: false,
   selectedId: null, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,
-  loaded: false, openError: null, audio: "idle", audioError: "", playWhenReady: false,
+  lang: "en",  // D69: page memory only, every launch starts in English
+  loaded: false, openError: null, audio: "idle", audioError: null, playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
   rechoose: null,  // D52: null | "menu" | the decision awaiting confirmation
   ideaDelete: null, ideaDeleting: false,  // D56: the idea asked about, a delete in flight
+  noteStatus: null, ideaStatus: null,  // null | {key, params}: drawn in the current language (L13)
 };
 const GAP_MIN_S = 120;  // one recording: 131 gaps >= 30 s (noise), 12 >= 120 s (real breaks)
-const NAMES = { process: "обработка", import: "импорт", backup: "бэкап", restore: "восстановление" };
-const JOB_STATES = { queued: "в очереди", running: "идёт", done: "готово", failed: "ошибка",
-  cancelled: "отменена" };
-const STATES = { imported: "импортирована", assembled: "собрана", probs: "вероятности посчитаны",
-  segmented: "размечена", clips: "клипы готовы", incomplete: "неполная" };
 const $ = (id) => document.getElementById(id);
+const tr = (key, params) => translate(ui.lang, key, params);
 const newId = () => crypto.randomUUID().replaceAll("-", "");
 let darkQuery = null;       // matchMedia, set in start(): the pure part also loads in node
 
@@ -233,7 +276,7 @@ async function api(method, path, body) {
   try {
     r = await fetch(path, opts);
   } catch {
-    const e = new Error("нет связи с VoxCut");
+    const e = codedError({ code: "offline", params: {} });
     e.offline = true;
     throw e;
   }
@@ -242,7 +285,7 @@ async function api(method, path, body) {
     ui.fatal = true;
     render();
   }
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) throw codedError((data && data.error) || { code: "http_status", params: { status: r.status } });
   return data;
 }
 
@@ -251,6 +294,24 @@ function applyTheme() {
   document.documentElement.classList.toggle("dark", dark);
   $("theme").setAttribute("aria-pressed", String(dark));
   if (view) drawTimeline();
+}
+
+// L11: static text, placeholders and labels marked data-i18n* take the current language.
+function applyStatic() {
+  for (const n of document.querySelectorAll("[data-i18n]")) n.textContent = tr(n.dataset.i18n);
+  for (const attr of ["placeholder", "aria-label", "title"]) {
+    for (const n of document.querySelectorAll(`[data-i18n-${attr}]`)) {
+      n.setAttribute(attr, tr(n.getAttribute(`data-i18n-${attr}`)));
+    }
+  }
+}
+
+// D67, L13: a live switch; nothing typed, selected, open or playing is reset.
+function setLang(value) {
+  ui.lang = pickLang(value);
+  document.documentElement.lang = ui.lang;
+  applyStatic();
+  render();
 }
 
 // D62: canonical launch window, shrunk to 90% of a small screen, centred on its work area.
@@ -275,7 +336,7 @@ function autoOpenTarget(sessions, tried) {
 // on an empty screen, while a lost link leaves the skeleton and the «нет связи» alert.
 function afterOpenError(hasView, e) {
   if (hasView) return { loaded: true, openError: null };
-  return { loaded: null, openError: e.offline ? null : e.message };
+  return { loaded: null, openError: e.offline ? null : errDesc(e) };
 }
 
 // Any open lost with the link, with nothing on screen and no newer open, retries on the next good poll.
@@ -296,6 +357,7 @@ async function start() {
   darkQuery.addEventListener("change", applyTheme);
   const code = location.hash.slice(1);
   history.replaceState(null, "", "/");
+  applyStatic();
   render();
   try {
     const r = await fetch("/api/exchange", {
@@ -335,13 +397,14 @@ async function pollOnce() {
     $("conn-alert").hidden = true;
   } catch (e) {
     if (e.offline) $("conn-alert").hidden = false;
-    else if (!ui.fatal) toast("Ошибка", e.message, true);
+    else if (!ui.fatal) toast(tr("toast.error"), errText(ui.lang, errDesc(e)), true);
     return;
   }
   for (const w of serverState.journal_warnings) {
-    if (!shownWarnings.has(w)) {
-      shownWarnings.add(w);
-      toast("Журнал", w, true);
+    const sig = JSON.stringify(w);
+    if (!shownWarnings.has(sig)) {
+      shownWarnings.add(sig);
+      toast(tr("toast.journal"), errText(ui.lang, w), true);
     }
   }
   const sessions = serverState.sessions;
@@ -363,7 +426,7 @@ async function pollOnce() {
 function fail(e) {
   if (e.stale) return;  // a newer open replaced this one: its outcome is what counts
   if (e.offline) $("conn-alert").hidden = false;
-  else if (!ui.fatal) toast("Ошибка", e.message, true);
+  else if (!ui.fatal) toast(tr("toast.error"), errText(ui.lang, errDesc(e)), true);
 }
 
 const sessionPath = (id, run) =>
@@ -373,9 +436,9 @@ function sessionRow(id) {
   return serverState && serverState.sessions.find((s) => s.session_id === id);
 }
 
-function sessionLabel(row) {
-  const p = parseSessionName(row.name);
-  return p ? `${p.date}, ${p.time} · ${p.length}` : row.name;
+function sessionLabel(row, lang) {
+  const p = parseSessionName(row.name, lang);
+  return p ? translate(lang, "top.session", p) : row.name;
 }
 
 async function openSession(id, run) {
@@ -464,12 +527,13 @@ const ownNote = (clip) => clip.notes.find((n) => n.own) || null;
 function render() {
   $("fatal").hidden = !ui.fatal;
   if (ui.fatal) {
-    $("fatal-title").textContent = "Откройте окно заново: VoxCut.cmd или make ui";
-    $("fatal-text").textContent = "Код запуска недействителен или устарел.";
+    $("fatal-title").textContent = tr("fatal.title");
+    $("fatal-text").textContent = tr("fatal.text");
     for (const id of ["top", "screen-session", "screen-library"]) $(id).hidden = true;
     return;
   }
   renderHeader();
+  renderStatuses();
   const lib = ui.screen === "library";
   $("screen-library").hidden = !lib;
   $("screen-session").hidden = lib;
@@ -477,15 +541,21 @@ function render() {
   else renderSession();
 }
 
+function renderStatuses() {
+  for (const [id, s] of [["note-status", ui.noteStatus], ["idea-status", ui.ideaStatus]]) {
+    $(id).textContent = s ? tr(s.key, s.params) : "";
+  }
+}
+
 function renderHeader() {
   const row = sid && sessionRow(sid);
-  $("session-label").textContent = row ? sessionLabel(row) : "";
+  $("session-label").textContent = row ? sessionLabel(row, ui.lang) : "";
   for (const b of $("tabs").querySelectorAll("[role=tab]")) {
     b.setAttribute("aria-selected", String(ui.screen === "session" && b.dataset.tab === ui.tab));
   }
   $("work").setAttribute("aria-labelledby", `tab-${ui.tab}`);
   const c = view && ui.loaded ? counts(view.clips) : null;
-  $("progress-label").textContent = c && c.all ? `разобрано ${c.all - c.undecided} из ${c.all}` : "";
+  $("progress-label").textContent = c && c.all ? tr("top.progress", { done: c.all - c.undecided, all: c.all }) : "";
   const badge = $("job-badge");
   const jobs = serverState ? serverState.jobs : [];
   const active = jobs.find((j) => j.state === "queued" || j.state === "running");
@@ -493,10 +563,11 @@ function renderHeader() {
   badge.hidden = !active && !(last && last.state === "failed");
   if (active) {
     badge.dataset.variant = "secondary";
-    badge.textContent = `${NAMES[active.kind] || active.kind}: ${active.stage || JOB_STATES[active.state]}`;
+    badge.textContent = tr("top.job", { kind: label(ui.lang, "job.kind.", active.kind),
+      state: active.stage ? label(ui.lang, "job.stage.", active.stage) : label(ui.lang, "job.state.", active.state) });
   } else if (!badge.hidden) {
     badge.dataset.variant = "destructive";
-    badge.textContent = `ошибка: ${NAMES[last.kind] || last.kind}`;
+    badge.textContent = tr("top.job_failed", { kind: label(ui.lang, "job.kind.", last.kind) });
   }
   $("library-btn").setAttribute("aria-pressed", String(ui.screen === "library"));
 }
@@ -513,11 +584,11 @@ function showSessionEmpty(title, text, action) {
 function renderSession() {
   $("session-empty").hidden = true;
   if (serverState && !serverState.sessions.length) {
-    showSessionEmpty("Сессий пока нет", "Положите записи в папку inbox и импортируйте их в Библиотеке.", true);
+    showSessionEmpty(tr("empty.no_sessions_title"), tr("empty.no_sessions_text"), true);
     return;
   }
   if (!view && ui.openError) {
-    showSessionEmpty("Сессия не открылась", `${ui.openError}. Откройте другую сессию в Библиотеке.`, true);
+    showSessionEmpty(tr("empty.open_failed_title"), tr("empty.open_failed_text", { error: ui.openError }), true);
     return;
   }
   if (!serverState || !ui.loaded || !view) {
@@ -527,9 +598,11 @@ function renderSession() {
   if (!view.clips.length) {
     const row = sessionRow(sid);
     const active = serverState.jobs.find((j) => j.state === "queued" || j.state === "running");
-    showSessionEmpty("Клипов пока нет", active
-      ? `Идёт ${NAMES[active.kind] || active.kind}: ${active.stage || active.state}.`
-      : `Сессия ${row ? `«${STATES[row.state] || row.state}»` : ""}: нажмите «Обработать» в Библиотеке.`, !active);
+    showSessionEmpty(tr("empty.no_clips_title"), active
+      ? tr("empty.job_running", { kind: label(ui.lang, "job.kind.", active.kind),
+        state: active.stage ? label(ui.lang, "job.stage.", active.stage) : label(ui.lang, "job.state.", active.state) })
+      : row ? tr("empty.session_state", { state: label(ui.lang, "session.state.", row.state) })
+        : tr("empty.session_no_row"), !active);
     return;
   }
   $("work").hidden = false;
@@ -556,8 +629,9 @@ function renderSkeleton() {
 }
 
 function setKids(node, sig, build) {
-  if (node.dataset.sig === sig) return;
-  node.dataset.sig = sig;
+  const s = `${ui.lang}\n${sig}`;  // a language switch rebuilds every cached block (L13)
+  if (node.dataset.sig === s) return;
+  node.dataset.sig = s;
   node.replaceChildren(...build());
 }
 
@@ -582,44 +656,35 @@ function renderFilters() {
     const kept = view.clips.filter((x) => status(x).kind === "kept");
     const noted = kept.filter((x) => x.notes.length).length;
     setKids($("filters"), JSON.stringify(["mine", kept.length, noted, ui.mineFilter]), () => [
-      chip(`мои ${kept.length}`, ui.mineFilter === "mine", set("mineFilter", "mine")),
-      chip(`с заметкой ${noted}`, ui.mineFilter === "noted", set("mineFilter", "noted"))]);
+      chip(tr("filter.mine", { n: kept.length }), ui.mineFilter === "mine", set("mineFilter", "mine")),
+      chip(tr("filter.noted", { n: noted }), ui.mineFilter === "noted", set("mineFilter", "noted"))]);
   } else {
-    const f = [["all", "все", c.all], ["undecided", "не разобраны", c.undecided],
-      ["kept", "оставлены", c.kept], ["rejected", "отброшены", c.rejected]];
-    setKids($("filters"), JSON.stringify(["review", f, ui.filter]), () => f.map(([k, label, n]) =>
-      chip(`${label} ${n}`, ui.filter === k, set("filter", k))));
+    const f = [["all", c.all], ["undecided", c.undecided], ["kept", c.kept], ["rejected", c.rejected]];
+    setKids($("filters"), JSON.stringify(["review", f, ui.filter]), () => f.map(([k, n]) =>
+      chip(tr(`filter.${k}`, { n }), ui.filter === k, set("filter", k))));
   }
 }
 
 function statusBadge(clip) {
   const s = status(clip);
   const b = el("span", null, "badge");
+  let text = "—";
   if (s.kind === "kept") {
     b.dataset.state = "kept";
-    b.textContent = "оставлен";
+    text = tr("status.kept");
   } else if (s.kind === "rejected") {
     b.dataset.variant = "secondary";
-    b.textContent = s.value;
+    text = label(ui.lang, "mark.", s.value);
   } else if (s.kind === "conflict") {
     b.dataset.variant = "outline";
     b.classList.add("conflict");
-    b.textContent = "разные решения";
+    text = tr("status.badge_conflict");
   } else {
     b.dataset.variant = "outline";
-    b.textContent = "—";
   }
-  if (s.others) b.append(" · есть другие");
+  b.textContent = s.others ? tr("status.badge_others", { status: text }) : text;
   if (ui.pending.has(clip.clip_id)) b.append(" ", el("span", null, "spinner"));
   return b;
-}
-
-function statusText(clip) {
-  const s = status(clip);
-  if (s.kind === "kept") return s.others ? "оставлен · есть другие решения" : "оставлен";
-  if (s.kind === "rejected") return `отброшен: ${s.value}${s.others ? " · есть другие решения" : ""}`;
-  if (s.kind === "conflict") return `разные решения: ${clip.marks.join(", ")}`;
-  return "не разобран";
 }
 
 const firstLine = (clip) => {
@@ -629,13 +694,13 @@ const firstLine = (clip) => {
 
 function renderList() {
   const list = shown();
-  const sig = JSON.stringify([ui.selectedId, [...ui.pending], list.map((c) =>
+  const sig = JSON.stringify([ui.lang, ui.selectedId, [...ui.pending], list.map((c) =>
     [c.clip_id, c.own_mark, c.marks, c.heard, firstLine(c)])]);
   if (sig === listSig) return;  // polls must not rebuild the list (scroll, hover)
   listSig = sig;
   if (!list.length) {
     const box = el("div", null, "list-empty");
-    box.append(el("p", "Ничего не найдено"), button("Сбросить фильтр", () => {
+    box.append(el("p", tr("card.nothing_found")), button(tr("card.reset_filter"), () => {
       ui.filter = "all";
       ui.mineFilter = "mine";
       ui.query = "";
@@ -648,20 +713,20 @@ function renderList() {
   const rows = [];
   list.forEach((c, i) => {
     const gap = gapBefore(list, i, GAP_MIN_S);
-    if (gap !== null) rows.push(el("p", gapLabel(gap), "gap"));
+    if (gap !== null) rows.push(el("p", gapLabel(gap, ui.lang), "gap"));
     const item = el("article", null, `item${c.clip_id === ui.selectedId ? " selected" : ""}`);
     if (c.clip_id === ui.selectedId) item.setAttribute("aria-current", "true");
     item.dataset.size = "xs";
     item.setAttribute("role", "listitem");
     item.dataset.clip = c.clip_id;
     const sec = el("section");
-    sec.append(el("h4", `${clockOf(c.start_local) || fmtPos(c.start_s)} · ${fmtDur(c.duration_s)}`));
+    sec.append(el("h4", `${clockOf(c.start_local) || fmtPos(c.start_s)} · ${fmtDur(c.duration_s, ui.lang)}`));
     const line = firstLine(c);
     if (line) sec.append(el("p", line, "snippet muted"));
     const aside = el("aside");
     if (c.heard) {
       const dot = el("span", null, "dot");
-      dot.title = "слушал";
+      dot.title = tr("card.heard");
       aside.append(dot);
     }
     // in my clips every row is kept: only extra states earn a badge there
@@ -687,7 +752,7 @@ function renderRechoose() {
   $("rechoose-hint").hidden = ui.rechoose !== "menu";
   const asking = mine && ui.rechoose !== null && ui.rechoose !== "menu";
   $("rechoose-confirm").hidden = !asking;
-  if (asking) $("rechoose-question").textContent = `Отбросить как «${ui.rechoose}»?`;
+  if (asking) $("rechoose-question").textContent = tr("rechoose.question", { mark: label(ui.lang, "mark.", ui.rechoose) });
 }
 
 function setDecisionsEnabled(on) {
@@ -712,15 +777,14 @@ function renderCard() {
   $("card-top").hidden = summary;
   $("card-body").hidden = summary;
   if (summary) {
-    $("summary-text").textContent = `Оставлено ${c.kept} · Отброшено ${c.rejected}: `
-      + REASONS.map((r) => `${r} ${c.reasons[r]}`).join(", ");
+    $("summary-text").textContent = summaryText(c, ui.lang);
     return;
   }
   const clip = selected();
   setDecisionsEnabled(!!clip);
   renderRechoose();  // also with no clip: a question must not outlive its clip
   if (!clip) {
-    $("clip-title").textContent = ui.tab === "mine" ? "Нет оставленных клипов" : "Клип не выбран";
+    $("clip-title").textContent = tr(ui.tab === "mine" ? "card.no_kept" : "card.no_clip");
     setKids($("clip-sub"), "", () => []);
     $("clip-saving").hidden = true;
     $("note-view").replaceChildren();
@@ -731,10 +795,10 @@ function renderCard() {
     return;
   }
   const idx = view.clips.indexOf(clip);
-  $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s)}`;
+  $("clip-title").textContent = `${clockOf(clip.start_local) || fmtPos(clip.start_s)} · ${fmtDur(clip.duration_s, ui.lang)}`;
   // aria-live: rewrite only on change, or every 2 s poll would be read out again;
   // the save spinner sits outside the live region, so it never re-reads the same text
-  const sub = `клип ${idx + 1} из ${view.clips.length} · ${statusText(clip)}`;
+  const sub = tr("card.sub", { i: idx + 1, n: view.clips.length, status: statusText(clip, ui.lang) });
   setKids($("clip-sub"), sub, () => [sub]);
   $("clip-saving").hidden = !ui.pending.has(clip.clip_id);
   const s = status(clip);
@@ -747,14 +811,14 @@ function renderCard() {
     }
   }
   const own = ownNote(clip);
-  $("note-label").textContent = own ? "заметка" : "+ заметка";
+  $("note-label").textContent = tr(own ? "note.label_own" : "note.label_add");
   $("note-box").hidden = ui.noteClipId !== clip.clip_id;
   const showOwn = own && ui.noteClipId !== clip.clip_id;
   setKids($("note-view"), JSON.stringify([clip.clip_id, showOwn && own.value, ui.expanded]), () => {
     if (!showOwn) return [];
     const parts = [el("p", own.value, `note-text${ui.expanded ? "" : " clamped"}`)];
     if (own.value.length > 160 || own.value.split("\n").length > 2) {
-      parts.push(button(ui.expanded ? "свернуть" : "ещё", () => {
+      parts.push(button(tr(ui.expanded ? "note.collapse" : "note.more"), () => {
         ui.expanded = !ui.expanded;
         render();
       }, "link", "sm"));
@@ -764,11 +828,11 @@ function renderCard() {
   const others = clip.notes.filter((n) => !n.own);
   setKids($("other-notes"), JSON.stringify(others.map((n) => n.value)), () => others.map((n) => {
     const box = el("div", null, "other-note");
-    box.append(el("p", "с другого прогона", "muted small"), el("p", n.value, "note-text"));
+    box.append(el("p", tr("note.other_run"), "muted small"), el("p", n.value, "note-text"));
     return box;
   }));
   $("clip-alert").hidden = !(ui.audio === "error" && playingId === clip.clip_id);
-  $("clip-alert-text").textContent = ui.audioError;
+  $("clip-alert-text").textContent = ui.audioError ? errText(ui.lang, ui.audioError) : "";
   renderPlayer();
 }
 
@@ -782,7 +846,7 @@ function renderPlayer() {
   $("bar").setAttribute("aria-valuenow", String(Math.round(pct)));
   const clip = selected();
   $("pos").textContent = clip ? `${fmtPos(t)} / ${fmtPos(dur || clip.duration_s)}` : "";
-  if (clip) $("bar").setAttribute("aria-valuetext", `${fmtPos(t)} из ${fmtPos(dur || clip.duration_s)}`);
+  if (clip) $("bar").setAttribute("aria-valuetext", tr("player.valuetext", { pos: fmtPos(t), dur: fmtPos(dur || clip.duration_s) }));
   else $("bar").removeAttribute("aria-valuetext");
   $("spinner").hidden = !(mine && ui.audio === "loading");
   $("play-icon").hidden = mine && !p.paused;
@@ -829,27 +893,29 @@ function renderLibrary() {
   setKids($("sessions"), JSON.stringify([st.sessions, runs]), () => (st.sessions.length ? st.sessions.map((s) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
-    head.append(el("strong", sessionLabel(s)),
-      el("span", `${STATES[s.state] || s.state}${s.n_clips !== null ? `, клипов ${s.n_clips}` : ""}`, "muted"));
+    head.append(el("strong", sessionLabel(s, ui.lang)),
+      el("span", s.n_clips !== null
+        ? tr("lib.session_clips", { state: label(ui.lang, "session.state.", s.state), n: s.n_clips })
+        : label(ui.lang, "session.state.", s.state), "muted"));
     row.append(head);
     const acts = el("div", null, "row");
     if (s.n_clips) {
-      acts.append(button(s.session_id === sid ? "Открыта" : "Открыть", () => {
+      acts.append(button(tr(s.session_id === sid ? "lib.opened" : "lib.open"), () => {
         ui.screen = "session";
         openSession(s.session_id).catch(fail);
         render();
       }, s.session_id === sid ? "secondary" : undefined));
     }
     if (s.can_process && s.state !== "clips") {
-      acts.append(button("Обработать", () => submit("process", { session_id: s.session_id }), "outline", "sm", "cog"));
+      acts.append(button(tr("lib.process"), () => submit("process", { session_id: s.session_id }), "outline", "sm", "cog"));
     } else if (!s.can_process && s.state === "clips") {
-      acts.append(el("span", "только прослушивание (light)", "muted small"));
+      acts.append(el("span", tr("lib.listen_only"), "muted small"));
     }
     row.append(acts);
     if (s.session_id === sid && view && view.runs.length > 1) {
       const runs = el("div", null, "row run-switch");
       const list = el("div", null, "row");  // wrapped buttons line up under the first, not the label
-      runs.append(el("span", "Прогон:", "muted small"), list);
+      runs.append(el("span", tr("lib.run"), "muted small"), list);
       list.append(...view.runs.map((r) => {
         const active = (runId || view.run_id) === r.run_id;
         const b = button(`${r.name} (${r.created})`, () => openSession(sid, r.run_id).catch(fail),
@@ -859,29 +925,35 @@ function renderLibrary() {
       }));
       row.append(runs);
     }
-    if (s.error) row.append(el("div", s.error, "error"));
+    if (s.error) row.append(el("div", errText(ui.lang, s.error), "error"));
     return row;
-  }) : [el("p", "Сессий пока нет.", "muted")]));
+  }) : [el("p", tr("lib.no_sessions"), "muted")]));
 
-  // Inputs being typed into are kept: re-render inbox only when its content changed.
+  // Inputs being typed into are kept: re-render inbox only when its content or the language changed,
+  // and carry typed starts over by (source, chain files) (L13).
   const inbox = $("inbox");
-  const sig = JSON.stringify(st.inbox);
+  const sig = JSON.stringify([ui.lang, st.inbox]);
   if (inbox.dataset.sig !== sig) {
     inbox.dataset.sig = sig;
+    const typed = new Map([...inbox.querySelectorAll("input[data-key]")].map((i) => [i.dataset.key, i.value]));
+    const had = document.activeElement;  // the start being typed keeps focus and caret
+    const focused = had && had.dataset && had.dataset.key !== undefined && inbox.contains(had)
+      ? { key: had.dataset.key, from: had.selectionStart, to: had.selectionEnd } : null;
     const parts = [];
     for (const src of st.inbox.sources) {
       const box = el("div", null, "lib-row");
-      box.append(el("strong", src.source === "" ? "inbox/ (корень)" : `inbox/${src.source}/`));
-      if (src.error) box.append(el("div", src.error, "error"));
+      box.append(el("strong", src.source === "" ? tr("inbox.root") : `inbox/${src.source}/`));
+      if (src.error) box.append(el("div", errText(ui.lang, src.error), "error"));
       for (const ch of src.chains) {
-        box.append(el("div", `цепочка ${ch.chain}: ${ch.files.length} файлов, начало ${ch.start_local}, `
-          + `${(ch.duration_s / 60).toFixed(1)} мин${ch.imported ? ", уже импортирована" : ""}`));
+        box.append(el("div", chainText(ch, ui.lang)));
         const input = el("input", null, "input");
         input.type = "text";
-        input.placeholder = "начало YYYY-MM-DD HH:MM (если часы сбиты)";
-        input.setAttribute("aria-label", "Начало записи, если часы диктофона сбиты");
+        input.dataset.key = `${src.source}\n${ch.files.join("\n")}`;  // chain numbers shift after an import
+        input.value = typed.get(input.dataset.key) || "";
+        input.placeholder = tr("inbox.start_placeholder");
+        input.setAttribute("aria-label", tr("inbox.start_aria"));
         const row = el("div", null, "row");
-        row.append(input, button("Импортировать", () => submit("import", {
+        row.append(input, button(tr("inbox.import"), () => submit("import", {
           source: src.source, chain: ch.chain, files: ch.files, start: input.value.trim() || null,
         }), undefined, "sm", "folder-input"));
         box.append(row);
@@ -891,29 +963,33 @@ function renderLibrary() {
     for (const name of st.inbox.backups) {
       const row = el("div", null, "lib-row");
       const line = el("div", null, "row");
-      line.append(el("span", name), button("Восстановить", () => submit("restore", { name }), "outline"));
+      line.append(el("span", name), button(tr("inbox.restore"), () => submit("restore", { name }), "outline"));
       row.append(line);
       parts.push(row);
     }
-    if (!parts.length) parts.push(el("p", "Пусто: положите файлы в папку inbox продукта.", "muted"));
+    if (!parts.length) parts.push(el("p", tr("inbox.empty"), "muted"));
     inbox.replaceChildren(...parts);
+    const again = focused && [...inbox.querySelectorAll("input[data-key]")].find((i) => i.dataset.key === focused.key);
+    if (again) {
+      again.focus({ preventScroll: true });
+      again.setSelectionRange(focused.from, focused.to);
+    }
   }
 
   setKids($("jobs"), JSON.stringify(st.jobs), () => (st.jobs.length ? st.jobs.slice().reverse().map((j) => {
     const box = el("div", null, "lib-row");
-    box.append(el("strong", `${NAMES[j.kind] || j.kind}: ${JOB_STATES[j.state] || j.state}`
-      + `${j.stage ? `, этап ${j.stage}` : ""}`));
-    if (j.error) box.append(el("div", j.error, "error"));
+    box.append(el("strong", jobText(j, ui.lang)));
+    if (j.error) box.append(el("div", errText(ui.lang, j.error), "error"));
     if (j.log_tail.length) box.append(el("pre", j.log_tail.join("\n")));
     if (j.state === "queued" || j.state === "running") {
-      box.append(button("Отменить", () => api("POST", `/api/jobs/${j.job_id}/cancel`, {})
+      box.append(button(tr("jobs.cancel"), () => api("POST", `/api/jobs/${j.job_id}/cancel`, {})
         .then(poll).catch(fail), "outline"));
     }
     return box;
-  }) : [el("p", "Задач нет.", "muted")]));
+  }) : [el("p", tr("jobs.none"), "muted")]));
 
   $("backup-info").textContent = st.last_backup
-    ? `Последний бэкап: ${backupTime(st.last_backup)}` : "Бэкапов ещё не было.";
+    ? tr("backup.last", { time: backupTime(st.last_backup, ui.lang) }) : tr("backup.none");
   renderIdeas();
 }
 
@@ -931,20 +1007,20 @@ function ideaRow(idea) {
   const li = el("li");
   li.dataset.id = idea.event_id;
   const head = el("div", null, "idea-head");
-  head.append(el("time", ideaTime(idea.ts)));
+  head.append(el("time", ideaTime(idea.ts, ui.lang)));
   if (ui.ideaDelete === idea.event_id) {
     const ask = el("span", null, "idea-ask");
-    const yes = button("Да", () => deleteIdea(idea.event_id), "destructive");
+    const yes = button(tr("common.yes"), () => deleteIdea(idea.event_id), "destructive");
     yes.classList.add("idea-yes");
     yes.disabled = ui.ideaDeleting;  // a double click must not send a second delete
-    const no = button("Нет", () => askDeleteIdea(null), "outline");
+    const no = button(tr("common.no"), () => askDeleteIdea(null), "outline");
     no.classList.add("idea-no");
-    ask.append(el("span", "Удалить идею?"), yes, no);
+    ask.append(el("span", tr("idea.delete_question")), yes, no);
     head.append(ask);
   } else {
     const x = button("", () => askDeleteIdea(idea.event_id), "ghost", "icon-sm", "x");
     x.classList.add("idea-del");
-    x.setAttribute("aria-label", "Удалить идею");
+    x.setAttribute("aria-label", tr("idea.delete"));
     head.append(x);
   }
   li.append(head, el("p", idea.value));
@@ -967,7 +1043,7 @@ async function deleteIdea(id) {
     serverState.ideas = serverState.ideas.filter((i) => i.event_id !== id);
     await poll();
   } catch (e) {
-    toast("Идея не удалена", e.message, true);
+    toast(tr("toast.idea_not_deleted"), errText(ui.lang, errDesc(e)), true);
   } finally {
     ui.ideaDeleting = false;
     renderIdeas();
@@ -977,7 +1053,7 @@ async function deleteIdea(id) {
 async function submit(kind, params) {
   try {
     await api("POST", "/api/jobs", { job_id: newId(), kind, params });
-    toast("Задача поставлена", NAMES[kind] || kind);
+    toast(tr("toast.job_submitted"), label(ui.lang, "job.kind.", kind));
     await poll();
   } catch (e) {
     fail(e);
@@ -1013,13 +1089,13 @@ async function loadAudio(clip, autoplay) {
   playingId = clip.clip_id;
   ui.playWhenReady = autoplay;
   ui.audio = "loading";
-  ui.audioError = "";
+  ui.audioError = null;
   renderPlayer();
   try {
     const r = await fetch(`/api/clip/${clip.clip_id}`, {
       headers: { Authorization: `Bearer ${KEY}` }, signal: ctl.signal,
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) throw codedError({ code: "http_status", params: { status: r.status } });
     const blob = await r.blob();
     if (ctl !== audioCtl) return;  // a newer clip was selected meanwhile
     audioUrl = URL.createObjectURL(blob);
@@ -1029,7 +1105,7 @@ async function loadAudio(clip, autoplay) {
   } catch (e) {
     if (e.name === "AbortError" || ctl !== audioCtl) return;
     ui.audio = "error";
-    ui.audioError = e.message;
+    ui.audioError = e.descriptor || { code: "offline", params: {} };  // fetch or blob failed
   }
   if (playingId === ui.selectedId) render();
 }
@@ -1066,7 +1142,7 @@ function select(clipId, { play = false } = {}) {
   if (clipId !== ui.selectedId) {
     ui.rechoose = null;
     closeNote();
-    $("note-status").textContent = "";
+    ui.noteStatus = null;
     ui.expanded = false;
     ui.selectedId = clipId;
     $("player").pause();  // the old clip must not end (and become «heard») as the new one
@@ -1089,7 +1165,7 @@ function journal(kind, value, clip) {
   if (clip) body.clip_id = clip.clip_id;
   const p = queue.then(async () => {
     const r = await api("POST", "/api/journal", body);
-    if (!r.saved) throw new Error("не сохранено");
+    if (!r.saved) throw codedError({ code: "not_saved", params: {} });
     return r;
   });
   queue = p.catch(() => {});
@@ -1112,7 +1188,7 @@ function setMark(clip, value) {
   }, (e) => {
     ui.pending.delete(clip.clip_id);
     Object.assign(clip, before);
-    toast("Не сохранено", e.message, true);
+    toast(tr("toast.not_saved"), errText(ui.lang, errDesc(e)), true);
     render();
     throw e;
   });
@@ -1168,11 +1244,11 @@ function undo() {
   if (ui.screen !== "session" || !view || !ui.loaded) return;
   const t = undoTarget(ui.undo, view.clips);
   if (!t) {
-    toast("Отменять нечего");
+    toast(tr("toast.nothing_to_undo"));
     return;
   }
   if (t.index < 0) {
-    toast("Клип не из этого прогона", "Отмена пропущена.");
+    toast(tr("toast.undo_other_run"), tr("toast.undo_skipped"));
     return;
   }
   const clip = view.clips[t.index];
@@ -1245,9 +1321,9 @@ async function saveNote() {
     return;
   }
   ui.noteSaving = true;
-  const st = $("note-status");
   clearTimeout(noteTimer);
-  st.textContent = "сохраняю…";
+  ui.noteStatus = { key: "note.saving" };
+  renderStatuses();
   try {
     const r = await journal("note", text, clip);
     clip.notes = clip.notes.filter((n) => !n.own);
@@ -1255,21 +1331,28 @@ async function saveNote() {
     if (ui.drafts.get(id) === text) ui.drafts.delete(id);
     // typed on while saving: keep the field open, the next Esc saves the rest
     if (ui.noteClipId === id && $("note").value === text) closeNote();
-    st.textContent = "сохранено";
-    noteTimer = setTimeout(() => { st.textContent = ""; }, 2000);
+    ui.noteStatus = { key: "note.saved" };
+    noteTimer = setTimeout(() => {
+      ui.noteStatus = null;
+      render();
+    }, 2000);
     render();
     reloadView().catch(fail);
   } catch (e) {
     if (ui.noteClipId !== id) ui.drafts.set(id, text);  // left the clip: N on it brings the text back
-    else st.textContent = `не сохранено: ${e.message}`;  // the text stays in the field; Esc retries
-    toast("Заметка не сохранена", `${e.message}. Текст сохранён в поле заметки этого клипа.`, true);
+    else {  // the text stays in the field; Esc retries
+      ui.noteStatus = { key: "note.not_saved", params: { error: errDesc(e) } };
+      renderStatuses();
+    }
+    toast(tr("toast.note_not_saved"), tr("toast.note_kept", { error: errDesc(e) }), true);
   } finally {
     ui.noteSaving = false;
   }
 }
 
 function openIdea() {
-  $("idea-status").textContent = "";
+  ui.ideaStatus = null;
+  renderStatuses();
   if (!$("idea-dialog").open) $("idea-dialog").showModal();
   $("idea").focus();
 }
@@ -1277,17 +1360,20 @@ function openIdea() {
 async function saveIdea() {
   const text = $("idea").value.trim();
   if (!text) return;
-  $("idea-status").textContent = "сохраняю…";
+  ui.ideaStatus = { key: "note.saving" };
+  renderStatuses();
   try {
     const body = { event_id: newId(), kind: "idea", value: text };
     if (sid) body.session_id = sid;
     await api("POST", "/api/journal", body);
     $("idea").value = "";
     $("idea-dialog").close();
-    toast("Идея записана");
+    ui.ideaStatus = null;
+    toast(tr("toast.idea_saved"));
     await poll();
   } catch (e) {
-    $("idea-status").textContent = `не сохранено: ${e.message}`;
+    ui.ideaStatus = { key: "note.not_saved", params: { error: errDesc(e) } };
+    renderStatuses();
   }
 }
 
@@ -1352,12 +1438,14 @@ function onKey(e) {
 function bind() {
   document.addEventListener("keydown", onKey, true);
   $("decisions").replaceChildren(...DECISIONS.map((value, i) => {
-    const b = button(value === KEEP ? "Оставить" : value[0].toUpperCase() + value.slice(1), () => {
+    const b = button(null, () => {
       if (ui.tab === "mine") pickRechoose(value);
       else decide(value);
     }, value === KEEP ? undefined : "outline", "default", DECISION_ICONS[value]);
     b.dataset.value = value;
-    b.append(el("kbd", String(i + 1), "kbd"));
+    const text = el("span", tr(`decision.${value}`));
+    text.dataset.i18n = `decision.${value}`;  // applyStatic() relabels it on a language switch
+    b.append(text, el("kbd", String(i + 1), "kbd"));
     return b;
   }));
   for (const b of $("tabs").querySelectorAll("[role=tab]")) {
@@ -1365,6 +1453,8 @@ function bind() {
   }
   $("library-btn").addEventListener("click", toggleLibrary);
   $("help-btn").addEventListener("click", () => $("help-dialog").showModal());
+  $("lang").addEventListener("click", () => setLang(ui.lang === "en" ? "ru" : "en"));
+  $("lang").addEventListener("mousedown", (e) => e.preventDefault());  // L13: a note being typed keeps focus, no blur save
   $("help-close").addEventListener("click", () => $("help-dialog").close());
   $("theme").addEventListener("click", () => {
     ui.theme = document.documentElement.classList.contains("dark") ? "light" : "dark";
@@ -1392,7 +1482,7 @@ function bind() {
   $("ideas-expand").addEventListener("click", () => $("ideas-dialog").showModal());
   $("ideas-close").addEventListener("click", () => $("ideas-dialog").close());
   $("inbox-open").addEventListener("click", () => {  // D49
-    api("POST", "/api/inbox/open", {}).catch((e) => toast("Проводник не открылся", e.message, true));
+    api("POST", "/api/inbox/open", {}).catch((e) => toast(tr("toast.explorer_failed"), errText(ui.lang, errDesc(e)), true));
   });
   $("rechoose-yes").addEventListener("click", () => closeRechoose(true));
   $("rechoose-no").addEventListener("click", () => closeRechoose(false));
@@ -1446,9 +1536,9 @@ function bind() {
 }
 
 if (typeof module === "object") {
-  module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter };
+  module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
+    counts, statusText, summaryText, chainText, jobText, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
+    afterOpenError, retryAfter, codedError, errDesc };
 } else {
   start();
 }

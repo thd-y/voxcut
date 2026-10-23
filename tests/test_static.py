@@ -1,6 +1,8 @@
 import hashlib
+import json
 import re
 import threading
+from html.parser import HTMLParser
 
 import pytest
 from test_server_security import SECURITY, Client
@@ -10,7 +12,8 @@ from voxcut.ui.server import STATIC, STATIC_DIR, make_server
 
 FORBIDDEN = ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(",
              "new Function", 'setAttribute("style"', "setAttribute('style'", "localStorage",
-             "sessionStorage", "document.cookie", "http://", "https://", "localhost"]
+             "sessionStorage", "document.cookie", "http://", "https://", "localhost",
+             "navigator.language", "Accept-Language"]  # D69: the UI language is the owner's choice only
 BASECOAT_SHA256 = "744bb04803c3480d1e79b3cfd38ecb6b103075400774cb89bf57b5e27e6d15a2"
 LUCIDE_SHA256 = "eeeb8ec76ade50ef1e41547941836815006d4976366b33b7e1ab796ea38ccf24"  # lucide-static 1.52.0, D55/D58
 LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mic-vocal", "music",
@@ -38,7 +41,8 @@ def test_static_rules(path):
         assert not re.search(r"\son[a-z]+\s*=", text, re.IGNORECASE), "inline event handler"
         assert not re.search(r"\sstyle\s*=", text, re.IGNORECASE), "inline style"
         assert not re.search(r"<script[^>]*>\s*[^<\s]", text, re.IGNORECASE), "inline script body"
-        assert re.findall(r'<script[^>]*src="([^"]+)"', text) == ["/app.js"]
+        assert re.findall(r'<script[^>]*src="([^"]+)"', text) == [
+            "/i18n/en.js", "/i18n/ru.js", "/i18n.js", "/app.js"]
         assert re.findall(r'<link[^>]*href="([^"]+)"', text) == [
             "/vendor/basecoat-luma.css", "/app.css", "/favicon.svg"]
 
@@ -86,7 +90,8 @@ def test_index_served_with_csp(tmp_path):
     threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True).start()
     try:
         c = Client(app)
-        for path in ("/", "/app.js", "/app.css", "/vendor/basecoat-luma.css",
+        assert c.req("GET", "/i18n/ru.js")[1].get("Content-Type") == "text/javascript; charset=utf-8"
+        for path in ("/", "/app.js", "/i18n.js", "/i18n/en.js", "/i18n/ru.js", "/app.css", "/vendor/basecoat-luma.css",
                      "/vendor/lucide-sprite.svg", "/favicon.svg"):
             status, headers, _ = c.req("GET", path)
             assert status == 200 and {k: headers.get(k) for k in SECURITY} == SECURITY
@@ -98,7 +103,7 @@ def test_index_served_with_csp(tmp_path):
 
 def test_no_translate_prompt():
     text = (STATIC_DIR / "index.html").read_text()
-    assert '<html lang="ru" translate="no">' in text
+    assert '<html lang="en" translate="no">' in text
     assert '<meta name="google" content="notranslate">' in text
 
 
@@ -116,3 +121,57 @@ def test_package_data_covers_static():
                for f in glob.glob(str(pkg / pat), recursive=True) if Path(f).is_file()}
     served = {(STATIC_DIR / name).resolve() for name, _ in STATIC.values()}
     assert served <= shipped, sorted(str(p) for p in served - shipped)
+
+
+I18N_ATTRS = {"data-i18n-placeholder": "placeholder", "data-i18n-aria-label": "aria-label",
+              "data-i18n-title": "title"}
+
+
+def en_catalog() -> dict:
+    text = (STATIC_DIR / "i18n" / "en.js").read_text()
+    return {m[1]: json.loads(m[2]) for m in re.finditer(r'^  "([^"]+)": ("(?:[^"\\]|\\.)*"),?$', text, re.MULTILINE)}
+
+
+class _I18nText(HTMLParser):
+    """(key, text inside the element) for data-i18n, (key, attribute value) for data-i18n-*."""
+
+    def __init__(self):
+        super().__init__()
+        self.found, self.open = [], []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        self.found += [(a[k], a.get(attr)) for k, attr in I18N_ATTRS.items() if k in a]
+        if "data-i18n" in a:
+            self.open.append([a["data-i18n"], ""])
+
+    def handle_data(self, data):
+        for item in self.open:
+            item[1] += data
+
+    def handle_endtag(self, tag):
+        if self.open:  # a data-i18n element holds text only: the next end tag is its own
+            self.found.append(tuple(self.open.pop()))
+
+
+def test_html_text_is_en_catalog():
+    """D67, L11: index.html is the English UI, word for word what applyStatic() writes."""
+    parser = _I18nText()
+    parser.feed((STATIC_DIR / "index.html").read_text())
+    en = en_catalog()
+    assert len(parser.found) > 40
+    assert [(k, v) for k, v in parser.found if en.get(k) != v] == []
+
+
+DATA_VALUES = ['"моё"', '"вокал"', '"музыка"', '"шум"', '"другое"', '"ё"', '"е"']  # journal data, norm (L14, L15)
+
+
+@pytest.mark.parametrize("name", ["index.html", "app.js", "i18n.js"])
+def test_ui_has_no_cyrillic_outside_catalogs(name):
+    """D67: every UI phrase comes from i18n/en.js or i18n/ru.js."""
+    text = (STATIC_DIR / name).read_text()
+    text = re.sub(r"<!--.*?-->|/\*.*?\*/", "", text, flags=re.DOTALL)
+    text = re.sub(r"//.*", "", text)
+    for value in DATA_VALUES:
+        text = text.replace(value, "")
+    assert re.findall(r".*[а-яёА-ЯЁ].*", text) == []

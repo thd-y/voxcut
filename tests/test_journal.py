@@ -67,7 +67,8 @@ def test_broken_last_line_skipped(tmp_path):
         f.write('{"event_id": "ab')
     events, warnings = load(p)
     assert [e["value"] for e in events] == ["моё", "шум"]
-    assert len(warnings) == 1
+    assert [(w["code"], w["params"]["where"]) for w in warnings] == [
+        ("journal_tail_skipped", str(p))]
     j2 = Journal(p)
     assert len(j2.events()) == 2 and len(j2.warnings) == 1
 
@@ -88,23 +89,27 @@ def test_broken_middle_line_refused(tmp_path):
     p = tmp_path / "j.jsonl"
     good = json.dumps(ev()) + "\n"
     p.write_text(good + "garbage\n" + good)
-    with pytest.raises(JournalError):
+    with pytest.raises(JournalError) as e:
         load(p)
+    assert (e.value.code, e.value.params["pos"]) == ("journal_broken_middle", len(good))
     with pytest.raises(JournalError):
         Journal(p)
 
 
 def test_append_rejects_bad_events(tmp_path):
     j = Journal(tmp_path / "j.jsonl")
-    for bad in (
-        ev(kind="exec"),
-        ev(value="x" * (journal.MARK_MAX + 1)),
-        ev(kind="note", value="x" * (journal.NOTE_MAX + 1)),
-        ev(event_id="../x"),
-        ev(start=20.0, end=10.0),
+    for bad, code in (
+        (ev(kind="exec"), "journal_unknown_kind"),
+        (ev(value="x" * (journal.MARK_MAX + 1)), "journal_value_too_long"),
+        (ev(kind="note", value="x" * (journal.NOTE_MAX + 1)), "journal_value_too_long"),
+        (ev(value=None), "journal_bad_value"),  # not a string: not "longer than N"
+        (ev(value=5), "journal_bad_value"),
+        (ev(event_id="../x"), "journal_bad_event_id"),
+        (ev(start=20.0, end=10.0), "journal_bad_span"),
     ):
-        with pytest.raises(JournalError):
+        with pytest.raises(JournalError) as e:
             j.append(bad)
+        assert e.value.code == code
 
 
 def test_mark_last_wins_and_clear(tmp_path):
@@ -208,8 +213,9 @@ def test_merge_keeps_ts_and_newer_local_wins(tmp_path):
 def test_merge_rejects_events_without_valid_ts(tmp_path):
     j = Journal(tmp_path / "j.jsonl")
     for bad in (ev(), ev(ts="вчера"), ev(ts="2026-10-21T10:00:00")):  # naive ts is ambiguous
-        with pytest.raises(JournalError):
+        with pytest.raises(JournalError) as e:
             j.merge([bad])
+        assert e.value.code == "journal_bad_ts"
     assert j.events() == []
 
 
