@@ -8,7 +8,7 @@ test("parseSessionName", () => {  // D68: the date through Intl, units from the 
   assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "ru"),
     { date: "11 авг.", time: "21:30", length: "4 ч 16 мин" });
   assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "en"),
-    { date: "Aug 11", time: "21:30", length: "4 h 16 min" });
+    { date: "11 Aug", time: "21:30", length: "4 h 16 min" });  // D71: en-GB
   assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").length, "45 мин");
   assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "en").length, "45 min");
   assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").date, "2 янв.");
@@ -18,6 +18,7 @@ test("parseSessionName", () => {  // D68: the date through Intl, units from the 
     assert.equal(app.parseSessionName("folder01", lang), null);
     assert.equal(app.parseSessionName("2026-13-01_00-00_5h", lang), null);
     assert.equal(app.parseSessionName("2026-00-01_00-00_5h", lang), null);
+    assert.equal(app.parseSessionName("2026-02-31_00-00_5h", lang), null);  // no roll-over into March
   }
   assert.equal(app.sessionLabel({ name: "2026-08-11_21-30_4h16m" }, "ru"), "11 авг., 21:30 · 4 ч 16 мин");
   assert.equal(app.sessionLabel({ name: "folder01" }, "en"), "folder01");
@@ -97,7 +98,8 @@ test("backupTime", () => {  // D61: «Последний бэкап» with the y
   try {
     assert.equal(app.backupTime("2026-10-22T06:53:19.402+03:00", "ru"), "22.10.2026, 06:53");
     assert.equal(app.ideaTime("2026-08-11T04:25:00+03:00", "ru"), "11.08, 04:25");
-    assert.equal(app.ideaTime("2026-08-11T04:25:00+03:00", "en"), "08/11, 04:25 AM");
+    assert.equal(app.ideaTime("2026-08-11T04:25:00+03:00", "en"), "11/08, 04:25");  // D71: en-GB, 24 h
+    assert.equal(app.backupTime("2026-10-22T13:28:00+03:00", "en"), "22/10/2026, 13:28");
     assert.equal(app.ideaTime("мусор", "en"), "");
     assert.equal(app.backupTime("", "ru"), "");
     assert.equal(app.backupTime("garbage", "ru"), "garbage");
@@ -284,4 +286,11 @@ test("jobText", () => {
   assert.equal(app.jobText(job("process", "running", "segment"), "en"), "processing: running, stage clip boundaries");
   assert.equal(app.jobText(job("process", "running", "newstage"), "ru"), "обработка: идёт, этап newstage");
   assert.equal(app.jobText(job("__proto__", "новое"), "en"), "__proto__: новое");  // unknown: as is
+});
+
+test("errDesc", () => {  // a thrown null or a body without a descriptor still gives a descriptor
+  assert.deepEqual(app.errDesc(null), { code: "legacy_error", params: { detail: "null" } });
+  assert.deepEqual(app.errDesc(new Error("x")), { code: "legacy_error", params: { detail: "x" } });
+  const desc = { code: "offline", params: {} };
+  assert.equal(app.errDesc({ descriptor: desc }), desc);
 });

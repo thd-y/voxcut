@@ -5,14 +5,17 @@ const { translate, errText, pickLang, label } = typeof module === "object" ? req
 
 // --- pure functions (no DOM; tested by node --test, D48) ---
 
+const LOCALE = { en: "en-GB", ru: "ru" };  // D71: English dates day first, 24 h
+
 function parseSessionName(name, lang) {
   const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})_(?:(\d+)h)?(?:(\d+)m)?$/.exec(name);
   if (!m || (!m[6] && !m[7]) || +m[2] < 1 || +m[2] > 12) return null;
   const [h, min] = [+m[6], +m[7]];
   const length = m[6] && m[7] ? translate(lang, "dur.hm", { h, m: min })
     : m[6] ? translate(lang, "dur.h", { h }) : translate(lang, "dur.m", { m: min });
-  const date = new Intl.DateTimeFormat(lang, { day: "numeric", month: "short" })
-    .format(new Date(+m[1], +m[2] - 1, +m[3]));  // D68
+  const day = new Date(+m[1], +m[2] - 1, +m[3]);
+  if (day.getDate() !== +m[3]) return null;  // 02-31 would roll over into March
+  const date = new Intl.DateTimeFormat(LOCALE[lang], { day: "numeric", month: "short" }).format(day);  // D68
   return { date, time: `${m[4]}:${m[5]}`, length };
 }
 
@@ -121,7 +124,7 @@ function gapBefore(clips, i, min = 30) {
 function localTime(ts, withYear, lang) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "";
-  return new Intl.DateTimeFormat(lang, { day: "2-digit", month: "2-digit",
+  return new Intl.DateTimeFormat(LOCALE[lang], { day: "2-digit", month: "2-digit",
     ...(withYear ? { year: "numeric" } : {}), hour: "2-digit", minute: "2-digit" }).format(d);
 }
 
@@ -139,7 +142,7 @@ function codedError(desc, lang) {
 }
 
 // Any caught error as a descriptor; a JS error without one shows its text as is.
-const errDesc = (e) => e.descriptor || { code: "legacy_error", params: { detail: String(e.message) } };
+const errDesc = (e) => (e && e.descriptor) || { code: "legacy_error", params: { detail: String(e?.message ?? e) } };
 
 const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
 
@@ -282,7 +285,7 @@ async function api(method, path, body) {
     ui.fatal = true;
     render();
   }
-  if (!r.ok) throw codedError(data.error || { code: "http_status", params: { status: r.status } }, ui.lang);
+  if (!r.ok) throw codedError((data && data.error) || { code: "http_status", params: { status: r.status } }, ui.lang);
   return data;
 }
 
@@ -934,6 +937,9 @@ function renderLibrary() {
     inbox.dataset.sig = sig;
     const typed = new Map([...inbox.querySelectorAll("input[data-chain]")]
       .map((i) => [`${i.dataset.source}\n${i.dataset.chain}`, i.value]));
+    const had = document.activeElement;  // the start being typed keeps focus and caret
+    const focused = had && had.dataset && had.dataset.chain !== undefined && inbox.contains(had)
+      ? { key: `${had.dataset.source}\n${had.dataset.chain}`, from: had.selectionStart, to: had.selectionEnd } : null;
     const parts = [];
     for (const src of st.inbox.sources) {
       const box = el("div", null, "lib-row");
@@ -965,6 +971,12 @@ function renderLibrary() {
     }
     if (!parts.length) parts.push(el("p", tr("inbox.empty"), "muted"));
     inbox.replaceChildren(...parts);
+    const again = focused && [...inbox.querySelectorAll("input[data-chain]")]
+      .find((i) => `${i.dataset.source}\n${i.dataset.chain}` === focused.key);
+    if (again) {
+      again.focus({ preventScroll: true });
+      again.setSelectionRange(focused.from, focused.to);
+    }
   }
 
   setKids($("jobs"), JSON.stringify(st.jobs), () => (st.jobs.length ? st.jobs.slice().reverse().map((j) => {
@@ -1529,7 +1541,7 @@ function bind() {
 if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, jobText, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, codedError };
+    afterOpenError, retryAfter, codedError, errDesc };
 } else {
   start();
 }
