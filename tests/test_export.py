@@ -68,16 +68,18 @@ def test_existing_clips_refused(tmp_path, monkeypatch):
         raise AssertionError("отказ должен прийти до чтения часов аудио")
 
     monkeypatch.setattr(audio, "sha256_file", no_hash)
-    with pytest.raises(RunError, match="уже существует"):
+    with pytest.raises(RunError, match="уже существует") as e:
         export_clips(seg)
+    assert e.value.code == "clips_exist"
 
 
 def test_changed_source_refused(tmp_path):
     src = make_source(tmp_path / "s.wav", "PCM_16")
     seg = make_seg_dir(tmp_path, src, [(0, 100)])
     make_source(tmp_path / "s.wav", "PCM_16", seed=1)
-    with pytest.raises(RunError, match="sha256"):
+    with pytest.raises(RunError, match="sha256") as e:
         export_clips(seg)
+    assert e.value.code == "export_source_changed"
     assert not (seg / "clips").exists()
 
 
@@ -95,8 +97,9 @@ def test_source_override_used_and_sha_checked(tmp_path):
     (tmp_path / "b").mkdir()
     seg2 = make_seg_dir(tmp_path / "b", str(moved), [(0, 100)])
     other = make_source(tmp_path / "other.wav", "PCM_16", seed=1)
-    with pytest.raises(RunError, match="sha256"):
+    with pytest.raises(RunError, match="sha256") as e:
         export_clips(str(seg2), source=other)
+    assert e.value.code == "export_source_changed"
     assert not (seg2 / "clips").exists()
 
 

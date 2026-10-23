@@ -49,8 +49,9 @@ def test_segment_refuses_probs_without_second_pass(tmp_path, change):
     d = make_probs_dir(tmp_path, [0.9] * 10)
     meta = json.loads((d / "probs.json").read_text()) | change
     (d / "probs.json").write_text(json.dumps({k: v for k, v in meta.items() if v is not None}))
-    with pytest.raises(RunError, match=f"(?s)D31.*rm -rf {d}"):
+    with pytest.raises(RunError, match=f"(?s)D31.*rm -rf {d}") as e:
         segment(str(d), cfg())
+    assert e.value.code == "run_no_reset_period"
 
 # речь 1–2 с и 5–6 с (кадр 32 мс), всего 10 с
 SPEECH = np.full(313, 0.05)
@@ -89,8 +90,9 @@ def test_replaced_probs_refused(tmp_path):
     d = make_probs_dir(tmp_path, SPEECH)
     segment(d, cfg())
     np.save(d / "probs.npy", np.asarray(SPEECH[::-1], dtype=np.float32))
-    with pytest.raises(RunError, match="подменён"):
+    with pytest.raises(RunError, match="подменён") as e:
         segment(d, cfg())
+    assert e.value.code == "seg_probs_replaced"
 
 
 def test_rm_hint_quotes_path_with_space(tmp_path):
@@ -100,18 +102,21 @@ def test_rm_hint_quotes_path_with_space(tmp_path):
     np.save(d / "probs.npy", np.asarray(SPEECH[::-1], dtype=np.float32))
     with pytest.raises(RunError) as e:
         segment(d, cfg())
+    assert e.value.code == "seg_probs_replaced"
     assert shlex.split(str(e.value).rsplit("rm -rf ", 1)[1]) == [str(seg)]
 
 
-@pytest.mark.parametrize("damage, needle", [
-    (lambda d: (d / "probs.json").unlink(), "нет .*probs.json"),
-    (lambda d: np.save(d / "probs.npy", np.zeros(5, dtype=np.float32)), "5 кадров"),
+@pytest.mark.parametrize("damage, needle, code", [
+    (lambda d: (d / "probs.json").unlink(), "нет .*probs.json", "run_missing"),
+    (lambda d: np.save(d / "probs.npy", np.zeros(5, dtype=np.float32)), "5 кадров",
+     "probs_frames_mismatch"),
 ])
-def test_incomplete_probs_dir_refused(tmp_path, damage, needle):
+def test_incomplete_probs_dir_refused(tmp_path, damage, needle, code):
     d = make_probs_dir(tmp_path, SPEECH)
     damage(d)
-    with pytest.raises(RunError, match=needle):
+    with pytest.raises(RunError, match=needle) as e:
         segment(d, cfg())
+    assert e.value.code == code
 
 
 def test_only_own_orphan_tmp_removed(tmp_path):
@@ -128,8 +133,9 @@ def test_only_own_orphan_tmp_removed(tmp_path):
 def test_channel_mismatch_refused(tmp_path):
     d = make_probs_dir(tmp_path, SPEECH, channel=0)
     segment(d, cfg())  # без channel в конфиге: probs уже определяют канал
-    with pytest.raises(RunError, match="channel"):
+    with pytest.raises(RunError, match="channel") as e:
         segment(d, cfg("threshold = 0.5\npad_ms = 0\nmerge_gap_ms = 0\nchannel = 1\n"))
+    assert e.value.code == "config_channel_mismatch"
 
 
 LABELS = "0\t10\tscored\n1.0\t2.0\tme\n5.0\t6.0\tme\n8.0\t9.0\tme\n"
@@ -186,8 +192,9 @@ def test_probs_env_drift_refused_with_rm_command(tmp_path):
     (d / "probs.json").write_text(json.dumps(meta))
     assert compute_probs(str(src), str(out)) == d  # переиспользован, модель не запускалась
     (d / "probs.json").write_text(json.dumps(meta | {"ffmpeg_version": "ffmpeg 5.0"}))
-    with pytest.raises(RunError, match=f"(?s)ffmpeg_version.*rm -rf {d}"):
+    with pytest.raises(RunError, match=f"(?s)ffmpeg_version.*rm -rf {d}") as e:
         compute_probs(str(src), str(out))
+    assert e.value.code == "run_env_changed"
 
 
 @pytest.mark.slow
@@ -280,8 +287,9 @@ def test_seam_tol_change_refused_on_reuse(tmp_path, monkeypatch):
     d = make_session_probs(tmp_path)
     seg = segment(d, cfg())
     monkeypatch.setattr("voxcut.cli.SEAM_TOL_S", 2.0)
-    with pytest.raises(RunError, match="(?s)seam_tol_s.*rm -rf"):
+    with pytest.raises(RunError, match="(?s)seam_tol_s.*rm -rf") as e:
         segment(d, cfg())
+    assert e.value.code == "seg_seam_tol_changed"
     monkeypatch.undo()
     assert segment(d, cfg()) == seg
 
@@ -301,5 +309,6 @@ def test_evaluate_refuses_probs_without_second_pass(tmp_path):
     (d / "probs.json").write_text(json.dumps(meta))
     labels = tmp_path / "l.txt"
     labels.write_text("0\t0.3\tscored\n")
-    with pytest.raises(RunError, match=f"(?s)D31.*rm -rf {d}"):
+    with pytest.raises(RunError, match=f"(?s)D31.*rm -rf {d}") as e:
         evaluate(str(seg), str(labels))
+    assert e.value.code == "run_no_reset_period"

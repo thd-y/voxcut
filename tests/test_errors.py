@@ -54,6 +54,7 @@ def test_descriptor_plain_exception():
 
 UI_MODULES = ["intervals", "audio", "cli", "library", "journal", "jobs", "ui/server"]
 EXEMPT = {"LabelsError", "ConfigError", "SystemExit"}
+INTERNAL = {("audio", "RuntimeError")}  # an invariant breach: internal_error in the UI
 CYR = re.compile("[а-яёА-ЯЁ]")
 
 
@@ -77,6 +78,7 @@ def russian_raises() -> list[str]:
             if (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)
                     and getattr(node.exc.func, "id", getattr(node.exc.func, "attr", None))
                     not in EXEMPT
+                    and (mod, getattr(node.exc.func, "id", None)) not in INTERNAL
                     and any(_russian_literal(x) for a in [*node.exc.args,
                                                          *(k.value for k in node.exc.keywords)]
                             for x in ast.walk(a))):
@@ -90,3 +92,37 @@ def russian_raises() -> list[str]:
 @pytest.mark.xfail(strict=True, reason="цикл 1, слой 2–3")
 def test_no_russian_raise_literals():
     assert russian_raises() == []
+
+
+RU_TEXT = [
+    ("session_overlap", {"a": "1.wav", "b": "2.wav", "gap": "0.50", "tol": "0.1"},
+     "файлы 1.wav и 2.wav перекрываются по времени на 0.50 с (допуск 0.1 с)"),
+    ("session_pause", {"minutes": "3.0", "a": "1.wav", "b": "2.wav"},
+     "между частями пауза 3.0 мин (1.wav → 2.wav); склейка пауз пока не поддерживается"),
+    ("session_chain_range", {"n": 3, "total": 2, "lines": ["  1: a.wav, b.wav", "  2: c.wav"]},
+     "--chain 3 вне диапазона 1..2:\n  1: a.wav, b.wav\n  2: c.wav"),
+    ("source_not_riff", {"src": "/x/a.wav"}, "/x/a.wav: не RIFF/RF64 WAVE"),
+    ("source_codec", {"src": "a.wav", "codec": "adpcm_ima_wav", "fix": "ffmpeg -i a.wav b.flac"},
+     ("a.wav: кодек adpcm_ima_wav, сэмпл-точность не гарантирована.\n"
+     "Конвертируйте: ffmpeg -i a.wav b.flac\nдальше источник — этот файл")),
+    ("import_move_stuck", {"file": "b.WAV", "detail": "[Errno 18] x", "files": ["a.WAV", "b.WAV"],
+                           "dir": "/d/originals.tmp"},
+     ("b.WAV: перенос не удался ([Errno 18] x); вернуть не удалось: a.WAV, b.WAV — они в "
+     "/d/originals.tmp, не удаляйте их: это единственные копии; остальные файлы во входящих")),
+    ("import_unfinished_elsewhere", {"session": "s1"},
+     ("часть файлов уже в сессии s1 (незавершённый импорт): нажмите у неё «Обработать»; "
+     "импорт отменён, файлы на месте")),
+    ("backup_full_refused", {"files": ["sessions/s/originals.tmp/a.WAV"]},
+     ("full-бэкап отменён: записи вне originals/ или ссылки — sessions/s/originals.tmp/a.WAV "
+     "(originals.tmp — незавершённый импорт, обычно его доделывает «Обработать»)")),
+    ("restore_conflicts", {"lines": ["  data/a", "  data/b"]},
+     "в data/ уже есть другие версии файлов, ничего не изменено:\n  data/a\n  data/b"),
+    ("run_no_reset_period", {"dir": "/r/p", "rm": "/r/p"},
+     ("/r/p: probs посчитаны без второго прохода Silero (D31).\n"
+     "Удалите каталог и запустите заново: rm -rf /r/p")),
+]
+
+
+@pytest.mark.parametrize(("code", "params", "text"), RU_TEXT)
+def test_ru_text_unchanged(code, params, text):
+    assert str(E(code, **params)) == text

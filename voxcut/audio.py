@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from voxcut.errors import Coded
 from voxcut.intervals import (
     FRAME_SAMPLES,
     GAP_MAX_S,
@@ -41,7 +42,7 @@ from voxcut.intervals import (
 )
 
 
-class FFmpegError(RuntimeError):
+class FFmpegError(Coded, RuntimeError):
     pass
 
 
@@ -49,12 +50,13 @@ def find_ffmpeg() -> tuple[str, str]:
     """The one ffmpeg check (D2): returns (path, first line of `ffmpeg -version`)."""
     path = shutil.which("ffmpeg")
     if path is None:
-        raise FFmpegError("ffmpeg не найден, установите: sudo apt install ffmpeg")
+        raise FFmpegError("ffmpeg_missing")
     r = subprocess.run(
         [path, "-hide_banner", "-version"], check=False, capture_output=True, text=True
     )
     if r.returncode != 0 or not r.stdout:
-        raise FFmpegError(f"{path} -version завершился с кодом {r.returncode}: {r.stderr.strip()}")
+        raise FFmpegError("ffmpeg_version_failed", path=path, rc=r.returncode,
+                          detail=r.stderr.strip())
     return path, r.stdout.splitlines()[0]
 
 
@@ -81,9 +83,7 @@ def ffmpeg_stream(args: list[str]):
         err.seek(0)
         msg = err.read().decode(errors="replace").strip()
         if proc.returncode != 0 or msg:
-            raise FFmpegError(
-                f"ffmpeg завершился с кодом {proc.returncode}: {msg}\nкоманда: {shlex.join(cmd)}"
-            )
+            raise FFmpegError("ffmpeg_failed", rc=proc.returncode, detail=msg, cmd=shlex.join(cmd))
 
 
 def probe_codec(src: str) -> str:
@@ -91,20 +91,20 @@ def probe_codec(src: str) -> str:
     find_ffmpeg()
     path = shutil.which("ffprobe")
     if path is None:
-        raise FFmpegError("ffprobe не найден, установите: sudo apt install ffmpeg")
+        raise FFmpegError("ffprobe_missing")
     cmd = [path, "-v", "error", "-select_streams", "a:0",
            "-show_entries", "stream=codec_name", "-of", "json", src]
     r = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if r.returncode != 0 or r.stderr.strip():
-        raise FFmpegError(f"ffprobe завершился с кодом {r.returncode}: {r.stderr.strip()}"
-                          f"\nкоманда: {shlex.join(cmd)}")
+        raise FFmpegError("ffprobe_failed", rc=r.returncode, detail=r.stderr.strip(),
+                          cmd=shlex.join(cmd))
     streams = json.loads(r.stdout)["streams"]
     if not streams:
-        raise SourceError(f"{src}: нет аудиодорожки")
+        raise SourceError("source_no_audio", src=src)
     return streams[0]["codec_name"]
 
 
-class SourceError(RuntimeError):
+class SourceError(Coded, RuntimeError):
     """The source is unfit for sample-exact work; the message carries the fix command."""
 
 
@@ -125,7 +125,7 @@ def convert_command(src: str, codec_name: str) -> str:
         cmd = ["ffmpeg", "-i", src, "-c:a", codec, "-rf64", "auto", f"{src}.fixed.wav"]
     else:
         cmd = ["ffmpeg", "-i", src, "-c:a", "flac", f"{src}.flac"]
-    return f"{shlex.join(cmd)}\nдальше источник — этот файл"
+    return shlex.join(cmd)
 
 
 def _printable(cid: bytes) -> bool:
@@ -148,7 +148,7 @@ def check_wav_structure(src: str) -> None:
         head = f.read(12)
         magic, wave = head[:4], head[8:]
         if magic not in (b"RIFF", b"RF64") or wave != b"WAVE":
-            raise SourceError(f"{src}: не RIFF/RF64 WAVE")
+            raise SourceError("source_not_riff", src=src)
         sr = block_align = data_start = data_size = ds64_data = None
         bad = None
         pos = 12
@@ -190,7 +190,7 @@ def check_wav_structure(src: str) -> None:
         by_file = (size - data_start) // block_align
         lengths = (f"; длина по заголовку {by_header} сэмплов ({by_header / sr:.1f} с), "
                    f"по размеру файла {by_file} сэмплов ({by_file / sr:.1f} с)")
-    raise SourceError(f"{src}: битая структура WAV: {bad}{lengths}.\nПересохраните: {fix}")
+    raise SourceError("source_wav_broken", src=src, detail=f"{bad}{lengths}", fix=fix)
 
 
 def count_samples(src: str, channels: int) -> int:
@@ -212,17 +212,14 @@ def check_source(src: str) -> SourceInfo:
     try:
         info = sf.info(src)
     except Exception as e:
-        raise SourceError(f"{src}: soundfile не читает файл ({e}).\nКонвертируйте: {fix}") from e
+        raise SourceError("source_unreadable", src=src, detail=str(e), fix=fix) from e
     if info.format not in ("WAV", "WAVEX", "RF64", "FLAC"):
-        raise SourceError(f"{src}: формат {info.format}, в v1 только WAV или FLAC."
-                          f"\nКонвертируйте: {fix}")
+        raise SourceError("source_format", src=src, format=info.format, fix=fix)
     if not (codec.startswith("pcm_") or codec == "flac"):
-        raise SourceError(f"{src}: кодек {codec}, сэмпл-точность не гарантирована."
-                          f"\nКонвертируйте: {fix}")
+        raise SourceError("source_codec", src=src, codec=codec, fix=fix)
     n = count_samples(src, info.channels)
     if n != info.frames:
-        raise SourceError(f"{src}: soundfile видит {info.frames} сэмплов, ffmpeg декодирует {n}."
-                          f"\nКонвертируйте: {fix}")
+        raise SourceError("source_frames_mismatch", src=src, frames=info.frames, n=n, fix=fix)
     return SourceInfo(info.samplerate, info.channels, n, codec, info.format, info.subtype)
 
 
@@ -231,16 +228,14 @@ def vad_filter(channel: str | int | None, channels: int) -> str:
     resample = "aresample=16000:resampler=swr"
     if channel is None or channel == "mono":
         if channels > 1:
-            raise SourceError(
-                f"в источнике {channels} канала(ов): задайте channel = индекс 0..{channels - 1} "
-                f'или "mix"')
+            raise SourceError("source_stereo", channels=channels, max=channels - 1)
         return resample
     if channel == "mix":
         weights = "+".join(f"{1 / channels:.6g}*c{i}" for i in range(channels))
         return f"pan=mono|c0={weights},{resample}"
     if isinstance(channel, int) and not isinstance(channel, bool) and 0 <= channel < channels:
         return f"pan=mono|c0=c{channel},{resample}"
-    raise SourceError(f'channel = {channel!r}: ожидается "mono", "mix" или индекс 0..{channels - 1}')
+    raise SourceError("source_bad_channel", channel=repr(channel), max=channels - 1)
 
 
 def vad_probs(src: str, af: str, model=None, reset_at=(), reset_period=0) -> tuple[np.ndarray, int]:
@@ -305,13 +300,8 @@ ENV_KEYS = ("silero_vad_version", "model_version", "ffmpeg_version", "ffmpeg_fil
             "torch_threads")
 
 
-class RunError(RuntimeError):
+class RunError(Coded, RuntimeError):
     """A published run dir does not match what this run would produce (D19)."""
-
-
-def rm_hint(path: Path) -> str:
-    """The one way to print a delete command: quoted, so a copied path with spaces stays whole."""
-    return f"Удалите каталог и запустите заново: rm -rf {shlex.quote(str(path))}"
 
 
 def fresh_tmp(dst: Path) -> Path:
@@ -336,15 +326,15 @@ def check_env(stored: dict, current: dict, run_dir: Path) -> None:
     diff = [f"{k}: было {stored.get(k)!r}, сейчас {v!r}" for k, v in current.items()
             if stored.get(k) != v]
     if diff:
-        raise RunError(f"{run_dir}: окружение изменилось ({'; '.join(diff)}).\n"
-                       f"Результат не переиспользуется. {rm_hint(run_dir)}")
+        raise RunError("run_env_changed", dir=str(run_dir), detail="; ".join(diff),
+                       rm=shlex.quote(str(run_dir)))
 
 
 def load_json(path: Path) -> dict:
     try:
         return json.loads(path.read_text())
     except FileNotFoundError:
-        raise RunError(f"нет {path}: каталог неполный или не тот") from None
+        raise RunError("run_missing", path=str(path)) from None
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -358,8 +348,7 @@ def read_jsonl(path: Path) -> list[dict]:
 def check_reset_period(meta: dict, probs_dir: Path) -> None:
     """probs from before the second Silero pass (D31) are never reused, by probs or segment."""
     if meta.get("reset_period_frames") != RESET_PERIOD_FRAMES:
-        raise RunError(f"{probs_dir}: probs посчитаны без второго прохода Silero (D31).\n"
-                       + rm_hint(probs_dir))
+        raise RunError("run_no_reset_period", dir=str(probs_dir), rm=shlex.quote(str(probs_dir)))
 
 
 def read_session(src: str, sha: str) -> dict | None:
@@ -368,8 +357,7 @@ def read_session(src: str, sha: str) -> dict | None:
         return None
     session = load_json(path)
     if session["session_sha256"] != sha:
-        raise RunError(f"{path}: session_sha256 не совпадает с sha256 {src}; "
-                       "сессия не от этого файла")
+        raise RunError("run_session_sha", path=str(path), src=src)
     return session
 
 
@@ -392,17 +380,15 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
         meta = load_json(dst / "probs.json")
         check_env(meta, current_env(vad_filter(channel, meta["channels"])), dst)
         if meta.get("session") != session:
-            raise RunError(f"{dst}: блок session в probs.json не совпадает с session.json "
-                           f"рядом с источником.\n{rm_hint(dst)}")
+            raise RunError("run_session_block", dir=str(dst), rm=shlex.quote(str(dst)))
         check_reset_period(meta, dst)
         if meta.get("seam_reset_frames") != resets:
-            raise RunError(f"{dst}: probs посчитаны без сброса Silero на стыках (D29).\n"
-                           + rm_hint(dst))
+            raise RunError("run_no_seam_reset", dir=str(dst), rm=shlex.quote(str(dst)))
         return dst
     info = check_source(src)
     if session and session["n_samples"] != info.n_samples:
-        raise RunError(f"{src}: в session.json {session['n_samples']} сэмплов, "
-                       f"в источнике {info.n_samples}")
+        raise RunError("run_session_samples", src=src, expected=session["n_samples"],
+                       got=info.n_samples)
     af = vad_filter(channel, info.channels)
     tmp = fresh_tmp(dst)
     probs, n16k = vad_probs(src, af, reset_at=resets or (), reset_period=RESET_PERIOD_FRAMES)
@@ -459,9 +445,9 @@ def export_clips(seg_dir: str, source: str | None = None) -> Path:
     src = source or run["source"]["path"]
     dst = seg_dir / "clips"
     if dst.exists():
-        raise RunError(f"{dst} уже существует: клипы не перезаписываются (D19)")
+        raise RunError("clips_exist", dir=str(dst))
     if sha256_file(src) != run["source"]["sha256"]:
-        raise RunError(f"{src}: sha256 не совпадает с манифестом {seg_dir}, источник изменился")
+        raise RunError("export_source_changed", src=src, dir=str(seg_dir))
     info = sf.info(src)
     dtype = _DTYPES.get(info.subtype, "int16")  # 8-bit PCM is exact through int16
     ext = "flac" if info.format == "FLAC" else "wav"
@@ -538,11 +524,10 @@ def _inventory(src_dir: str):
     """Names, RIFF structure and sf.info of every WAV, then chains; no decode."""
     wavs = sorted(p for p in Path(src_dir).iterdir() if p.is_file() and p.suffix.lower() == ".wav")
     if not wavs:
-        raise SessionError(f"{src_dir}: нет WAV-файлов")
+        raise SessionError("session_no_wavs", dir=src_dir)
     foreign = [p.name for p in wavs if file_start(p.name) is None]
     if foreign:
-        raise SessionError(f"{src_dir}: имена не по правилу диктофона YYYYMMDDHHMMSS.wav: "
-                           f"{', '.join(foreign)}")
+        raise SessionError("session_foreign_names", dir=src_dir, files=foreign)
     for p in wavs:
         check_wav_structure(str(p))
     infos = [sf.info(str(p)) for p in wavs]
@@ -574,16 +559,15 @@ def plan_session(src_dir: str, chain: int | None = None, start: str | None = Non
     for p, i in zip(files, infos, strict=True):
         if (i.samplerate, i.channels, i.subtype) != (first.samplerate, first.channels,
                                                        first.subtype):
-            raise SessionError(f"{p}: {i.samplerate} Гц, {i.channels} кан., {i.subtype}; "
-                               f"первый файл цепочки: {first.samplerate} Гц, {first.channels} "
-                               f"кан., {first.subtype}")
+            raise SessionError("session_format_mismatch", file=str(p), sr=i.samplerate,
+                               channels=i.channels, subtype=i.subtype, first_sr=first.samplerate,
+                               first_channels=first.channels, first_subtype=first.subtype)
     sr, channels, subtype = first.samplerate, first.channels, first.subtype
     if subtype not in _SUBTYPE_BYTES:
-        raise SessionError(f"{files[0]}: subtype {subtype}, для сессии нужен PCM или FLOAT")
+        raise SessionError("session_subtype", file=str(files[0]), subtype=subtype)
     n_total = sum(n for _, _, n in parts)
     if not data_bytes_ok(n_total, channels, _SUBTYPE_BYTES[subtype]):
-        raise SessionError(f"сессия {n_total / sr / 3600:.2f} ч не помещается в WAV "
-                           f"(предел RIFF 4 ГиБ); разбейте папку на части")
+        raise SessionError("session_too_long", hours=f"{n_total / sr / 3600:.2f}")
     rec_start = parts[0][1]
     real_start = real_start or rec_start
     name = session_name(real_start, n_total, sr)
@@ -635,8 +619,8 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         check_env(run["env"], session_env(), dst)
         meta = load_json(dst / "session.json")
         if not (dst / wav_name).exists() or sf.info(str(dst / wav_name)).frames != n_total:
-            raise RunError(f"{dst}: {wav_name} нет или его длина не {n_total} сэмплов.\n"
-                           + rm_hint(dst))
+            raise RunError("session_wav_mismatch", dir=str(dst), wav=wav_name, n=n_total,
+                           rm=shlex.quote(str(dst)))
         for line in channel_advice(meta["channels_identical"]):
             log(line)
         return dst
@@ -661,7 +645,8 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
                               "mtime_end": end.isoformat(timespec="seconds")})
     info = check_source(str(tmp / wav_name))
     if info.n_samples != n_total:
-        raise SourceError(f"{tmp / wav_name}: {info.n_samples} сэмплов, ожидалось {n_total}")
+        raise SourceError("source_copy_samples", path=str(tmp / wav_name), got=info.n_samples,
+                          expected=n_total)
     session = {
         "session_id": plan.session_id,
         "name": name,

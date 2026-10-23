@@ -75,8 +75,9 @@ def test_backup_full_light_contents(lay):
     assert f"data/sessions/{SID}/{SID}.session/x.wav" not in lnames
     assert f"data/sessions/{SID}/{SID}.session/session.json" in lnames
     assert not list(lay.backups.glob("*.tmp"))
-    with pytest.raises(RunError, match="уже есть"):
+    with pytest.raises(RunError, match="уже есть") as e:
         make_backup(lay, "full", NOW)
+    assert e.value.code == "backup_exists"
 
 
 def test_restore_into_empty_root(lay, lay2):
@@ -143,8 +144,9 @@ def _evil_tar(lay, kind):
 def test_restore_refuses_evil_members(lay, kind):
     name = _evil_tar(lay, kind)
     before = tree(lay.root)
-    with pytest.raises(RunError, match="член"):
+    with pytest.raises(RunError, match="член") as e:
         restore_backup(lay, name, lay.run / "journal.in")
+    assert e.value.code == "restore_bad_member"
     assert tree(lay.root) == before
     assert not (lay.run / "restore.tmp").exists()
 
@@ -152,8 +154,9 @@ def test_restore_refuses_evil_members(lay, kind):
 def test_restore_unknown_name_refused(lay):
     (lay.backups / "voxcut-backup_x_full.tar").write_bytes(b"")
     for name in ("../backups/voxcut-backup_x_full.tar", "voxcut-backup_x_full.tar", "x.tar"):
-        with pytest.raises(RunError, match="нет архива"):
+        with pytest.raises(RunError, match="нет архива") as e:
             restore_backup(lay, name, lay.run / "journal.in")
+        assert e.value.code == "restore_no_archive"
 
 
 def test_restore_diverging_session_refused_before_any_move(lay, lay2):
@@ -163,8 +166,9 @@ def test_restore_diverging_session_refused_before_any_move(lay, lay2):
     (lay2.data / "pilot" / "labels.txt").unlink()  # one file restore could add
     to_inbox(lay2, lay, name)
     before = tree(lay2.data)
-    with pytest.raises(RunError, match="x.wav"):
+    with pytest.raises(RunError, match="x.wav") as e:
         restore_backup(lay2, name, lay2.run / "journal.in")
+    assert e.value.code == "restore_conflicts"
     assert tree(lay2.data) == before
 
 
@@ -196,8 +200,9 @@ def test_restore_sha_checked_before_extract(lay, lay2):
     pos = raw.index(b"clipa")
     raw[pos:pos + 5] = b"clipZ"
     (lay2.inbox / name).write_bytes(raw)
-    with pytest.raises(RunError, match="sha256"):
+    with pytest.raises(RunError, match="sha256") as e:
         restore_backup(lay2, name, lay2.run / "journal.in")
+    assert e.value.code == "restore_mismatch"
     assert not (lay2.run / "restore.tmp").exists()
     assert tree(lay2.data) == {}
 
@@ -213,8 +218,9 @@ def test_full_backup_refuses_recordings_it_would_skip(lay, tmp_path, case):
     else:
         (tmp_path / "elsewhere.WAV").write_bytes(b"orig")
         (s / "originals" / "20250301092922.WAV").symlink_to(tmp_path / "elsewhere.WAV")
-    with pytest.raises(RunError, match="20250301092922.WAV"):
+    with pytest.raises(RunError, match="20250301092922.WAV") as e:
         make_backup(lay, "full", NOW)
+    assert e.value.code == "backup_full_refused"
     assert list(lay.backups.iterdir()) == []
     assert make_backup(lay, "light", NOW)  # light leaves originals out by design
 
@@ -271,6 +277,7 @@ def test_unrestorable_backup_not_published(lay):
     make_data(lay)
     clips = lay.sessions / SID / "x.c0.raw" / "seg-aaaaaaaa" / "clips"
     os.link(clips / "0000.wav", clips / "0001.wav")  # tar writes the 2nd as a hard link
-    with pytest.raises(RunError, match="член"):
+    with pytest.raises(RunError, match="член") as e:
         make_backup(lay, "full", NOW)
+    assert e.value.code == "restore_bad_member"
     assert list(lay.backups.iterdir()) == []

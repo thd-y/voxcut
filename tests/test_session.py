@@ -98,6 +98,7 @@ def test_split_one_chain(gap):
 def test_pause_refused(gap):
     with pytest.raises(SessionError, match="склейка пауз пока не поддерживается") as e:
         split_chains(parts(1.0, gap), SR)
+    assert e.value.code == "session_pause"
     assert "f1" in str(e.value) and "f2" in str(e.value)
 
 
@@ -106,8 +107,9 @@ def test_long_gap_gives_separate_chains():
 
 
 def test_overlap_refused():
-    with pytest.raises(SessionError, match="перекрываются"):
+    with pytest.raises(SessionError, match="перекрываются") as e:
         split_chains(parts(-2.01), SR)
+    assert e.value.code == "session_overlap"
 
 
 def test_split_sorts_by_start():
@@ -121,10 +123,12 @@ def test_pick_chain():
     assert pick_chain([[0], [1, 2]], 2, names) == [1, 2]
     with pytest.raises(SessionError, match="--chain") as e:
         pick_chain([[0], [1, 2]], None, names)
-    assert "1: a" in str(e.value) and "2: b, c" in str(e.value)
+    assert e.value.code == "session_chain_choose"
+    assert e.value.params["lines"] == ["  1: a", "  2: b, c"]
     for bad in (0, 3):
-        with pytest.raises(SessionError, match="вне диапазона"):
+        with pytest.raises(SessionError, match="вне диапазона") as e:
             pick_chain([[0], [1, 2]], bad, names)
+        assert e.value.code == "session_chain_range"
 
 
 def test_meta_key():
@@ -155,8 +159,9 @@ def test_parse_start(text, expected):
 
 @pytest.mark.parametrize("text", ["2025-03-01", "09:00", "2025-03-01T09:00", "2025-02-30 09:00"])
 def test_parse_start_bad(text):
-    with pytest.raises(SessionError, match="2025-03-01 09:00"):
+    with pytest.raises(SessionError, match="2025-03-01 09:00") as e:
         parse_start(text)
+    assert e.value.code == "session_bad_start"
 
 
 def test_locate():
@@ -257,8 +262,10 @@ def no_decode(monkeypatch):
 def test_foreign_name_refused(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2))
     sf.write(tmp_path / "in" / "REC001.WAV", np.zeros((10, 2), np.int16), SR)
-    with pytest.raises(SessionError, match="YYYYMMDDHHMMSS.wav.*REC001.WAV"):
+    with pytest.raises(SessionError, match="YYYYMMDDHHMMSS.wav.*REC001.WAV") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert e.value.code == "session_foreign_names"
+    assert e.value.params["files"] == ["REC001.WAV"]
     assert not (tmp_path / "out").exists()
 
 
@@ -268,40 +275,46 @@ def test_broken_wav_refused_before_chains(tmp_path, no_decode):
     pos = raw.index(b"data")
     raw[pos + 4:pos + 8] = struct.pack("<I", 0)
     paths[1].write_bytes(raw)
-    with pytest.raises(SourceError, match=f"{paths[1].name}.*битая структура"):
+    with pytest.raises(SourceError, match=f"{paths[1].name}.*битая структура") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert e.value.code == "source_wav_broken"
 
 
 def test_empty_wav_refused_not_crashed(tmp_path, no_decode):
     """A recorder that died right after creating a file leaves 0 bytes."""
     make_folder(tmp_path / "in", chain_starts(2))
     (tmp_path / "in" / f"{T0 + timedelta(hours=5):%Y%m%d%H%M%S}.wav").write_bytes(b"")
-    with pytest.raises(SourceError, match="не RIFF/RF64 WAVE"):
+    with pytest.raises(SourceError, match="не RIFF/RF64 WAVE") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert e.value.code == "source_not_riff"
 
 
 def test_two_chains_refused_with_numbers(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
     with pytest.raises(SessionError, match="--chain N") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert e.value.code == "session_chain_choose"
     assert "1: 20250301082921.WAV, 20250301082924.WAV" in str(e.value)
     assert "2: 20250301102921.WAV" in str(e.value)
-    with pytest.raises(SessionError, match="вне диапазона"):
+    with pytest.raises(SessionError, match="вне диапазона") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), chain=3,
                          log=lambda m: None)
+    assert e.value.code == "session_chain_range"
 
 
 def test_pause_refused_in_folder(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2, gap=60))
-    with pytest.raises(SessionError, match="склейка пауз"):
+    with pytest.raises(SessionError, match="склейка пауз") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert e.value.code == "session_pause"
 
 
 def test_riff_limit_refused_before_copy(tmp_path, no_decode, monkeypatch):
     make_folder(tmp_path / "in", chain_starts(2))
     monkeypatch.setattr(audio, "data_bytes_ok", lambda *a: False)
-    with pytest.raises(SessionError, match="4 ГиБ"):
+    with pytest.raises(SessionError, match="4 ГиБ") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+    assert e.value.code == "session_too_long"
     assert not any((tmp_path / "out").glob("*")) if (tmp_path / "out").exists() else True
 
 
@@ -380,8 +393,9 @@ def test_session_reuse_and_env(tmp_path, monkeypatch):
     assert run_session(tmp_path)[0] == dst  # ffmpeg только для справки
     run["env"]["libsndfile_version"] = "0.0"
     (dst / "run.json").write_text(json.dumps(run))
-    with pytest.raises(RunError, match="rm -rf"):
+    with pytest.raises(RunError, match="rm -rf") as e:
         run_session(tmp_path)
+    assert e.value.code == "run_env_changed"
 
 
 @pytest.mark.slow
@@ -389,8 +403,9 @@ def test_session_reuse_missing_wav(tmp_path):
     make_folder(tmp_path / "in", chain_starts(2))
     dst, s, _ = run_session(tmp_path)
     (dst / s["wav"]).unlink()
-    with pytest.raises(RunError, match="rm -rf"):
+    with pytest.raises(RunError, match="rm -rf") as e:
         run_session(tmp_path)
+    assert e.value.code == "session_wav_mismatch"
 
 
 @pytest.mark.slow
@@ -415,8 +430,9 @@ def test_session_start_fix(tmp_path):
     assert s["files"][1]["start_local"] == "2026-10-20T11:30:24"
     assert s["clock_offset_s"] == (datetime(2026, 10, 20, 11, 30, 21) - T0).total_seconds()
     assert "повторите с --start" not in logs
-    with pytest.raises(SessionError, match="2025-03-01 09:00"):
+    with pytest.raises(SessionError, match="2025-03-01 09:00") as e:
         run_session(tmp_path, start="20.10.2026 11:30")
+    assert e.value.code == "session_bad_start"
 
 
 @pytest.mark.slow
@@ -471,8 +487,9 @@ def test_session_probs_segment_export(tmp_path):
 def test_session_lr_differ_needs_channel(tmp_path):
     make_folder(tmp_path / "in", chain_starts(2))
     sdir, s, _ = run_session(tmp_path)
-    with pytest.raises(SourceError, match="задайте channel"):
+    with pytest.raises(SourceError, match="задайте channel") as e:
         compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
+    assert e.value.code == "source_stereo"
 
 
 @pytest.mark.slow
@@ -480,8 +497,9 @@ def test_session_sha_mismatch_refused(tmp_path):
     make_folder(tmp_path / "in", chain_starts(2), data=same_channels)
     sdir, s, _ = run_session(tmp_path)
     (sdir / "session.json").write_text(json.dumps(s | {"session_sha256": "0" * 64}))
-    with pytest.raises(RunError, match="session_sha256"):
+    with pytest.raises(RunError, match="session_sha256") as e:
         compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
+    assert e.value.code == "run_session_sha"
     assert not (tmp_path / "probs").exists() or not any((tmp_path / "probs").iterdir())
 
 
@@ -492,8 +510,9 @@ def test_two_starts_same_minute_refused_on_reuse(tmp_path):
     b, sb, _ = run_session(tmp_path, start="2026-10-20 11:30:30")
     assert a != b and sa["name"] == sb["name"]
     compute_probs(str(a / sa["wav"]), str(tmp_path / "probs"))
-    with pytest.raises(RunError, match="(?s)блок session.*rm -rf"):
+    with pytest.raises(RunError, match="(?s)блок session.*rm -rf") as e:
         compute_probs(str(b / sb["wav"]), str(tmp_path / "probs"))
+    assert e.value.code == "run_session_block"
 
 
 @pytest.mark.slow
@@ -505,8 +524,9 @@ def test_probs_without_seam_reset_refused_on_reuse(tmp_path):
     pj = json.loads((pdir / "probs.json").read_text())
     del pj["seam_reset_frames"]
     (pdir / "probs.json").write_text(json.dumps(pj))
-    with pytest.raises(RunError, match="(?s)сброс.*rm -rf"):
+    with pytest.raises(RunError, match="(?s)сброс.*rm -rf") as e:
         compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
+    assert e.value.code == "run_no_seam_reset"
 
 
 # --- cli ---

@@ -164,16 +164,18 @@ def test_probs_without_period_refused_on_reuse(tmp_path, period):
     if period is None:
         del meta["reset_period_frames"]
     (dst / "probs.json").write_text(json.dumps(meta))
-    with pytest.raises(RunError, match="(?s)D31.*rm -rf"):
+    with pytest.raises(RunError, match="(?s)D31.*rm -rf") as e:
         compute_probs(src, str(tmp_path / "o"))
+    assert e.value.code == "run_no_reset_period"
 
 
 @pytest.mark.slow
 def test_ffmpeg_failure_publishes_nothing(tmp_path, monkeypatch):
     src = noise_wav(tmp_path / "a.wav", 1)
     monkeypatch.setattr("voxcut.audio.vad_filter", lambda channel, channels: "bogusfilter")
-    with pytest.raises(FFmpegError):
+    with pytest.raises(FFmpegError) as e:
         compute_probs(src, str(tmp_path / "o"))
+    assert e.value.code == "ffmpeg_failed"
     # .tmp остаётся до следующего запуска, итогового каталога нет
     assert [p.name for p in (tmp_path / "o").iterdir()] == [
         probs_dir_name(src, sha256_file(src), None) + ".tmp"]

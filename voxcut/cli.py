@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import shlex
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +25,6 @@ from voxcut.audio import (
     fresh_tmp,
     load_json,
     read_jsonl,
-    rm_hint,
     write_jsonl,
 )
 from voxcut.intervals import (
@@ -61,8 +61,8 @@ def load_probs(probs_dir: Path) -> tuple[dict, np.ndarray]:
     check_reset_period(meta, probs_dir)
     probs = np.load(probs_dir / "probs.npy")
     if len(probs) != meta["n_frames"] or n_frames(meta["n16k"]) != meta["n_frames"]:
-        raise RunError(f"{probs_dir}: в probs.npy {len(probs)} кадров, в probs.json "
-                       f"n_frames={meta['n_frames']}, n16k={meta['n16k']}")
+        raise RunError("probs_frames_mismatch", dir=str(probs_dir), frames=len(probs),
+                       n_frames=meta["n_frames"], n16k=meta["n16k"])
     return meta, probs
 
 
@@ -104,19 +104,19 @@ def segment(probs_dir: str, cfg: SegmentConfig, meta: dict | None = None) -> Pat
     pj, probs = load_probs(probs_dir)
     # channel in the config only matters when set: it must name the channel the probs used
     if cfg.channel is not None and _mono(cfg.channel) != _mono(pj["channel"]):
-        raise RunError(f"конфиг: channel={cfg.channel!r}, а probs посчитаны для "
-                       f"channel={pj['channel']!r} ({probs_dir})")
+        raise RunError("config_channel_mismatch", channel=repr(cfg.channel),
+                       probs_channel=repr(pj["channel"]), dir=str(probs_dir))
     probs_sha = hashlib.sha256((probs_dir / "probs.npy").read_bytes()).hexdigest()
     env = {k: pj[k] for k in ENV_KEYS}
     dst = probs_dir / f"seg-{cfg.sha256()[:8]}"
     if dst.exists():
         run = load_json(dst / "run.json")
         if run["probs_sha256"] != probs_sha:
-            raise RunError(f"{dst}: probs.npy подменён после сегментации.\n" + rm_hint(dst))
+            raise RunError("seg_probs_replaced", dir=str(dst), rm=shlex.quote(str(dst)))
         check_env(run["env"], env, dst)
         if "session" in pj and run.get("seam_tol_s") != SEAM_TOL_S:
-            raise RunError(f"{dst}: seam_tol_s было {run.get('seam_tol_s')}, сейчас "
-                           f"{SEAM_TOL_S}.\n" + rm_hint(dst))
+            raise RunError("seg_seam_tol_changed", dir=str(dst), was=str(run.get("seam_tol_s")),
+                           now=str(SEAM_TOL_S), rm=shlex.quote(str(dst)))
         return dst
 
     params = cfg.effective()
@@ -175,7 +175,7 @@ def evaluate(seg_dir: str, labels_path: str) -> tuple[Metrics, dict]:
     rows = read_jsonl(seg_dir / "manifest.jsonl")
     sha = run["source"]["sha256"]
     if pj["source_sha256"] != sha or any(r["source_sha256"] != sha for r in rows):
-        raise RunError(f"{seg_dir}: source_sha256 манифеста, run.json и probs.json не совпадают")
+        raise RunError("eval_sha_mismatch", dir=str(seg_dir))
     sr = run["source"]["sr"]
     labels = parse_labels(Path(labels_path).read_text(),
                           duration_s=run["source"]["n_samples"] / sr)
