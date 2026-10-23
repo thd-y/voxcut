@@ -895,3 +895,16 @@ def test_interrupted_import_sha_mismatch_not_finished(lay, no_check, monkeypatch
         finish_import(lay, sid, _quiet)
     assert e.value.code == "finish_sha_mismatch"
     assert not (lay.sessions / sid / "import.json").exists()
+
+
+def test_inventory_unreadable_source_keeps_reason(lay, monkeypatch):
+    """Layer-2 review: an OSError in one inbox folder still names its cause, as before D66."""
+    (lay.inbox / "rec").mkdir()
+    (lay.inbox / "rec" / "a.wav").write_bytes(b"")
+
+    def denied(src):
+        raise PermissionError(13, "Permission denied", src)
+
+    monkeypatch.setattr(audio, "plan_chains", denied)
+    err = inbox_inventory(lay)["sources"][0]["error"]
+    assert err["code"] == "inbox_unreadable" and "Permission denied" in err["params"]["detail"]

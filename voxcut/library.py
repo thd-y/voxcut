@@ -15,7 +15,7 @@ from pathlib import Path
 from voxcut import audio
 from voxcut.audio import RunError, SourceError, load_json, read_jsonl
 from voxcut.cli import read_config, segment
-from voxcut.errors import descriptor
+from voxcut.errors import Coded, descriptor
 from voxcut.intervals import SessionError
 
 SESSION_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_\d+h\d{2}m\.[0-9a-f]{8}")
@@ -200,7 +200,8 @@ def inbox_inventory(lay: Layout) -> dict:
                     "imported": (lay.sessions / plan.session_id / "import.json").is_file(),
                 })
         except (SessionError, SourceError, OSError, RuntimeError) as exc:
-            entry["chains"], entry["error"] = [], descriptor(exc)
+            entry["chains"], entry["error"] = [], descriptor(exc) if isinstance(exc, Coded) else {
+                "code": "inbox_unreadable", "params": {"detail": str(exc)}}
         sources.append(entry)
     return {"sources": sources, "backups": _backup_names(lay)}
 

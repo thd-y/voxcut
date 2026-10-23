@@ -115,6 +115,7 @@ CODES: dict[str, tuple[tuple[str, ...], str]] = {
         ("незавершённый импорт: файлы записи внутри {session}, не удаляйте их; нужна ручная "
          "проверка")),
     "session_unreadable": (("detail",), "{detail}"),
+    "inbox_unreadable": (("detail",), "{detail}"),
     "inbox_no_source": (("source",), "нет такого источника во входящих: {source}"),
     "import_chain_gone": (("files",),
         ("цепочки {files} нет во входящих (уже импортирована или файлы изменились); ничего не "
