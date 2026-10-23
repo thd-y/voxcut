@@ -4,7 +4,7 @@
 (() => {
   const LANGS = ["en", "ru"];
   const pickLang = (value) => (typeof value === "string" && LANGS.includes(value) ? value : "en");
-  const catalog = (lang) => globalThis.I18N[pickLang(lang)];
+  const catalog = (lang) => globalThis.I18N?.[pickLang(lang)] ?? {};  // a catalog that did not load: "?"
   const own = (cat, key) => (typeof key === "string" && Object.hasOwn(cat, key) ? cat[key] : undefined);
 
   // {name} → text; an array joins with ", " ("lines" with "\n"), a descriptor renders as an error.
@@ -17,6 +17,10 @@
         return "";
       }
       const v = params[name];
+      if (v === null || v === undefined) {  // as missing: never "null" here and "None" in Python
+        missing = true;
+        return "";
+      }
       if (Array.isArray(v)) return v.join(name === "lines" ? "\n" : ", ");
       return v && typeof v === "object" ? errText(lang, v) : String(v);
     });
@@ -25,7 +29,7 @@
 
   function translate(lang, key, params = {}) {
     const cat = catalog(lang);
-    const unknown = cat["common.unknown"];
+    const unknown = cat["common.unknown"] ?? "?";
     if (!params || typeof params !== "object") return unknown;
     let value = own(cat, key);
     if (value && typeof value === "object") {  // plural: the form by params.n
@@ -39,7 +43,7 @@
   // D66: a server error is {code, params}; anything unknown gets one neutral phrase.
   function errText(lang, desc) {
     const cat = catalog(lang);
-    const unknown = cat["err.unknown"];
+    const unknown = cat["err.unknown"] ?? "?";
     const template = desc && typeof desc === "object" && typeof desc.code === "string"
       ? own(cat, `err.${desc.code}`) : undefined;
     const params = desc && desc.params;
@@ -50,7 +54,7 @@
   // A value from the server or the journal (U5): its label if the catalog has one, else as is.
   const label = (lang, prefix, value) => {
     const cat = catalog(lang);
-    return Object.hasOwn(cat, prefix + value) ? cat[prefix + value] : value;
+    return typeof own(cat, prefix + value) === "string" ? cat[prefix + value] : value;
   };
 
   const i18n = { LANGS, pickLang, translate, errText, label };

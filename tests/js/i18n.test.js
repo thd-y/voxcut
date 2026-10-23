@@ -167,3 +167,18 @@ test("stage labels and wording (D70, D72, D73)", () => {
   assert.equal(i18n.translate("en", "top.job_failed", { kind: "processing" }), "processing failed");
   for (const code of ["backup_full_refused", "import_move_stuck"]) assert.ok(!I18N.en[`err.${code}`].includes("—"));
 });
+
+test("no catalogs, null params, plural labels (TODOS minors)", () => {
+  const saved = globalThis.I18N;
+  globalThis.I18N = undefined;  // a catalog script failed to load: a neutral phrase, never a TypeError
+  try {
+    assert.equal(i18n.translate("ru", "common.unknown"), "?");
+    assert.equal(i18n.errText("ru", d("offline")), "?");
+    assert.equal(i18n.label("ru", "job.stage.", "probs"), "probs");
+  } finally {
+    globalThis.I18N = saved;
+  }
+  assert.equal(i18n.translate("en", "jobs.row", { kind: null, state: "x" }), I18N.en["common.unknown"]);
+  assert.equal(i18n.errText("en", d("source_no_audio", { src: null })), I18N.en["err.unknown"]);
+  assert.equal(i18n.label("en", "lib.", "session_clips"), "session_clips");  // a plural value is not a label
+});
