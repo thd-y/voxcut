@@ -46,6 +46,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/i18n/ru.js": ("i18n/ru.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/vendor/basecoat-luma.css": ("vendor/basecoat-luma.css", "text/css; charset=utf-8"),
     "/vendor/lucide-sprite.svg": ("vendor/lucide-sprite.svg", "image/svg+xml"),

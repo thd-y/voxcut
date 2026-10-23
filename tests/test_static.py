@@ -38,7 +38,7 @@ def test_static_rules(path):
         assert not re.search(r"\son[a-z]+\s*=", text, re.IGNORECASE), "inline event handler"
         assert not re.search(r"\sstyle\s*=", text, re.IGNORECASE), "inline style"
         assert not re.search(r"<script[^>]*>\s*[^<\s]", text, re.IGNORECASE), "inline script body"
-        assert re.findall(r'<script[^>]*src="([^"]+)"', text) == ["/app.js"]
+        assert re.findall(r'<script[^>]*src="([^"]+)"', text) == ["/i18n/ru.js", "/app.js"]
         assert re.findall(r'<link[^>]*href="([^"]+)"', text) == [
             "/vendor/basecoat-luma.css", "/app.css", "/favicon.svg"]
 
@@ -86,7 +86,8 @@ def test_index_served_with_csp(tmp_path):
     threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True).start()
     try:
         c = Client(app)
-        for path in ("/", "/app.js", "/app.css", "/vendor/basecoat-luma.css",
+        assert c.req("GET", "/i18n/ru.js")[1].get("Content-Type") == "text/javascript; charset=utf-8"
+        for path in ("/", "/app.js", "/i18n/ru.js", "/app.css", "/vendor/basecoat-luma.css",
                      "/vendor/lucide-sprite.svg", "/favicon.svg"):
             status, headers, _ = c.req("GET", path)
             assert status == 200 and {k: headers.get(k) for k in SECURITY} == SECURITY

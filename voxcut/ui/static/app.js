@@ -99,6 +99,32 @@ const backupTime = (value) => localTime(value, true) || value;  // D61; anything
 
 const gapLabel = (seconds) => `пауза ${fmtPos(seconds)}`;  // D54
 
+// D66: a server error is {code, params}; the text is the catalog's template. Own keys only: a code
+// from the server is never a path into the prototype; anything unknown gets one neutral phrase.
+function errText(desc, catalog = globalThis.I18N.ru) {
+  const unknown = catalog["err.unknown"];
+  const key = desc && typeof desc === "object" && typeof desc.code === "string" ? `err.${desc.code}` : null;
+  const params = key && desc.params;
+  if (!key || !Object.hasOwn(catalog, key) || !params || typeof params !== "object") return unknown;
+  let missing = false;
+  const text = catalog[key].replace(/\{(\w+)\}/g, (_, name) => {
+    if (!Object.hasOwn(params, name)) {
+      missing = true;
+      return "";
+    }
+    const v = params[name];
+    if (Array.isArray(v)) return v.join(name === "lines" ? "\n" : ", ");
+    return v && typeof v === "object" ? errText(v, catalog) : String(v);
+  });
+  return missing ? unknown : text;
+}
+
+function codedError(desc) {
+  const e = new Error(errText(desc));
+  e.descriptor = desc;
+  return e;
+}
+
 const undoEntry = (clip) => ({ clip_id: clip.clip_id, prev: clip.own_mark || "" });
 
 function undoTarget(stack, clips) {
@@ -233,7 +259,7 @@ async function api(method, path, body) {
   try {
     r = await fetch(path, opts);
   } catch {
-    const e = new Error("нет связи с VoxCut");
+    const e = codedError({ code: "offline", params: {} });
     e.offline = true;
     throw e;
   }
@@ -242,7 +268,7 @@ async function api(method, path, body) {
     ui.fatal = true;
     render();
   }
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) throw data.error ? codedError(data.error) : new Error(`HTTP ${r.status}`);
   return data;
 }
 
@@ -339,9 +365,10 @@ async function pollOnce() {
     return;
   }
   for (const w of serverState.journal_warnings) {
-    if (!shownWarnings.has(w)) {
-      shownWarnings.add(w);
-      toast("Журнал", w, true);
+    const sig = JSON.stringify(w);
+    if (!shownWarnings.has(sig)) {
+      shownWarnings.add(sig);
+      toast("Журнал", errText(w), true);
     }
   }
   const sessions = serverState.sessions;
@@ -859,7 +886,7 @@ function renderLibrary() {
       }));
       row.append(runs);
     }
-    if (s.error) row.append(el("div", s.error, "error"));
+    if (s.error) row.append(el("div", errText(s.error), "error"));
     return row;
   }) : [el("p", "Сессий пока нет.", "muted")]));
 
@@ -872,7 +899,7 @@ function renderLibrary() {
     for (const src of st.inbox.sources) {
       const box = el("div", null, "lib-row");
       box.append(el("strong", src.source === "" ? "inbox/ (корень)" : `inbox/${src.source}/`));
-      if (src.error) box.append(el("div", src.error, "error"));
+      if (src.error) box.append(el("div", errText(src.error), "error"));
       for (const ch of src.chains) {
         box.append(el("div", `цепочка ${ch.chain}: ${ch.files.length} файлов, начало ${ch.start_local}, `
           + `${(ch.duration_s / 60).toFixed(1)} мин${ch.imported ? ", уже импортирована" : ""}`));
@@ -903,7 +930,7 @@ function renderLibrary() {
     const box = el("div", null, "lib-row");
     box.append(el("strong", `${NAMES[j.kind] || j.kind}: ${JOB_STATES[j.state] || j.state}`
       + `${j.stage ? `, этап ${j.stage}` : ""}`));
-    if (j.error) box.append(el("div", j.error, "error"));
+    if (j.error) box.append(el("div", errText(j.error), "error"));
     if (j.log_tail.length) box.append(el("pre", j.log_tail.join("\n")));
     if (j.state === "queued" || j.state === "running") {
       box.append(button("Отменить", () => api("POST", `/api/jobs/${j.job_id}/cancel`, {})
@@ -1089,7 +1116,7 @@ function journal(kind, value, clip) {
   if (clip) body.clip_id = clip.clip_id;
   const p = queue.then(async () => {
     const r = await api("POST", "/api/journal", body);
-    if (!r.saved) throw new Error("не сохранено");
+    if (!r.saved) throw codedError({ code: "not_saved", params: {} });
     return r;
   });
   queue = p.catch(() => {});
@@ -1448,7 +1475,7 @@ function bind() {
 if (typeof module === "object") {
   module.exports = { parseSessionName, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter };
+    afterOpenError, retryAfter, errText };
 } else {
   start();
 }

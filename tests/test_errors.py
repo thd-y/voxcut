@@ -1,4 +1,5 @@
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -127,3 +128,15 @@ RU_TEXT = [
 @pytest.mark.parametrize(("code", "params", "text"), RU_TEXT)
 def test_ru_text_unchanged(code, params, text):
     assert str(E(code, **params)) == text
+
+
+RU_JS = Path(__file__).parent.parent / "voxcut" / "ui" / "static" / "i18n" / "ru.js"
+FRONT_ONLY = {"unknown", "offline", "not_saved"}
+
+
+def test_ru_catalog_matches_registry():
+    """D66: the frontend's err.* templates are the registry's, byte for byte (cycle 2: ru catalog)."""
+    text = RU_JS.read_text()
+    found = {m[1]: json.loads(m[2]) for m in re.finditer(r'"err\.(\w+)":\s*("(?:[^"\\]|\\.)*")', text)}
+    assert set(found) == set(CODES) | FRONT_ONLY
+    assert {c: found[c] for c in CODES} == {c: t for c, (_, t) in CODES.items()}

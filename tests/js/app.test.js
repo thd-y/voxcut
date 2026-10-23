@@ -2,6 +2,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const ru = require("../../voxcut/ui/static/i18n/ru.js");
 const app = require("../../voxcut/ui/static/app.js");
 
 test("parseSessionName", () => {
@@ -215,4 +216,28 @@ test("retryAfter", () => {
   assert.equal(app.retryAfter({ offline: true }, true), false);  // the open session stays, the owner clicks again
   assert.equal(app.retryAfter({ offline: true, stale: true }, false), false);  // a newer open replaced it
   assert.equal(app.retryAfter({}, false), false);  // a server error: «Сессия не открылась», no hammering
+});
+
+
+test("errText", () => {
+  const d = (code, params = {}) => ({ code, params });
+  assert.equal(app.errText(d("http_need_key")), "нужен ключ");  // default catalog: ru
+  assert.equal(app.errText(d("session_foreign_names", { dir: "/in", files: ["a.WAV", "b.WAV"] }), ru),
+    "/in: имена не по правилу диктофона YYYYMMDDHHMMSS.wav: a.WAV, b.WAV");
+  assert.equal(app.errText(d("session_chain_range", { n: 3, total: 2, lines: ["  1: a", "  2: b"] })),
+    "--chain 3 вне диапазона 1..2:\n  1: a\n  2: b");
+  assert.equal(app.errText(d("job_after_done_failed", { cause: d("restore_journal_broken", { detail: "x" }) })),
+    "после завершения: журнал архива не читается (x); файлы восстановлены, журнал не слит, повтор не поможет");
+  assert.equal(app.errText(d("legacy_error", { detail: "<b>старый</b>" })), "<b>старый</b>");  // text, S7 is textContent
+  const unknown = ru["err.unknown"];
+  for (const bad of [d("no_such_code"), d("__proto__"), d("constructor"), d("toString"), null, "строка",
+    {}, d("legacy_error", null)]) {
+    assert.equal(app.errText(bad), unknown, JSON.stringify(bad));
+  }
+  assert.equal(app.errText(d("legacy_error", {})), unknown);  // a param the template needs is missing
+});
+
+test("afterOpenError with a descriptor", () => {
+  const e = { message: "нет такой сессии", descriptor: { code: "http_no_session", params: {} } };
+  assert.deepEqual(app.afterOpenError(false, e), { loaded: null, openError: "нет такой сессии" });
 });
