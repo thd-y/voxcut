@@ -78,6 +78,16 @@ function summaryText(c, lang) {
   return translate(lang, "summary.text", { kept: c.kept, rejected: c.rejected, reasons });
 }
 
+function chainText(ch, lang) {
+  return translate(lang, ch.imported ? "inbox.chain_imported" : "inbox.chain", { chain: ch.chain,
+    n: ch.files.length, start: ch.start_local, minutes: (ch.duration_s / 60).toFixed(1) });
+}
+
+function jobText(j, lang) {
+  const params = { kind: label(lang, "job.kind.", j.kind), state: label(lang, "job.state.", j.state), stage: j.stage };
+  return translate(lang, j.stage ? "jobs.row_stage" : "jobs.row", params);
+}
+
 function nextUndecided(clips, from) {
   const after = clips.findIndex((c, i) => i > from && !isDecided(c));
   return after >= 0 ? after : clips.findIndex((c) => !isDecided(c));
@@ -206,13 +216,9 @@ const ui = {
   noteClipId: null, noteSaving: false, expanded: false,
   rechoose: null,  // D52: null | "menu" | the decision awaiting confirmation
   ideaDelete: null, ideaDeleting: false,  // D56: the idea asked about, a delete in flight
+  noteStatus: null, ideaStatus: null,  // null | {key, params}: drawn in the current language (L13)
 };
 const GAP_MIN_S = 120;  // one recording: 131 gaps >= 30 s (noise), 12 >= 120 s (real breaks)
-const NAMES = { process: "обработка", import: "импорт", backup: "бэкап", restore: "восстановление" };
-const JOB_STATES = { queued: "в очереди", running: "идёт", done: "готово", failed: "ошибка",
-  cancelled: "отменена" };
-const STATES = { imported: "импортирована", assembled: "собрана", probs: "вероятности посчитаны",
-  segmented: "размечена", clips: "клипы готовы", incomplete: "неполная" };
 const $ = (id) => document.getElementById(id);
 const tr = (key, params) => translate(ui.lang, key, params);
 const newId = () => crypto.randomUUID().replaceAll("-", "");
@@ -387,14 +393,14 @@ async function pollOnce() {
     $("conn-alert").hidden = true;
   } catch (e) {
     if (e.offline) $("conn-alert").hidden = false;
-    else if (!ui.fatal) toast("Ошибка", e.message, true);
+    else if (!ui.fatal) toast(tr("toast.error"), errText(ui.lang, errDesc(e)), true);
     return;
   }
   for (const w of serverState.journal_warnings) {
     const sig = JSON.stringify(w);
     if (!shownWarnings.has(sig)) {
       shownWarnings.add(sig);
-      toast("Журнал", errText(ui.lang, w), true);
+      toast(tr("toast.journal"), errText(ui.lang, w), true);
     }
   }
   const sessions = serverState.sessions;
@@ -416,7 +422,7 @@ async function pollOnce() {
 function fail(e) {
   if (e.stale) return;  // a newer open replaced this one: its outcome is what counts
   if (e.offline) $("conn-alert").hidden = false;
-  else if (!ui.fatal) toast("Ошибка", e.message, true);
+  else if (!ui.fatal) toast(tr("toast.error"), errText(ui.lang, errDesc(e)), true);
 }
 
 const sessionPath = (id, run) =>
@@ -523,11 +529,18 @@ function render() {
     return;
   }
   renderHeader();
+  renderStatuses();
   const lib = ui.screen === "library";
   $("screen-library").hidden = !lib;
   $("screen-session").hidden = lib;
   if (lib) renderLibrary();
   else renderSession();
+}
+
+function renderStatuses() {
+  for (const [id, s] of [["note-status", ui.noteStatus], ["idea-status", ui.ideaStatus]]) {
+    $(id).textContent = s ? tr(s.key, s.params) : "";
+  }
 }
 
 function renderHeader() {
@@ -877,26 +890,28 @@ function renderLibrary() {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
     head.append(el("strong", sessionLabel(s, ui.lang)),
-      el("span", `${STATES[s.state] || s.state}${s.n_clips !== null ? `, клипов ${s.n_clips}` : ""}`, "muted"));
+      el("span", s.n_clips !== null
+        ? tr("lib.session_clips", { state: label(ui.lang, "session.state.", s.state), n: s.n_clips })
+        : label(ui.lang, "session.state.", s.state), "muted"));
     row.append(head);
     const acts = el("div", null, "row");
     if (s.n_clips) {
-      acts.append(button(s.session_id === sid ? "Открыта" : "Открыть", () => {
+      acts.append(button(tr(s.session_id === sid ? "lib.opened" : "lib.open"), () => {
         ui.screen = "session";
         openSession(s.session_id).catch(fail);
         render();
       }, s.session_id === sid ? "secondary" : undefined));
     }
     if (s.can_process && s.state !== "clips") {
-      acts.append(button("Обработать", () => submit("process", { session_id: s.session_id }), "outline", "sm", "cog"));
+      acts.append(button(tr("lib.process"), () => submit("process", { session_id: s.session_id }), "outline", "sm", "cog"));
     } else if (!s.can_process && s.state === "clips") {
-      acts.append(el("span", "только прослушивание (light)", "muted small"));
+      acts.append(el("span", tr("lib.listen_only"), "muted small"));
     }
     row.append(acts);
     if (s.session_id === sid && view && view.runs.length > 1) {
       const runs = el("div", null, "row run-switch");
       const list = el("div", null, "row");  // wrapped buttons line up under the first, not the label
-      runs.append(el("span", "Прогон:", "muted small"), list);
+      runs.append(el("span", tr("lib.run"), "muted small"), list);
       list.append(...view.runs.map((r) => {
         const active = (runId || view.run_id) === r.run_id;
         const b = button(`${r.name} (${r.created})`, () => openSession(sid, r.run_id).catch(fail),
@@ -908,27 +923,32 @@ function renderLibrary() {
     }
     if (s.error) row.append(el("div", errText(ui.lang, s.error), "error"));
     return row;
-  }) : [el("p", "Сессий пока нет.", "muted")]));
+  }) : [el("p", tr("lib.no_sessions"), "muted")]));
 
-  // Inputs being typed into are kept: re-render inbox only when its content changed.
+  // Inputs being typed into are kept: re-render inbox only when its content or the language changed,
+  // and carry typed starts over by (source, chain) (L13).
   const inbox = $("inbox");
-  const sig = JSON.stringify(st.inbox);
+  const sig = JSON.stringify([ui.lang, st.inbox]);
   if (inbox.dataset.sig !== sig) {
     inbox.dataset.sig = sig;
+    const typed = new Map([...inbox.querySelectorAll("input[data-chain]")]
+      .map((i) => [`${i.dataset.source}\n${i.dataset.chain}`, i.value]));
     const parts = [];
     for (const src of st.inbox.sources) {
       const box = el("div", null, "lib-row");
-      box.append(el("strong", src.source === "" ? "inbox/ (корень)" : `inbox/${src.source}/`));
+      box.append(el("strong", src.source === "" ? tr("inbox.root") : `inbox/${src.source}/`));
       if (src.error) box.append(el("div", errText(ui.lang, src.error), "error"));
       for (const ch of src.chains) {
-        box.append(el("div", `цепочка ${ch.chain}: ${ch.files.length} файлов, начало ${ch.start_local}, `
-          + `${(ch.duration_s / 60).toFixed(1)} мин${ch.imported ? ", уже импортирована" : ""}`));
+        box.append(el("div", chainText(ch, ui.lang)));
         const input = el("input", null, "input");
         input.type = "text";
-        input.placeholder = "начало YYYY-MM-DD HH:MM (если часы сбиты)";
-        input.setAttribute("aria-label", "Начало записи, если часы диктофона сбиты");
+        input.dataset.source = src.source;
+        input.dataset.chain = String(ch.chain);
+        input.value = typed.get(`${src.source}\n${ch.chain}`) || "";
+        input.placeholder = tr("inbox.start_placeholder");
+        input.setAttribute("aria-label", tr("inbox.start_aria"));
         const row = el("div", null, "row");
-        row.append(input, button("Импортировать", () => submit("import", {
+        row.append(input, button(tr("inbox.import"), () => submit("import", {
           source: src.source, chain: ch.chain, files: ch.files, start: input.value.trim() || null,
         }), undefined, "sm", "folder-input"));
         box.append(row);
@@ -938,29 +958,28 @@ function renderLibrary() {
     for (const name of st.inbox.backups) {
       const row = el("div", null, "lib-row");
       const line = el("div", null, "row");
-      line.append(el("span", name), button("Восстановить", () => submit("restore", { name }), "outline"));
+      line.append(el("span", name), button(tr("inbox.restore"), () => submit("restore", { name }), "outline"));
       row.append(line);
       parts.push(row);
     }
-    if (!parts.length) parts.push(el("p", "Пусто: положите файлы в папку inbox продукта.", "muted"));
+    if (!parts.length) parts.push(el("p", tr("inbox.empty"), "muted"));
     inbox.replaceChildren(...parts);
   }
 
   setKids($("jobs"), JSON.stringify(st.jobs), () => (st.jobs.length ? st.jobs.slice().reverse().map((j) => {
     const box = el("div", null, "lib-row");
-    box.append(el("strong", `${NAMES[j.kind] || j.kind}: ${JOB_STATES[j.state] || j.state}`
-      + `${j.stage ? `, этап ${j.stage}` : ""}`));
+    box.append(el("strong", jobText(j, ui.lang)));
     if (j.error) box.append(el("div", errText(ui.lang, j.error), "error"));
     if (j.log_tail.length) box.append(el("pre", j.log_tail.join("\n")));
     if (j.state === "queued" || j.state === "running") {
-      box.append(button("Отменить", () => api("POST", `/api/jobs/${j.job_id}/cancel`, {})
+      box.append(button(tr("jobs.cancel"), () => api("POST", `/api/jobs/${j.job_id}/cancel`, {})
         .then(poll).catch(fail), "outline"));
     }
     return box;
-  }) : [el("p", "Задач нет.", "muted")]));
+  }) : [el("p", tr("jobs.none"), "muted")]));
 
   $("backup-info").textContent = st.last_backup
-    ? `Последний бэкап: ${backupTime(st.last_backup, ui.lang)}` : "Бэкапов ещё не было.";
+    ? tr("backup.last", { time: backupTime(st.last_backup, ui.lang) }) : tr("backup.none");
   renderIdeas();
 }
 
@@ -981,17 +1000,17 @@ function ideaRow(idea) {
   head.append(el("time", ideaTime(idea.ts, ui.lang)));
   if (ui.ideaDelete === idea.event_id) {
     const ask = el("span", null, "idea-ask");
-    const yes = button("Да", () => deleteIdea(idea.event_id), "destructive");
+    const yes = button(tr("common.yes"), () => deleteIdea(idea.event_id), "destructive");
     yes.classList.add("idea-yes");
     yes.disabled = ui.ideaDeleting;  // a double click must not send a second delete
-    const no = button("Нет", () => askDeleteIdea(null), "outline");
+    const no = button(tr("common.no"), () => askDeleteIdea(null), "outline");
     no.classList.add("idea-no");
-    ask.append(el("span", "Удалить идею?"), yes, no);
+    ask.append(el("span", tr("idea.delete_question")), yes, no);
     head.append(ask);
   } else {
     const x = button("", () => askDeleteIdea(idea.event_id), "ghost", "icon-sm", "x");
     x.classList.add("idea-del");
-    x.setAttribute("aria-label", "Удалить идею");
+    x.setAttribute("aria-label", tr("idea.delete"));
     head.append(x);
   }
   li.append(head, el("p", idea.value));
@@ -1014,7 +1033,7 @@ async function deleteIdea(id) {
     serverState.ideas = serverState.ideas.filter((i) => i.event_id !== id);
     await poll();
   } catch (e) {
-    toast("Идея не удалена", e.message, true);
+    toast(tr("toast.idea_not_deleted"), errText(ui.lang, errDesc(e)), true);
   } finally {
     ui.ideaDeleting = false;
     renderIdeas();
@@ -1024,7 +1043,7 @@ async function deleteIdea(id) {
 async function submit(kind, params) {
   try {
     await api("POST", "/api/jobs", { job_id: newId(), kind, params });
-    toast("Задача поставлена", NAMES[kind] || kind);
+    toast(tr("toast.job_submitted"), label(ui.lang, "job.kind.", kind));
     await poll();
   } catch (e) {
     fail(e);
@@ -1113,7 +1132,7 @@ function select(clipId, { play = false } = {}) {
   if (clipId !== ui.selectedId) {
     ui.rechoose = null;
     closeNote();
-    $("note-status").textContent = "";
+    ui.noteStatus = null;
     ui.expanded = false;
     ui.selectedId = clipId;
     $("player").pause();  // the old clip must not end (and become «heard») as the new one
@@ -1159,7 +1178,7 @@ function setMark(clip, value) {
   }, (e) => {
     ui.pending.delete(clip.clip_id);
     Object.assign(clip, before);
-    toast("Не сохранено", e.message, true);
+    toast(tr("toast.not_saved"), errText(ui.lang, errDesc(e)), true);
     render();
     throw e;
   });
@@ -1215,11 +1234,11 @@ function undo() {
   if (ui.screen !== "session" || !view || !ui.loaded) return;
   const t = undoTarget(ui.undo, view.clips);
   if (!t) {
-    toast("Отменять нечего");
+    toast(tr("toast.nothing_to_undo"));
     return;
   }
   if (t.index < 0) {
-    toast("Клип не из этого прогона", "Отмена пропущена.");
+    toast(tr("toast.undo_other_run"), tr("toast.undo_skipped"));
     return;
   }
   const clip = view.clips[t.index];
@@ -1292,9 +1311,9 @@ async function saveNote() {
     return;
   }
   ui.noteSaving = true;
-  const st = $("note-status");
   clearTimeout(noteTimer);
-  st.textContent = "сохраняю…";
+  ui.noteStatus = { key: "note.saving" };
+  renderStatuses();
   try {
     const r = await journal("note", text, clip);
     clip.notes = clip.notes.filter((n) => !n.own);
@@ -1302,21 +1321,28 @@ async function saveNote() {
     if (ui.drafts.get(id) === text) ui.drafts.delete(id);
     // typed on while saving: keep the field open, the next Esc saves the rest
     if (ui.noteClipId === id && $("note").value === text) closeNote();
-    st.textContent = "сохранено";
-    noteTimer = setTimeout(() => { st.textContent = ""; }, 2000);
+    ui.noteStatus = { key: "note.saved" };
+    noteTimer = setTimeout(() => {
+      ui.noteStatus = null;
+      render();
+    }, 2000);
     render();
     reloadView().catch(fail);
   } catch (e) {
     if (ui.noteClipId !== id) ui.drafts.set(id, text);  // left the clip: N on it brings the text back
-    else st.textContent = `не сохранено: ${e.message}`;  // the text stays in the field; Esc retries
-    toast("Заметка не сохранена", `${e.message}. Текст сохранён в поле заметки этого клипа.`, true);
+    else {  // the text stays in the field; Esc retries
+      ui.noteStatus = { key: "note.not_saved", params: { error: errDesc(e) } };
+      renderStatuses();
+    }
+    toast(tr("toast.note_not_saved"), tr("toast.note_kept", { error: errDesc(e) }), true);
   } finally {
     ui.noteSaving = false;
   }
 }
 
 function openIdea() {
-  $("idea-status").textContent = "";
+  ui.ideaStatus = null;
+  renderStatuses();
   if (!$("idea-dialog").open) $("idea-dialog").showModal();
   $("idea").focus();
 }
@@ -1324,17 +1350,20 @@ function openIdea() {
 async function saveIdea() {
   const text = $("idea").value.trim();
   if (!text) return;
-  $("idea-status").textContent = "сохраняю…";
+  ui.ideaStatus = { key: "note.saving" };
+  renderStatuses();
   try {
     const body = { event_id: newId(), kind: "idea", value: text };
     if (sid) body.session_id = sid;
     await api("POST", "/api/journal", body);
     $("idea").value = "";
     $("idea-dialog").close();
-    toast("Идея записана");
+    ui.ideaStatus = null;
+    toast(tr("toast.idea_saved"));
     await poll();
   } catch (e) {
-    $("idea-status").textContent = `не сохранено: ${e.message}`;
+    ui.ideaStatus = { key: "note.not_saved", params: { error: errDesc(e) } };
+    renderStatuses();
   }
 }
 
@@ -1442,7 +1471,7 @@ function bind() {
   $("ideas-expand").addEventListener("click", () => $("ideas-dialog").showModal());
   $("ideas-close").addEventListener("click", () => $("ideas-dialog").close());
   $("inbox-open").addEventListener("click", () => {  // D49
-    api("POST", "/api/inbox/open", {}).catch((e) => toast("Проводник не открылся", e.message, true));
+    api("POST", "/api/inbox/open", {}).catch((e) => toast(tr("toast.explorer_failed"), errText(ui.lang, errDesc(e)), true));
   });
   $("rechoose-yes").addEventListener("click", () => closeRechoose(true));
   $("rechoose-no").addEventListener("click", () => closeRechoose(false));
@@ -1497,7 +1526,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, statusText, summaryText, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
+    counts, statusText, summaryText, chainText, jobText, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
     afterOpenError, retryAfter, codedError };
 } else {
   start();

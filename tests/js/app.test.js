@@ -262,3 +262,24 @@ test("summaryText", () => {
   assert.equal(app.summaryText(c, "ru"), "Оставлено 3 · Отброшено 2: вокал 1, музыка 1, шум 0, другое 0");
   assert.equal(app.summaryText(c, "en"), "Kept 3 · Rejected 2: vocals 1, music 1, noise 0, other 0");
 });
+
+test("chainText", () => {  // plural «файл/файла/файлов» (decision 4); ISO start and minutes as is (L8)
+  const ch = (n, imported = false) => ({ chain: 1, files: Array.from({ length: n }, (_, i) => `${i}.WAV`),
+    start_local: "2025-03-01T08:29:21", duration_s: 3600, imported });
+  assert.equal(app.chainText(ch(1), "ru"), "цепочка 1: 1 файл, начало 2025-03-01T08:29:21, 60.0 мин");
+  assert.equal(app.chainText(ch(2), "ru"), "цепочка 1: 2 файла, начало 2025-03-01T08:29:21, 60.0 мин");
+  assert.equal(app.chainText(ch(5), "ru"), "цепочка 1: 5 файлов, начало 2025-03-01T08:29:21, 60.0 мин");
+  assert.equal(app.chainText(ch(21, true), "ru"),
+    "цепочка 1: 21 файл, начало 2025-03-01T08:29:21, 60.0 мин, уже импортирована");
+  assert.equal(app.chainText(ch(1), "en"), "chain 1: 1 file, start 2025-03-01T08:29:21, 60.0 min");
+  assert.equal(app.chainText(ch(2, true), "en"),
+    "chain 1: 2 files, start 2025-03-01T08:29:21, 60.0 min, already imported");
+});
+
+test("jobText", () => {
+  const job = (kind, state, stage = null) => ({ kind, state, stage });
+  assert.equal(app.jobText(job("import", "done"), "ru"), "импорт: готово");
+  assert.equal(app.jobText(job("process", "done", "export"), "ru"), "обработка: готово, этап export");
+  assert.equal(app.jobText(job("process", "running", "probs"), "en"), "processing: running, stage probs");
+  assert.equal(app.jobText(job("__proto__", "новое"), "en"), "__proto__: новое");  // unknown: as is
+});

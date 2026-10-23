@@ -166,8 +166,7 @@ def test_html_text_is_en_catalog():
 DATA_VALUES = ['"моё"', '"вокал"', '"музыка"', '"шум"', '"другое"', '"ё"', '"е"']  # journal data, norm (L14, L15)
 
 
-@pytest.mark.parametrize("name", ["index.html", pytest.param(
-    "app.js", marks=pytest.mark.xfail(strict=True, reason="задачи 5–6")), "i18n.js"])
+@pytest.mark.parametrize("name", ["index.html", "app.js", "i18n.js"])
 def test_ui_has_no_cyrillic_outside_catalogs(name):
     """D67: every UI phrase comes from i18n/en.js or i18n/ru.js."""
     text = (STATIC_DIR / name).read_text()
