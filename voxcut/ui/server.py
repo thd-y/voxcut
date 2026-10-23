@@ -282,11 +282,9 @@ class App:
                 events, _ = jr.load(self.lay.jobs / job["job_id"] / "journal.jsonl")
                 self.journal.merge(events)
             except jr.JournalError as exc:  # the archive's own journal: the same every time
-                raise RuntimeError(f"журнал архива не читается ({exc}); файлы восстановлены, "
-                                   f"журнал не слит, повтор не поможет") from exc
+                raise JobError("restore_journal_broken", detail=str(exc)) from exc
             except Exception as exc:  # on_done runs once: a new restore job is the retry
-                raise RuntimeError(f"журнал из архива не слит ({exc}); файлы восстановлены, "
-                                   f"восстановите этот архив ещё раз, чтобы слить журнал") from exc
+                raise JobError("restore_journal_not_merged", detail=str(exc)) from exc
 
     def start_poller(self, interval: float = 2.0) -> threading.Event:
         """jobs.poll() off the request path: GET never starts anything (S4)."""

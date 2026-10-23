@@ -176,6 +176,47 @@ CODES: dict[str, tuple[tuple[str, ...], str]] = {
     "restore_conflicts": (("lines",),
         ("в data/ уже есть другие версии файлов, ничего не изменено:\n"
          "{lines}")),
+    # journal.py
+    "journal_unknown_fields": ((), "неизвестные поля события"),
+    "journal_bad_ts": ((), "ts: нужна дата ISO с часовым поясом"),
+    "journal_bad_event_id": ((), "event_id: нужны 32 hex"),
+    "journal_unknown_kind": ((), "неизвестный вид события"),
+    "journal_value_too_long": (("limit",), "value: строка не длиннее {limit}"),
+    "journal_bad_session_id": ((), "session_id"),
+    "journal_bad_span": ((), "отрезок: нужны session_id и 0 <= start_s < end_s"),
+    "journal_no_span": ((), "у этого вида события нет отрезка"),
+    "journal_bad_idea_ref": ((), "idea_deleted: value — event_id идеи"),
+    "journal_broken_middle": (("where", "pos"),
+        "{where}: битая строка в середине журнала (байт {pos})"),
+    "journal_tail_skipped": (("where", "detail"),
+        "{where}: последняя строка журнала битая и пропущена ({detail})"),
+    # jobs.py
+    "job_unknown_kind": (("kind",), "неизвестный вид задачи: {kind}"),
+    "job_bad_params": (("kind", "keys"), "параметры {kind}: нужны ровно {keys}"),
+    "job_no_source": ((), "нет такого источника во входящих"),
+    "job_bad_chain": ((), "chain: целое >= 1"),
+    "job_bad_files": ((), "files: непустой список имён файлов"),
+    "job_bad_start": ((), "start: строка или null"),
+    "job_bad_session_id": ((), "session_id: строка"),
+    "job_no_session": ((), "нет такой сессии"),
+    "job_cannot_process": ((), "сессию нельзя обработать (light-бэкап или незавершённый импорт)"),
+    "job_bad_mode": ((), "mode: full или light"),
+    "job_no_archive": ((), "нет такого архива во входящих"),
+    "job_bad_id": ((), "job_id: нужны 32 hex"),
+    "job_slice_limit": (("slice", "detail"),
+        "лимит памяти на {slice} не применился ({detail}); задача не запущена"),
+    "job_unit_failed": (("detail",), "systemd-run: {detail}"),
+    "job_start_failed": (("detail",), "{detail}"),
+    "job_dead": ((), "процесс задачи завершился без итога (возможно, OOM)"),
+    "job_unit_unknown_kind": (("kind",), "неизвестный вид задачи {kind}"),
+    "job_after_done_failed": (("cause",), "после завершения: {cause}"),
+    # ui/server.py (on_done of a restore job)
+    "restore_journal_broken": (("detail",),
+        ("журнал архива не читается ({detail}); файлы восстановлены, журнал не слит, повтор не "
+         "поможет")),
+    "restore_journal_not_merged": (("detail",),
+        ("журнал из архива не слит ({detail}); файлы восстановлены, восстановите этот архив "
+         "ещё раз, чтобы слить журнал")),
 }
 
 _FIELD = re.compile(r"\{(\w+)\}")

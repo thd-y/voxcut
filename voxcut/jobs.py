@@ -13,18 +13,23 @@ from datetime import datetime
 from pathlib import Path
 
 from voxcut import library
+from voxcut.errors import Coded, descriptor
 from voxcut.intervals import parse_start
 
 KINDS = ("import", "process", "backup", "restore")
 HEAVY = KINDS  # all heavy, one at a time
 SLICE = "voxcut.slice"
 JOB_ID_RE = re.compile(r"[0-9a-f]{32}")
-DEAD = "процесс задачи завершился без итога (возможно, OOM)"
+DEAD = {"code": "job_dead", "params": {}}
 FINAL = ("done", "failed", "cancelled")
 
 
-class JobError(RuntimeError):
+class JobError(Coded, RuntimeError):
     pass
+
+
+class JobParamsError(Coded, ValueError):
+    """Every refusal of validate/submit: a 400 with its code, not internal_error."""
 
 
 LIST_MAX = 20  # (агент) jobs shown in /api/state; older finished ones stay on disk
@@ -39,35 +44,35 @@ def validate(kind: str, params: dict, lay: library.Layout) -> dict:
     keys = {"import": {"source", "chain", "files", "start"}, "process": {"session_id"},
             "backup": {"mode"}, "restore": {"name"}}
     if kind not in keys:
-        raise ValueError(f"неизвестный вид задачи: {kind!r}")
+        raise JobParamsError("job_unknown_kind", kind=repr(kind))
     if not isinstance(params, dict) or set(params) != keys[kind]:
-        raise ValueError(f"параметры {kind}: нужны ровно {sorted(keys[kind])}")
+        raise JobParamsError("job_bad_params", kind=kind, keys=str(sorted(keys[kind])))
     p = dict(params)
     if kind == "import":
         if p["source"] not in library._source_names(lay):
-            raise ValueError("нет такого источника во входящих")
+            raise JobParamsError("job_no_source")
         if type(p["chain"]) is not int or p["chain"] < 1:
-            raise ValueError("chain: целое >= 1")
+            raise JobParamsError("job_bad_chain")
         if (not isinstance(p["files"], list) or not p["files"]
                 or not all(isinstance(f, str) and f for f in p["files"])):
-            raise ValueError("files: непустой список имён файлов")
+            raise JobParamsError("job_bad_files")
         if p["start"] is not None:
             if not isinstance(p["start"], str):
-                raise ValueError("start: строка или null")
+                raise JobParamsError("job_bad_start")
             parse_start(p["start"])  # SessionError is a ValueError
     elif kind == "process":
         if not isinstance(p["session_id"], str):
-            raise ValueError("session_id: строка")
+            raise JobParamsError("job_bad_session_id")
         row = library.session_row(lay, p["session_id"])
         if row is None:
-            raise ValueError("нет такой сессии")
+            raise JobParamsError("job_no_session")
         if not row["can_process"]:
-            raise ValueError("сессию нельзя обработать (light-бэкап или незавершённый импорт)")
+            raise JobParamsError("job_cannot_process")
     elif kind == "backup":
         if p["mode"] not in ("full", "light"):
-            raise ValueError("mode: full или light")
+            raise JobParamsError("job_bad_mode")
     elif p["name"] not in library._backup_names(lay):
-        raise ValueError("нет такого архива во входящих")
+        raise JobParamsError("job_no_archive")
     return p
 
 
@@ -89,8 +94,7 @@ def ensure_slice(run=subprocess.run) -> None:
               capture_output=True, text=True).stdout
     got = dict(line.split("=", 1) for line in out.split() if "=" in line)
     if got != {"MemoryMax": "5368709120", "MemorySwapMax": "0"}:
-        raise JobError(f"лимит памяти на {SLICE} не применился ({out.strip()!r}); "
-                       "задача не запущена")
+        raise JobError("job_slice_limit", slice=SLICE, detail=repr(out.strip()))
 
 
 def _write(path: Path, obj) -> None:
@@ -162,9 +166,13 @@ class Jobs:
             r = self.run(unit_argv(self._unit(job_id).removesuffix(".service"), cmd,
                                    self.lay.root), capture_output=True, text=True)
             if r.returncode != 0:
-                raise JobError(f"systemd-run: {r.stderr.strip()}")
-        except (JobError, OSError) as exc:
-            self._set_status(job_id, "failed", error=str(exc))
+                raise JobError("job_unit_failed", detail=r.stderr.strip())
+        except JobError as exc:
+            self._set_status(job_id, "failed", error=descriptor(exc))
+            rec["state"] = "failed"
+        except OSError as exc:
+            self._set_status(job_id, "failed",
+                             error={"code": "job_start_failed", "params": {"detail": str(exc)}})
             rec["state"] = "failed"
 
     def _step(self) -> None:
@@ -175,7 +183,8 @@ class Jobs:
                 try:
                     self.on_done(self._view(job_id))
                 except Exception as exc:  # noqa: BLE001 - one bad hook must not stall the queue
-                    self._set_status(job_id, "failed", error=f"после завершения: {exc}")
+                    self._set_status(job_id, "failed", error={
+                        "code": "job_after_done_failed", "params": {"cause": descriptor(exc)}})
                     rec["state"] = "failed"  # the badge flags it; the job's work is only partly in
                 finally:
                     marker.touch()
@@ -184,7 +193,7 @@ class Jobs:
 
     def submit(self, job_id: str, kind: str, params: dict) -> dict:
         if not isinstance(job_id, str) or not JOB_ID_RE.fullmatch(job_id):
-            raise ValueError("job_id: нужны 32 hex")
+            raise JobParamsError("job_bad_id")
         with self._lock:
             if job_id not in self._jobs:
                 job = {"job_id": job_id, "kind": kind, "params": validate(kind, params, self.lay),
@@ -232,8 +241,11 @@ class Jobs:
                 tail = [line.rstrip("\n") for line in deque(f, 20)]
         except OSError:
             tail = []
+        error = st.get("error")
+        if isinstance(error, str):  # status.json from before D66
+            error = {"code": "legacy_error", "params": {"detail": error}}
         return {"job_id": job_id, "kind": rec["job"]["kind"], "state": rec["state"],
-                "stage": st.get("stage"), "error": st.get("error"),
+                "stage": st.get("stage"), "error": error,
                 "started": st.get("started"), "finished": st.get("finished"),
                 "result": st.get("result"), "log_tail": tail}
 
@@ -273,10 +285,10 @@ def main(argv: list[str]) -> int:
             elif job["kind"] == "restore":
                 result = library.restore_backup(lay, p["name"], d / "journal.jsonl")
             else:
-                raise JobError(f"неизвестный вид задачи {job['kind']!r}")
+                raise JobError("job_unit_unknown_kind", kind=repr(job["kind"]))
         except Exception as exc:  # noqa: BLE001 - every failure becomes a visible status
             log(traceback.format_exc())
-            _write(d / "status.json", status | {"state": "failed", "error": str(exc),
+            _write(d / "status.json", status | {"state": "failed", "error": descriptor(exc),
                                                 "finished": _now()})
             return 1
     _write(d / "status.json", status | {"state": "done", "result": result, "finished": _now()})

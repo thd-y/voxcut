@@ -54,7 +54,8 @@ def test_descriptor_plain_exception():
 
 UI_MODULES = ["intervals", "audio", "cli", "library", "journal", "jobs", "ui/server"]
 EXEMPT = {"LabelsError", "ConfigError", "SystemExit"}
-INTERNAL = {("audio", "RuntimeError")}  # an invariant breach: internal_error in the UI
+INTERNAL = {("audio", "RuntimeError"),  # an invariant breach: internal_error in the UI
+            ("journal", "ValueError")}  # a bad line's reason, carried as detail of a warning
 CYR = re.compile("[а-яёА-ЯЁ]")
 
 

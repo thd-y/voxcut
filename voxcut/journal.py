@@ -9,6 +9,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from voxcut.errors import Coded
 from voxcut.intervals import intersect, total, union
 
 KINDS = ("mark", "note", "idea", "heard", "backup", "idea_deleted")
@@ -19,11 +20,11 @@ EVENT_ID_RE = re.compile(r"[0-9a-f]{32}")
 FIELDS = {"event_id", "kind", "value", "session_id", "start_s", "end_s"}
 
 
-class JournalError(ValueError):
+class JournalError(Coded, ValueError):
     pass
 
 
-def _parse(data: bytes, where: str) -> tuple[list[dict], list[str], int]:
+def _parse(data: bytes, where: str) -> tuple[list[dict], list[dict], int]:
     """Events, warnings and the byte length of the good prefix.
 
     A line counts only with its trailing newline: append writes line+newline in one write and
@@ -40,14 +41,15 @@ def _parse(data: bytes, where: str) -> tuple[list[dict], list[str], int]:
                 raise ValueError("не событие")  # noqa: TRY004 - one except path for all bad lines
         except ValueError as exc:
             if nl >= 0 and nl + 1 < len(data):
-                raise JournalError(f"{where}: битая строка в середине журнала (байт {pos})") from exc
-            return events, [f"{where}: последняя строка журнала битая и пропущена ({exc})"], pos
+                raise JournalError("journal_broken_middle", where=where, pos=pos) from exc
+            return events, [{"code": "journal_tail_skipped",
+                             "params": {"where": where, "detail": str(exc)}}], pos
         events.append(e)
         pos = nl + 1
     return events, [], pos
 
 
-def load(path: Path) -> tuple[list[dict], list[str]]:
+def load(path: Path) -> tuple[list[dict], list[dict]]:
     events, warnings, _ = _parse(Path(path).read_bytes(), str(path))
     return events, warnings
 
@@ -58,24 +60,24 @@ def _when(e: dict) -> datetime:
 
 def _validate(event: dict, with_ts: bool = False) -> dict:
     if not isinstance(event, dict) or set(event) - FIELDS - ({"ts"} if with_ts else set()):
-        raise JournalError("неизвестные поля события")
+        raise JournalError("journal_unknown_fields")
     e = dict(event)
     if with_ts:
         try:
             if _when(e).tzinfo is None:
                 raise ValueError
         except (KeyError, TypeError, ValueError):
-            raise JournalError("ts: нужна дата ISO с часовым поясом") from None
+            raise JournalError("journal_bad_ts") from None
     if not isinstance(e.get("event_id"), str) or not EVENT_ID_RE.fullmatch(e["event_id"]):
-        raise JournalError("event_id: нужны 32 hex")
+        raise JournalError("journal_bad_event_id")
     if e.get("kind") not in KINDS:
-        raise JournalError("неизвестный вид события")
+        raise JournalError("journal_unknown_kind")
     limit = MARK_MAX if e["kind"] == "mark" else NOTE_MAX
     if not isinstance(e.get("value"), str) or len(e["value"]) > limit:
-        raise JournalError(f"value: строка не длиннее {limit}")
+        raise JournalError("journal_value_too_long", limit=limit)
     sid = e.get("session_id")
     if sid is not None and (not isinstance(sid, str) or not sid or len(sid) > 200):
-        raise JournalError("session_id")
+        raise JournalError("journal_bad_session_id")
     span = [e.get(k) for k in ("start_s", "end_s")]
     if e["kind"] in SPAN_KINDS:
         ok = sid is not None and all(
@@ -83,11 +85,11 @@ def _validate(event: dict, with_ts: bool = False) -> dict:
             for x in span
         )
         if not ok or not 0 <= span[0] < span[1]:
-            raise JournalError("отрезок: нужны session_id и 0 <= start_s < end_s")
+            raise JournalError("journal_bad_span")
     elif span != [None, None] or (e["kind"] in ("backup", "idea_deleted") and sid is not None):
-        raise JournalError("у этого вида события нет отрезка")
+        raise JournalError("journal_no_span")
     if e["kind"] == "idea_deleted" and not EVENT_ID_RE.fullmatch(e["value"]):
-        raise JournalError("idea_deleted: value — event_id идеи")  # D56
+        raise JournalError("journal_bad_idea_ref")  # D56
     return e
 
 
@@ -98,7 +100,7 @@ class Journal:
         self._events: list[dict] = []
         self._ids: dict[str, dict] = {}
         self._good = 0
-        self.warnings: list[str] = []
+        self.warnings: list[dict] = []
         self.events()
 
     def _catch_up(self, fd: int) -> None:

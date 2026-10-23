@@ -354,8 +354,8 @@ def test_restore_merges_journal_once(wapi):
 
 
 @pytest.mark.parametrize("case, advice", [
-    ("transient", "восстановите этот архив ещё раз"),  # review #4: on_done runs once
-    ("broken", "повтор не поможет"),  # the archive's journal itself: retrying loops
+    ("transient", "restore_journal_not_merged"),  # review #4: on_done runs once
+    ("broken", "restore_journal_broken"),  # the archive's journal itself: retrying loops
 ])
 def test_restore_merge_failure_advice(wapi, monkeypatch, case, advice):
     (wapi.lay.inbox / "voxcut-backup_x_full.tar").write_bytes(b"")
@@ -375,7 +375,8 @@ def test_restore_merge_failure_advice(wapi, monkeypatch, case, advice):
     wapi.jobs.poll()
     wapi.jobs.poll()
     job = next(j for j in wapi.jobs.list() if j["job_id"] == jid)
-    assert advice in job["error"] and job["state"] == "failed"  # the badge shows «failed»
+    cause = job["error"]["params"]["cause"]
+    assert cause["code"] == advice and job["state"] == "failed"  # the badge shows «failed»
 
 
 def test_get_state_does_not_start_jobs(wapi):
