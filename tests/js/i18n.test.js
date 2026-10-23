@@ -92,3 +92,31 @@ test("label", () => {
     assert.equal(i18n.label("en", "", value), value);
   }
 });
+
+// D67: the two catalogs say the same things: same keys, same {params}, the plural forms each language needs.
+const EN_CYRILLIC_OK = [];  // en values that are data samples (none yet)
+const FORMS = { ru: ["few", "many", "one", "other"], en: ["one", "other"] };
+const fields = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
+
+test("catalogs agree", () => {
+  assert.deepEqual(Object.keys(I18N.en).sort(), Object.keys(I18N.ru).sort());
+  for (const key of Object.keys(I18N.ru)) {
+    const ru = I18N.ru[key];
+    const en = I18N.en[key];
+    if (typeof ru === "object") {
+      assert.deepEqual(Object.keys(ru).sort(), FORMS.ru, key);
+      assert.equal(typeof en, "object", key);
+      assert.deepEqual(Object.keys(en).sort(), FORMS.en, key);
+      const want = fields(ru.other);
+      for (const form of FORMS.ru) assert.deepEqual(fields(ru[form]), want, `${key}.${form}`);
+      for (const form of FORMS.en) assert.deepEqual(fields(en[form]), want, `${key}.${form}`);
+    } else {
+      assert.equal(typeof en, "string", key);
+      assert.deepEqual(fields(en), fields(ru), key);
+    }
+    const texts = typeof en === "object" ? Object.values(en) : [en];
+    if (!EN_CYRILLIC_OK.includes(key)) {
+      for (const t of texts) assert.doesNotMatch(t, /[а-яёА-ЯЁ]/, key);
+    }
+  }
+});

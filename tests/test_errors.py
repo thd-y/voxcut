@@ -140,3 +140,14 @@ def test_ru_catalog_matches_registry():
     found = {m[1]: json.loads(m[2]) for m in re.finditer(r'"err\.(\w+)":\s*("(?:[^"\\]|\\.)*")', text)}
     assert set(found) == set(CODES) | FRONT_ONLY
     assert {c: found[c] for c in CODES} == {c: t for c, (_, t) in CODES.items()}
+
+
+EN_JS = RU_JS.with_name("en.js")
+
+
+def test_en_catalog_covers_registry():
+    """D67: every registry code has an English template with the registry's parameters."""
+    text = EN_JS.read_text()
+    found = {m[1]: json.loads(m[2]) for m in re.finditer(r'"err\.(\w+)":\s*("(?:[^"\\]|\\.)*")', text)}
+    assert set(found) == set(CODES) | FRONT_ONLY
+    assert {c: set(FIELD.findall(found[c])) for c in CODES} == {c: set(n) for c, (n, _) in CODES.items()}
