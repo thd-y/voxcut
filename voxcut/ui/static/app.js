@@ -1444,6 +1444,7 @@ function bind() {
   $("library-btn").addEventListener("click", toggleLibrary);
   $("help-btn").addEventListener("click", () => $("help-dialog").showModal());
   $("lang").addEventListener("click", () => setLang(ui.lang === "en" ? "ru" : "en"));
+  $("lang").addEventListener("mousedown", (e) => e.preventDefault());  // L13: a note being typed keeps focus, no blur save
   $("help-close").addEventListener("click", () => $("help-dialog").close());
   $("theme").addEventListener("click", () => {
     ui.theme = document.documentElement.classList.contains("dark") ? "light" : "dark";

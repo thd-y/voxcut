@@ -246,7 +246,7 @@ test("statusText", () => {  // D67: the status line from the catalog, marks thro
     [clip("a", ["вокал", "моё"], "вокал"), "отброшен: вокал · есть другие решения",
       "rejected: vocals · other decisions exist"],
     [clip("a", ["смех"]), "отброшен: смех", "rejected: смех"],  // a value without a label: as is (U5)
-    [clip("a", ["вокал", "моё"]), "разные решения: вокал, моё", "different decisions: vocals, mine"],
+    [clip("a", ["вокал", "моё"]), "разные решения: вокал, моё", "different decisions: vocals, kept"],
     [clip("a", ["смех", "шум"]), "разные решения: смех, шум", "different decisions: смех, noise"],
     [clip("a"), "не разобран", "not reviewed"],
   ];
