@@ -13,6 +13,7 @@
   "common.yes": "Да",
   "common.no": "Нет",
   "common.close": "Закрыть",
+  "lang.current": "RU",
   "lang.switch": "Переключить на английский",
   "top.review": "Разбор",
   "top.mine": "Мои клипы",

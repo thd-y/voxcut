@@ -20,6 +20,8 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
   border-bottom: 1px solid var(--border); }
 #top .brand { font-size: 15px; }
 #job-badge { cursor: pointer; }
+#lang { font-weight: 400; color: var(--muted-foreground); }  /* D76: a quiet label, not a bright one */
+#lang:hover { color: var(--foreground); }
 #conn-alert { margin: 8px 16px 0; width: auto; }
 #fatal { padding: 48px 16px; }
 

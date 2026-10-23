@@ -191,3 +191,8 @@ test("an error ending in a command stands on its own line", () => {  // TODOS: "
   assert.equal(i18n.translate("en", "empty.open_failed_text", { error }), "rm -rf /p\nOpen another session in the Library.");
   assert.equal(i18n.translate("en", "toast.note_kept", { error }), "rm -rf /p\nThe text is kept in this clip's note field.");
 });
+
+test("language button shows the current language (D76)", () => {
+  assert.equal(i18n.translate("en", "lang.current"), "EN");
+  assert.equal(i18n.translate("ru", "lang.current"), "RU");
+});

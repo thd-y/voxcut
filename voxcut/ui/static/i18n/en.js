@@ -13,6 +13,7 @@
   "common.yes": "Yes",
   "common.no": "No",
   "common.close": "Close",
+  "lang.current": "EN",
   "lang.switch": "Switch to Russian",
   "top.review": "Review",
   "top.mine": "My clips",
