@@ -227,7 +227,7 @@ test("afterOpenError", () => {  // the state keeps the descriptor, the screen re
   assert.deepEqual(app.afterOpenError(false, offline), { loaded: null, openError: null });  // skeleton + alert
   assert.deepEqual(app.afterOpenError(false, server), { loaded: null, openError: desc });
   const d = (code, params = {}) => ({ code, params });
-  assert.deepEqual(app.afterOpenError(false, app.codedError(d("http_need_key"), "ru")),
+  assert.deepEqual(app.afterOpenError(false, app.codedError(d("http_need_key"))),
     { loaded: null, openError: d("http_need_key") });
   assert.deepEqual(app.afterOpenError(false, new Error("boom")),  // a JS error: its text as is
     { loaded: null, openError: d("legacy_error", { detail: "boom" }) });

@@ -135,8 +135,8 @@ const backupTime = (value, lang) => localTime(value, true, lang) || value;  // D
 const gapLabel = (seconds, lang) => translate(lang, "card.gap", { t: fmtPos(seconds) });  // D54
 
 // D66: the state keeps the descriptor and renders it in the current language (D67).
-function codedError(desc, lang) {
-  const e = new Error(errText(lang, desc));
+function codedError(desc) {  // the message is the code, for the console; the UI renders errDesc(e)
+  const e = new Error(desc.code);
   e.descriptor = desc;
   return e;
 }
@@ -276,7 +276,7 @@ async function api(method, path, body) {
   try {
     r = await fetch(path, opts);
   } catch {
-    const e = codedError({ code: "offline", params: {} }, ui.lang);
+    const e = codedError({ code: "offline", params: {} });
     e.offline = true;
     throw e;
   }
@@ -285,7 +285,7 @@ async function api(method, path, body) {
     ui.fatal = true;
     render();
   }
-  if (!r.ok) throw codedError((data && data.error) || { code: "http_status", params: { status: r.status } }, ui.lang);
+  if (!r.ok) throw codedError((data && data.error) || { code: "http_status", params: { status: r.status } });
   return data;
 }
 
@@ -1095,7 +1095,7 @@ async function loadAudio(clip, autoplay) {
     const r = await fetch(`/api/clip/${clip.clip_id}`, {
       headers: { Authorization: `Bearer ${KEY}` }, signal: ctl.signal,
     });
-    if (!r.ok) throw codedError({ code: "http_status", params: { status: r.status } }, ui.lang);
+    if (!r.ok) throw codedError({ code: "http_status", params: { status: r.status } });
     const blob = await r.blob();
     if (ctl !== audioCtl) return;  // a newer clip was selected meanwhile
     audioUrl = URL.createObjectURL(blob);
@@ -1165,7 +1165,7 @@ function journal(kind, value, clip) {
   if (clip) body.clip_id = clip.clip_id;
   const p = queue.then(async () => {
     const r = await api("POST", "/api/journal", body);
-    if (!r.saved) throw codedError({ code: "not_saved", params: {} }, ui.lang);
+    if (!r.saved) throw codedError({ code: "not_saved", params: {} });
     return r;
   });
   queue = p.catch(() => {});
