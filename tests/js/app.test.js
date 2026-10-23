@@ -282,10 +282,11 @@ test("chainText", () => {  // plural «файл/файла/файлов» (decis
 test("jobText", () => {
   const job = (kind, state, stage = null) => ({ kind, state, stage });
   assert.equal(app.jobText(job("import", "done"), "ru"), "импорт: готово");
-  assert.equal(app.jobText(job("process", "done", "export"), "ru"), "обработка: готово, этап нарезка клипов");  // D70
-  assert.equal(app.jobText(job("process", "running", "probs"), "ru"), "обработка: идёт, этап поиск речи");
-  assert.equal(app.jobText(job("process", "running", "segment"), "en"), "processing: running, stage clip boundaries");
-  assert.equal(app.jobText(job("process", "running", "newstage"), "ru"), "обработка: идёт, этап newstage");
+  assert.equal(app.jobText(job("process", "running", "probs"), "ru"), "обработка: поиск речи");  // D70, D75
+  assert.equal(app.jobText(job("process", "running", "segment"), "en"), "processing: clip boundaries");
+  assert.equal(app.jobText(job("process", "running", "newstage"), "ru"), "обработка: newstage");
+  assert.equal(app.jobText(job("process", "done", "export"), "ru"), "обработка: готово");  // the stage only while running
+  assert.equal(app.jobText(job("process", "failed", "probs"), "en"), "processing: failed");
   assert.equal(app.jobText(job("__proto__", "новое"), "en"), "__proto__: новое");  // unknown: as is
 });
 

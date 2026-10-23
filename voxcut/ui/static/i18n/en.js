@@ -157,7 +157,7 @@
   "inbox.restore": "Restore",
   "inbox.empty": "Empty: put files in the product's inbox folder.",
   "jobs.row": "{kind}: {state}",
-  "jobs.row_stage": "{kind}: {state}, stage {stage}",
+  "jobs.row_stage": "{kind}: {stage}",
   "jobs.cancel": "Cancel",
   "jobs.none": "No jobs.",
   "backup.last": "Last backup: {time}",

@@ -165,6 +165,7 @@ test("stage labels and wording (D70, D72, D73)", () => {
   assert.equal(i18n.errText("ru", d("journal_value_too_long", { limit: 500 })), "текст длиннее 500 символов");
   assert.equal(i18n.errText("en", d("journal_value_too_long", { limit: 500 })), "text longer than 500 characters");
   assert.equal(i18n.translate("en", "top.job_failed", { kind: "processing" }), "processing failed");
+  assert.equal(i18n.translate("ru", "empty.session_no_row"), "Нажмите «Обработать» в Библиотеке.");  // D75
   for (const code of ["backup_full_refused", "import_move_stuck"]) assert.ok(!I18N.en[`err.${code}`].includes("—"));
 });
 

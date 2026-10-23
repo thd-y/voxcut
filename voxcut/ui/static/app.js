@@ -89,7 +89,7 @@ function chainText(ch, lang) {
 function jobText(j, lang) {
   const params = { kind: label(lang, "job.kind.", j.kind), state: label(lang, "job.state.", j.state),
     stage: label(lang, "job.stage.", j.stage) };
-  return translate(lang, j.stage ? "jobs.row_stage" : "jobs.row", params);
+  return translate(lang, j.state === "running" && j.stage ? "jobs.row_stage" : "jobs.row", params);  // D75
 }
 
 function nextUndecided(clips, from) {
