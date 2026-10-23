@@ -110,7 +110,7 @@
   "empty.no_sessions_title": "No sessions yet",
   "empty.no_sessions_text": "Put recordings in the inbox folder and import them in the Library.",
   "empty.open_failed_title": "The session did not open",
-  "empty.open_failed_text": "{error}. Open another session in the Library.",
+  "empty.open_failed_text": "{error}\nOpen another session in the Library.",
   "empty.no_clips_title": "No clips yet",
   "empty.job_running": "Running {kind}: {state}.",
   "empty.session_state": "Session “{state}”: press “Process” in the Library.",
@@ -176,7 +176,7 @@
   "toast.undo_other_run": "The clip is not from this run",
   "toast.undo_skipped": "Undo skipped.",
   "toast.note_not_saved": "Note not saved",
-  "toast.note_kept": "{error}. The text is kept in this clip's note field.",
+  "toast.note_kept": "{error}\nThe text is kept in this clip's note field.",
   "toast.idea_saved": "Idea saved",
   "toast.explorer_failed": "File Explorer did not open",
   "lib.session_clips": {

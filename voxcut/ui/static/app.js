@@ -84,7 +84,8 @@ function chainText(ch, lang) {
 }
 
 function jobText(j, lang) {
-  const params = { kind: label(lang, "job.kind.", j.kind), state: label(lang, "job.state.", j.state), stage: j.stage };
+  const params = { kind: label(lang, "job.kind.", j.kind), state: label(lang, "job.state.", j.state),
+    stage: label(lang, "job.stage.", j.stage) };
   return translate(lang, j.stage ? "jobs.row_stage" : "jobs.row", params);
 }
 
@@ -560,7 +561,7 @@ function renderHeader() {
   if (active) {
     badge.dataset.variant = "secondary";
     badge.textContent = tr("top.job", { kind: label(ui.lang, "job.kind.", active.kind),
-      state: active.stage || label(ui.lang, "job.state.", active.state) });
+      state: active.stage ? label(ui.lang, "job.stage.", active.stage) : label(ui.lang, "job.state.", active.state) });
   } else if (!badge.hidden) {
     badge.dataset.variant = "destructive";
     badge.textContent = tr("top.job_failed", { kind: label(ui.lang, "job.kind.", last.kind) });
@@ -596,7 +597,7 @@ function renderSession() {
     const active = serverState.jobs.find((j) => j.state === "queued" || j.state === "running");
     showSessionEmpty(tr("empty.no_clips_title"), active
       ? tr("empty.job_running", { kind: label(ui.lang, "job.kind.", active.kind),
-        state: active.stage || label(ui.lang, "job.state.", active.state) })
+        state: active.stage ? label(ui.lang, "job.stage.", active.stage) : label(ui.lang, "job.state.", active.state) })
       : row ? tr("empty.session_state", { state: label(ui.lang, "session.state.", row.state) })
         : tr("empty.session_no_row"), !active);
     return;

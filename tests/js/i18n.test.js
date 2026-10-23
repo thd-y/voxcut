@@ -182,3 +182,11 @@ test("no catalogs, null params, plural labels (TODOS minors)", () => {
   assert.equal(i18n.errText("en", d("source_no_audio", { src: null })), I18N.en["err.unknown"]);
   assert.equal(i18n.label("en", "lib.", "session_clips"), "session_clips");  // a plural value is not a label
 });
+
+test("an error ending in a command stands on its own line", () => {  // TODOS: "rm -rf /p." stuck the dot to the path
+  const error = d("legacy_error", { detail: "rm -rf /p" });
+  assert.equal(i18n.translate("ru", "empty.open_failed_text", { error }), "rm -rf /p\nОткройте другую сессию в Библиотеке.");
+  assert.equal(i18n.translate("ru", "toast.note_kept", { error }), "rm -rf /p\nТекст сохранён в поле заметки этого клипа.");
+  assert.equal(i18n.translate("en", "empty.open_failed_text", { error }), "rm -rf /p\nOpen another session in the Library.");
+  assert.equal(i18n.translate("en", "toast.note_kept", { error }), "rm -rf /p\nThe text is kept in this clip's note field.");
+});

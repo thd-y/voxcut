@@ -110,7 +110,7 @@
   "empty.no_sessions_title": "Сессий пока нет",
   "empty.no_sessions_text": "Положите записи в папку inbox и импортируйте их в Библиотеке.",
   "empty.open_failed_title": "Сессия не открылась",
-  "empty.open_failed_text": "{error}. Откройте другую сессию в Библиотеке.",
+  "empty.open_failed_text": "{error}\nОткройте другую сессию в Библиотеке.",
   "empty.no_clips_title": "Клипов пока нет",
   "empty.job_running": "Идёт {kind}: {state}.",
   "empty.session_state": "Сессия «{state}»: нажмите «Обработать» в Библиотеке.",
@@ -176,7 +176,7 @@
   "toast.undo_other_run": "Клип не из этого прогона",
   "toast.undo_skipped": "Отмена пропущена.",
   "toast.note_not_saved": "Заметка не сохранена",
-  "toast.note_kept": "{error}. Текст сохранён в поле заметки этого клипа.",
+  "toast.note_kept": "{error}\nТекст сохранён в поле заметки этого клипа.",
   "toast.idea_saved": "Идея записана",
   "toast.explorer_failed": "Проводник не открылся",
   "lib.session_clips": {
