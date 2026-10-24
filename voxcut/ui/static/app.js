@@ -1093,7 +1093,7 @@ const logIsOpen = (j) => (ui.logOpen.has(j.job_id) ? ui.logOpen.get(j.job_id) : 
 
 function jobEl(j, st) {
   const id = j.job_id;
-  const cls = { open: "job-open", moot: "job-moot", retried: "job-moot" }[j.failure]
+  const cls = { open: "job-open", moot: "job-moot", retried: "job-moot", resolved: "job-resolved" }[j.failure]
     || (j.state === "done" ? "job-done" : "");
   const row = el("div", null, `lib-row job-row ${cls}`.trim());
   row.id = `job-${id}`;
