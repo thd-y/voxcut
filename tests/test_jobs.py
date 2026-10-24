@@ -352,3 +352,41 @@ def test_after_done_cause(lay, exc, cause):
     finish(lay, a)
     j.poll()
     assert j.list()[0]["error"] == {"code": "job_after_done_failed", "params": {"cause": cause}}
+
+
+def as_job(lay, kind, params, state=None, run=None):
+    """A job of any kind without building its inputs: submit a backup, then rewrite job.json."""
+    a = jid()
+    Jobs(lay, run=run or FakeRun()).submit(a, "backup", {"mode": "light"})
+    job = json.loads((lay.jobs / a / "job.json").read_text())
+    job["kind"], job["params"] = kind, params
+    (lay.jobs / a / "job.json").write_text(json.dumps(job))
+    if state:
+        finish(lay, a, state)
+    return a
+
+
+@pytest.mark.parametrize("kind, params, subject", [
+    ("process", {"session_id": SID}, {"session_id": SID}),
+    ("import", {"source": "s1", "chain": 2, "files": ["REC0001.WAV"], "start": "2026-08-11 21:30"},
+     {"source": "s1"}),
+    ("backup", {"mode": "full"}, {"mode": "full"}),
+    ("restore", {"name": "voxcut-backup_x_full.tar"}, {"name": "voxcut-backup_x_full.tar"}),
+])
+def test_view_subject_whitelist(lay, kind, params, subject):
+    """D79: subject by a whitelist; files, chain, start never leave job.json."""
+    a = as_job(lay, kind, params, "done")
+    view = Jobs(lay, run=FakeRun()).list()[0]
+    assert view["subject"] == subject
+    dumped = json.dumps(view)
+    for leak in ('"files"', '"chain"', '"start"', "REC0001"):
+        assert leak not in dumped
+    assert view["submitted"] == json.loads((lay.jobs / a / "job.json").read_text())["submitted"]
+
+
+def test_view_old_job_without_submitted(lay):
+    a = as_job(lay, "backup", {"mode": "light"}, "done")
+    job = json.loads((lay.jobs / a / "job.json").read_text())
+    del job["submitted"]
+    (lay.jobs / a / "job.json").write_text(json.dumps(job))
+    assert Jobs(lay, run=FakeRun()).list()[0]["submitted"] is None

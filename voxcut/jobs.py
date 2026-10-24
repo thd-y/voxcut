@@ -32,6 +32,8 @@ class JobParamsError(Coded, ValueError):
     """Every refusal of validate/submit: a 400 with its code, not internal_error."""
 
 
+SUBJECT = {"process": ("session_id",), "import": ("source",), "backup": ("mode",),
+           "restore": ("name",)}  # D79: whitelist, nothing else leaves job.json
 LIST_MAX = 20  # (агент) jobs shown in /api/state; older finished ones stay on disk
 
 
@@ -251,7 +253,11 @@ class Jobs:
         error = st.get("error")
         if isinstance(error, str):  # status.json from before D66
             error = {"code": "legacy_error", "params": {"detail": error}}
-        return {"job_id": job_id, "kind": rec["job"]["kind"], "state": rec["state"],
+        job = rec["job"]
+        params = job.get("params") or {}
+        return {"job_id": job_id, "kind": job["kind"], "state": rec["state"],
+                "subject": {k: params[k] for k in SUBJECT.get(job["kind"], ()) if k in params},
+                "submitted": job.get("submitted"),
                 "stage": st.get("stage"), "error": error,
                 "started": st.get("started"), "finished": st.get("finished"),
                 "result": st.get("result"), "log_tail": tail}
