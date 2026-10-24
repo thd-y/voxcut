@@ -1073,6 +1073,9 @@ function renderLibrary() {
 // D79-D83: the job log, newest first. Open logs, their scroll and focus survive a rebuild by poll.
 function renderJobs(st) {
   const box = $("jobs");
+  if (ui.cancelAsk && !st.jobs.some((j) => j.job_id === ui.cancelAsk && (j.state === "queued" || j.state === "running"))) {
+    ui.cancelAsk = null;  // the job ended while asked: Esc belongs to others again
+  }
   const had = document.activeElement;
   const fkey = had && box.contains(had) ? had.dataset.focus : null;
   const sig = JSON.stringify([st.jobs, st.sessions.map((s) => [s.session_id, s.name]), [...ui.logOpen],
@@ -1122,11 +1125,11 @@ function jobEl(j, st) {
     b.setAttribute("aria-expanded", String(open));
     b.setAttribute("aria-controls", `log-${id}`);
   }
-  if (j.failure === "open") act(button(tr("jobs.retry"), () => retryJob(j), "outline"), "job-retry");
+  if (j.failure === "open") act(button(tr("jobs.retry"), (e) => retryJob(j, e.currentTarget), "outline"), "job-retry");
   if (j.state === "queued" || j.state === "running") {
     if (ui.cancelAsk === id) {  // D83: two steps in the row, like deleting an idea
       acts.append(el("span", tr("jobs.cancel_question")));
-      act(button(tr("common.yes"), () => cancelJob(id), "destructive"), "job-yes");
+      act(button(tr("common.yes"), (e) => cancelJob(id, e.currentTarget), "destructive"), "job-yes");
       act(button(tr("common.no"), () => askCancel(null), "outline"), "job-no");
     } else {
       act(button(tr("jobs.cancel"), () => askCancel(id), "outline"), "job-cancel");
@@ -1197,7 +1200,8 @@ function askCancel(id) {
   if (back) back.focus({ preventScroll: true });
 }
 
-async function cancelJob(id) {
+async function cancelJob(id, b) {
+  b.disabled = true;  // a double click must not send a second request
   ui.cancelAsk = null;
   try {
     await api("POST", `/api/jobs/${id}/cancel`, {});
@@ -1207,7 +1211,8 @@ async function cancelJob(id) {
   }
 }
 
-async function retryJob(j) {  // D82: the server takes kind and params from the failed job
+async function retryJob(j, b) {  // D82: the server takes kind and params from the failed job
+  b.disabled = true;  // a double click must not send a second request
   try {
     await api("POST", `/api/jobs/${j.job_id}/retry`, { job_id: newId() });
     toast(tr("toast.job_submitted"), label(ui.lang, "job.kind.", j.kind));

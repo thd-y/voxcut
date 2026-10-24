@@ -127,6 +127,7 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 .job-moot .error, .job-resolved .error { color: var(--muted-foreground); }  /* D84: no longer an alarm */
 .job-log { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--muted); max-height: 320px; overflow: auto;
   font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }  /* mono: pre, as D77 left it */
+.job-log:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }  /* the Basecoat ring */
 .job-log .stage { color: var(--foreground); font-weight: 600; }
 .job-log .error { color: var(--destructive); }
 .job-group > .job-head > button { grid-column: 2 / -1; justify-self: start; margin-left: -12px; }  /* text on the line column */
