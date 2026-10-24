@@ -100,7 +100,7 @@
   "job.state.queued": "в очереди",
   "job.state.running": "идёт",
   "job.state.done": "готово",
-  "job.state.failed": "упала",
+  "job.state.failed": "ошибка",
   "job.state.cancelled": "отменена",
   "session.state.imported": "импортирована",
   "session.state.assembled": "собрана",

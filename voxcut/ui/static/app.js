@@ -134,6 +134,8 @@ function journalRows(jobs) {
   return rows.map((r) => (!r.run ? r : r.run.length > 1 ? { group: r.run } : { job: r.run[0] }));
 }
 
+const groupKey = (group) => group[group.length - 1].job_id;  // the oldest: stays when a newer backup joins
+
 const groupLine = (group, lang) => translate(lang, "jobs.backup_group",
   { n: group.length, time: ideaTime(group[0].finished || group[0].started || "", lang) });
 
@@ -962,7 +964,8 @@ function renderLibrary() {
   if (!st) return;
   const runs = sid && view ? [sid, runId, view.run_id, view.runs] : null;
   const marks = st.sessions.map((s) => sessionJobMark(st.jobs, s.session_id));
-  setKids($("sessions"), JSON.stringify([st.sessions, runs, marks]), () => (st.sessions.length ? st.sessions.map((s, i) => {
+  const markSig = marks.map((m) => m && [m.kind, m.job.job_id, m.job.state, m.job.stage]);  // not log_tail: no rebuild per poll
+  setKids($("sessions"), JSON.stringify([st.sessions, runs, markSig]), () => (st.sessions.length ? st.sessions.map((s, i) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
     head.append(el("strong", sessionLabel(s, ui.lang)),
@@ -1136,6 +1139,7 @@ function jobEl(j, st) {
     const pre = el("pre", null, "job-log");
     pre.id = `log-${id}`;
     pre.dataset.job = id;
+    pre.dataset.focus = `${id}:log`;
     pre.tabIndex = 0;  // a scrollable region is reachable by keyboard
     pre.setAttribute("aria-label", tr("jobs.log_aria", { kind: label(ui.lang, "job.kind.", j.kind),
       subject: jobSubject(j, st.sessions, ui.lang) }));
@@ -1149,9 +1153,9 @@ function jobEl(j, st) {
   return row;
 }
 
-// D81: done backups in a row; the key is the newest job of the group
+// D81: done backups in a row
 function groupEl(group, st) {
-  const key = group[0].job_id;
+  const key = groupKey(group);
   const open = ui.groupOpen.has(key);
   const row = el("div", null, "lib-row job-group job-done");
   const head = el("div", null, "job-head");
@@ -1762,7 +1766,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, statusText, summaryText, chainText, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupLine,
+    counts, statusText, summaryText, chainText, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
     afterOpenError, retryAfter, codedError, errDesc };
 } else {

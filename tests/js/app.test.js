@@ -299,7 +299,7 @@ test("jobLine", () => {  // D79: «{kind} {subject} — {state}»; the stage als
     `обработка ${label} — упала на „поиске речи“`);
   assert.equal(app.jobLine(job("process", "failed", { stage: "probs" }), SESSIONS, "en"),
     "processing 11 Aug, 21:30 · 4 h 16 min — failed at “speech detection”");
-  assert.equal(app.jobLine(job("process", "failed"), [], "ru"), `обработка ${SID} — упала`);
+  assert.equal(app.jobLine(job("process", "failed"), [], "ru"), `обработка ${SID} — ошибка`);
   assert.equal(app.jobLine(job("import", "done"), [], "ru"), "импорт 24_oct — готово");
   assert.equal(app.jobLine(job("backup", "done"), [], "ru"), "бэкап light — готово");
   assert.equal(app.jobLine(job("process", "running", { stage: "segment" }), SESSIONS, "ru"),
@@ -342,6 +342,17 @@ test("journalRows", () => {  // D81: newest first; done backups in a row become 
   assert.deepEqual(ids(app.journalRows([b(1), b(2, "failed"), b(3)])), ["3", "2", "1"]);
   assert.deepEqual(ids(app.journalRows([b(1), b(2, "cancelled"), b(3), b(4, "running")])), ["4", "3", "2", "1"]);
   assert.deepEqual(app.journalRows([]), []);
+});
+
+test("groupKey", () => {  // an open group stays open when a newer backup joins it
+  const b = (n) => ({ ...job("backup", "done"), job_id: String(n) });
+  const before = app.journalRows([b(1), b(2)])[0].group;
+  const after = app.journalRows([b(1), b(2), b(3)])[0].group;
+  assert.equal(app.groupKey(after), app.groupKey(before));
+});
+
+test("jobLine failed without a stage", () => {  // ru: «ошибка» fits every kind; «упала на» only with a stage
+  assert.equal(app.jobLine(job("import", "failed"), [], "ru"), "импорт 24_oct — ошибка");
 });
 
 test("groupLine", () => {  // D81: «бэкап ×7 — готово · последний 23.10, 10:37»
