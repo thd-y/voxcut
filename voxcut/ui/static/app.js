@@ -628,15 +628,17 @@ function renderHeader() {
   const badge = $("job-badge");
   const jobs = serverState ? serverState.jobs : [];
   const active = jobs.find((j) => j.state === "queued" || j.state === "running");
-  const last = jobs[jobs.length - 1];
-  badge.hidden = !active && !(last && last.state === "failed");
+  badge.hidden = !active;
   if (active) {
     badge.dataset.variant = "secondary";
     badge.textContent = tr("top.job", { kind: label(ui.lang, "job.kind.", active.kind),
       state: active.stage ? label(ui.lang, "job.stage.", active.stage) : label(ui.lang, "job.state.", active.state) });
-  } else if (!badge.hidden) {
-    badge.dataset.variant = "destructive";
-    badge.textContent = tr("top.job_failed", { kind: label(ui.lang, "job.kind.", last.kind) });
+  }
+  const fb = failedBadge(jobs);  // D84: a second, red badge while any failure is open
+  $("fail-badge").hidden = !fb;
+  if (fb) {
+    $("fail-badge").textContent = tr(fb.more ? "top.job_failed_more" : "top.job_failed",
+      { kind: label(ui.lang, "job.kind.", fb.job.kind), n: fb.more });
   }
   $("library-btn").setAttribute("aria-pressed", String(ui.screen === "library"));
 }
@@ -959,13 +961,26 @@ function renderLibrary() {
   const st = serverState;
   if (!st) return;
   const runs = sid && view ? [sid, runId, view.run_id, view.runs] : null;
-  setKids($("sessions"), JSON.stringify([st.sessions, runs]), () => (st.sessions.length ? st.sessions.map((s) => {
+  const marks = st.sessions.map((s) => sessionJobMark(st.jobs, s.session_id));
+  setKids($("sessions"), JSON.stringify([st.sessions, runs, marks]), () => (st.sessions.length ? st.sessions.map((s, i) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
     head.append(el("strong", sessionLabel(s, ui.lang)),
       el("span", s.n_clips !== null
         ? tr("lib.session_clips", { state: label(ui.lang, "session.state.", s.state), n: s.n_clips })
         : label(ui.lang, "session.state.", s.state), "muted"));
+    const mark = marks[i];  // D85: the job state lives on the session row too; buttons stay in the log
+    if (mark && mark.kind === "running") {
+      head.append(el("span", tr("lib.session_running", { stage: mark.job.stage
+        ? label(ui.lang, "job.stage.", mark.job.stage) : label(ui.lang, "job.state.", mark.job.state) }), "badge session-running"));
+      head.lastChild.dataset.variant = "secondary";
+    } else if (mark) {
+      const b = el("button", tr("lib.session_failed"), "badge session-failed");
+      b.type = "button";
+      b.dataset.variant = "destructive";
+      b.addEventListener("click", () => openJobLog(mark.job.job_id));
+      head.append(b);
+    }
     row.append(head);
     const acts = el("div", null, "row");
     if (s.n_clips) {
@@ -1160,6 +1175,8 @@ function groupEl(group, st) {
 // D84: open the library at a job, its log open, focus on its row
 function openJobLog(jobId) {
   ui.logOpen.set(jobId, true);
+  ui.rechoose = null;
+  ui.ideaDelete = null;
   ui.screen = "library";
   render();
   const row = $(`job-${jobId}`);
@@ -1663,6 +1680,10 @@ function bind() {
   $("theme").addEventListener("click", () => {
     ui.theme = document.documentElement.classList.contains("dark") ? "light" : "dark";
     applyTheme();
+  });
+  $("fail-badge").addEventListener("click", () => {
+    const fb = serverState && failedBadge(serverState.jobs);
+    if (fb) openJobLog(fb.job.job_id);
   });
   $("job-badge").addEventListener("click", () => {
     ui.screen = "library";
