@@ -19,7 +19,8 @@ LUCIDE_SHA256 = "eeeb8ec76ade50ef1e41547941836815006d4976366b33b7e1ab796ea38ccf2
 LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mic-vocal", "music",
                 "audio-waveform", "ellipsis", "notebook-pen", "lightbulb", "pencil", "folder-open",
                 "folder-input", "cog", "archive", "x", "maximize-2"]  # D55, D58
-LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt"}
+MULISH_SHA256 = "00f1105796291a2fdda117a0fc7f25d8e68f8010cdbb34a411f60b3bd57717ac"  # google/fonts e7db6ca, D77
+LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt", "vendor/OFL-mulish.txt"}
 
 
 SVG_NS = 'xmlns="http://www.w3.org/2000/svg"'  # a standalone SVG needs it; not a request
@@ -74,6 +75,24 @@ def test_vendor_lucide_pinned():
     assert re.findall(r'<symbol id="([^"]+)"', data.decode()) == LUCIDE_ICONS
 
 
+def test_vendor_mulish_pinned():
+    data = (STATIC_DIR / "vendor" / "Mulish.ttf").read_bytes()
+    assert hashlib.sha256(data).hexdigest() == MULISH_SHA256
+    assert (STATIC_DIR / "vendor" / "OFL-mulish.txt").is_file()
+
+
+def test_font_face():
+    # D77: Mulish for the whole UI, text visible at once if the file fails; mono places stay system
+    css = (STATIC_DIR / "app.css").read_text()
+    faces = re.findall(r"@font-face\s*\{([^}]*)\}", css)
+    assert len(faces) == 1
+    for decl in ('font-family: "Mulish"', 'src: url("/vendor/Mulish.ttf") format("truetype")',
+                 "font-weight: 200 1000", "font-display: swap"):
+        assert decl in faces[0], decl
+    assert '--font-sans: "Mulish", system-ui, "Segoe UI", sans-serif' in css
+    assert "--font-mono" not in css
+
+
 def test_icon_refs_exist_in_sprite():
     refs = set()
     for name in ("index.html", "app.js"):
@@ -92,10 +111,11 @@ def test_index_served_with_csp(tmp_path):
         c = Client(app)
         assert c.req("GET", "/i18n/ru.js")[1].get("Content-Type") == "text/javascript; charset=utf-8"
         for path in ("/", "/app.js", "/i18n.js", "/i18n/en.js", "/i18n/ru.js", "/app.css", "/vendor/basecoat-luma.css",
-                     "/vendor/lucide-sprite.svg", "/favicon.svg"):
+                     "/vendor/lucide-sprite.svg", "/vendor/Mulish.ttf", "/favicon.svg"):
             status, headers, _ = c.req("GET", path)
             assert status == 200 and {k: headers.get(k) for k in SECURITY} == SECURITY
         assert c.req("GET", "/favicon.svg")[1].get("Content-Type") == "image/svg+xml"  # D60
+        assert c.req("GET", "/vendor/Mulish.ttf")[1].get("Content-Type") == "font/ttf"  # D77
     finally:
         server.shutdown()
         server.server_close()

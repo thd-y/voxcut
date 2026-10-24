@@ -1,4 +1,8 @@
 /* Layout on top of Basecoat Luma (R8): own Grid/Flexbox, Basecoat semantic tokens only. */
+/* D77: Mulish, local; mono stays system */
+@font-face { font-family: "Mulish"; src: url("/vendor/Mulish.ttf") format("truetype");
+  font-weight: 200 1000; font-display: swap; }
+:root { --font-sans: "Mulish", system-ui, "Segoe UI", sans-serif; }
 :root { --kept: oklch(0.52 0.15 150); --kept-foreground: oklch(0.99 0 0); }
 html.dark { --kept: oklch(0.7 0.15 150); --kept-foreground: oklch(0.2 0 0); }
 /* Audit 2026-10-22: light-theme text >= 4.5:1; :not(.dark) keeps Basecoat's dark tokens */

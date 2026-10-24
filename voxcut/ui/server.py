@@ -52,6 +52,7 @@ STATIC = {
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/vendor/basecoat-luma.css": ("vendor/basecoat-luma.css", "text/css; charset=utf-8"),
     "/vendor/lucide-sprite.svg": ("vendor/lucide-sprite.svg", "image/svg+xml"),
+    "/vendor/Mulish.ttf": ("vendor/Mulish.ttf", "font/ttf"),  # D77
     "/favicon.svg": ("img/favicon.svg", "image/svg+xml"),  # D60: Lucide audio-waveform
 }
 JSON_TYPE = "application/json; charset=utf-8"
