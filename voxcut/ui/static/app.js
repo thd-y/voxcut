@@ -287,6 +287,8 @@ const ui = {
   noteClipId: null, noteSaving: false, expanded: false,
   rechoose: null,  // D52: null | "menu" | the decision awaiting confirmation
   ideaDelete: null, ideaDeleting: false,  // D56: the idea asked about, a delete in flight
+  logOpen: new Map(), logPinned: new Map(), logScroll: new Map(),  // D80: by job_id, window memory only
+  groupOpen: new Set(), cancelAsk: null,  // D81: open backup groups; D83: the job asked about
   noteStatus: null, ideaStatus: null,  // null | {key, params}: drawn in the current language (L13)
 };
 const GAP_MIN_S = 120;  // one recording: 131 gaps >= 30 s (noise), 12 >= 120 s (real breaks)
@@ -1043,21 +1045,155 @@ function renderLibrary() {
     }
   }
 
-  setKids($("jobs"), JSON.stringify(st.jobs), () => (st.jobs.length ? st.jobs.slice().reverse().map((j) => {
-    const box = el("div", null, "lib-row");
-    box.append(el("strong", jobLine(j, st.sessions, ui.lang)));
-    if (j.error) box.append(el("div", errText(ui.lang, j.error), "error"));
-    if (j.log_tail.length) box.append(el("pre", j.log_tail.join("\n")));
-    if (j.state === "queued" || j.state === "running") {
-      box.append(button(tr("jobs.cancel"), () => api("POST", `/api/jobs/${j.job_id}/cancel`, {})
-        .then(poll).catch(fail), "outline"));
-    }
-    return box;
-  }) : [el("p", tr("jobs.none"), "muted")]));
+  renderJobs(st);
 
   $("backup-info").textContent = st.last_backup
     ? tr("backup.last", { time: backupTime(st.last_backup, ui.lang) }) : tr("backup.none");
   renderIdeas();
+}
+
+// D79-D83: the job log, newest first. Open logs, their scroll and focus survive a rebuild by poll.
+function renderJobs(st) {
+  const box = $("jobs");
+  const had = document.activeElement;
+  const fkey = had && box.contains(had) ? had.dataset.focus : null;
+  const sig = JSON.stringify([st.jobs, st.sessions.map((s) => [s.session_id, s.name]), [...ui.logOpen],
+    ui.cancelAsk, [...ui.groupOpen], Math.floor(Date.now() / 60000)]);  // the minute: «running 12 min»
+  setKids(box, sig, () => (st.jobs.length ? journalRows(st.jobs).map((r) => (r.group ? groupEl(r.group, st)
+    : jobEl(r.job, st))) : [el("p", tr("jobs.none"), "muted")]));
+  for (const pre of box.querySelectorAll(".job-log")) {
+    const id = pre.dataset.job;
+    pre.scrollTop = ui.logPinned.get(id) === false ? ui.logScroll.get(id) || 0 : pre.scrollHeight;
+  }
+  if (fkey && !box.contains(document.activeElement)) {
+    const again = [...box.querySelectorAll("[data-focus]")].find((e) => e.dataset.focus === fkey);
+    if (again) again.focus({ preventScroll: true });
+  }
+}
+
+const logIsOpen = (j) => (ui.logOpen.has(j.job_id) ? ui.logOpen.get(j.job_id) : j.state === "running");
+
+function jobEl(j, st) {
+  const id = j.job_id;
+  const cls = { open: "job-open", moot: "job-moot", retried: "job-moot" }[j.failure]
+    || (j.state === "done" ? "job-done" : "");
+  const row = el("div", null, `lib-row job-row ${cls}`.trim());
+  row.id = `job-${id}`;
+  row.tabIndex = -1;  // D84: the red badge brings focus here
+  row.dataset.focus = id;
+  const head = el("div", null, "job-head");
+  const line = el("span", jobLine(j, st.sessions, ui.lang), "job-line");
+  const note = { resolved: "jobs.resolved", retried: "jobs.retried",
+    moot: j.kind === "restore" ? "jobs.moot_archive" : "jobs.moot_source" }[j.failure];
+  if (note) line.append(el("span", tr(note), "job-note"));
+  head.append(el("time", jobClock(j, ui.lang), "job-time"), line,
+    el("span", jobDuration(j, new Date(), ui.lang), "job-dur"));
+  const acts = el("span", null, "job-acts");
+  const open = logIsOpen(j) && j.log_tail.length > 0;
+  const act = (b, cls) => {
+    b.classList.add(cls);
+    b.dataset.focus = `${id}:${cls}`;
+    acts.append(b);
+    return b;
+  };
+  if (j.log_tail.length) {
+    const b = act(button(`${tr("jobs.log")} ${open ? "▾" : "▸"}`, () => {
+      ui.logOpen.set(id, !open);
+      renderLibrary();
+    }, "ghost"), "job-log-btn");
+    b.setAttribute("aria-expanded", String(open));
+    b.setAttribute("aria-controls", `log-${id}`);
+  }
+  if (j.failure === "open") act(button(tr("jobs.retry"), () => retryJob(j), "outline"), "job-retry");
+  if (j.state === "queued" || j.state === "running") {
+    if (ui.cancelAsk === id) {  // D83: two steps in the row, like deleting an idea
+      acts.append(el("span", tr("jobs.cancel_question")));
+      act(button(tr("common.yes"), () => cancelJob(id), "destructive"), "job-yes");
+      act(button(tr("common.no"), () => askCancel(null), "outline"), "job-no");
+    } else {
+      act(button(tr("jobs.cancel"), () => askCancel(id), "outline"), "job-cancel");
+    }
+  }
+  head.append(acts);
+  row.append(head);
+  if (j.error) row.append(el("div", errText(ui.lang, j.error), "error"));
+  if (open) {
+    const pre = el("pre", null, "job-log");
+    pre.id = `log-${id}`;
+    pre.dataset.job = id;
+    pre.tabIndex = 0;  // a scrollable region is reachable by keyboard
+    pre.setAttribute("aria-label", tr("jobs.log_aria", { kind: label(ui.lang, "job.kind.", j.kind),
+      subject: jobSubject(j, st.sessions, ui.lang) }));
+    for (const l of logLines(j.log_tail, j.state === "failed")) pre.append(el("span", l.text, l.cls || null), "\n");
+    pre.addEventListener("scroll", () => {
+      ui.logPinned.set(id, pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 2);
+      ui.logScroll.set(id, pre.scrollTop);
+    });
+    row.append(pre);
+  }
+  return row;
+}
+
+// D81: done backups in a row; the key is the newest job of the group
+function groupEl(group, st) {
+  const key = group[0].job_id;
+  const open = ui.groupOpen.has(key);
+  const row = el("div", null, "lib-row job-group job-done");
+  const head = el("div", null, "job-head");
+  const b = button(`${groupLine(group, ui.lang)} ${open ? "▾" : "▸"}`, () => {
+    if (open) ui.groupOpen.delete(key);
+    else ui.groupOpen.add(key);
+    renderLibrary();
+  }, "ghost");
+  b.setAttribute("aria-expanded", String(open));
+  b.dataset.focus = `${key}:group`;
+  head.append(el("time", jobClock(group[0], ui.lang), "job-time"), b);
+  row.append(head);
+  if (open) {
+    const items = el("div", null, "job-group-items");
+    items.append(...group.map((j) => jobEl(j, st)));
+    row.append(items);
+  }
+  return row;
+}
+
+// D84: open the library at a job, its log open, focus on its row
+function openJobLog(jobId) {
+  ui.logOpen.set(jobId, true);
+  ui.screen = "library";
+  render();
+  const row = $(`job-${jobId}`);
+  if (!row) return;
+  row.scrollIntoView({ block: "center" });
+  row.focus({ preventScroll: true });
+}
+
+function askCancel(id) {
+  const was = ui.cancelAsk;
+  ui.cancelAsk = id;
+  renderLibrary();
+  const back = id ? $(`job-${id}`).querySelector(".job-no") : was && $(`job-${was}`) && $(`job-${was}`).querySelector(".job-cancel");
+  if (back) back.focus({ preventScroll: true });
+}
+
+async function cancelJob(id) {
+  ui.cancelAsk = null;
+  try {
+    await api("POST", `/api/jobs/${id}/cancel`, {});
+    await poll();
+  } catch (e) {
+    fail(e);
+  }
+}
+
+async function retryJob(j) {  // D82: the server takes kind and params from the failed job
+  try {
+    await api("POST", `/api/jobs/${j.job_id}/retry`, { job_id: newId() });
+    toast(tr("toast.job_submitted"), label(ui.lang, "job.kind.", j.kind));
+    await poll();
+  } catch (e) {
+    fail(e);
+  }
 }
 
 // D56-D58: one list in two places (the card and the expanded window), newest first.
@@ -1445,6 +1581,7 @@ async function saveIdea() {
 }
 
 function escape(target) {
+  if (ui.cancelAsk && ui.screen === "library" && !document.querySelector("dialog[open]")) return askCancel(null);
   // The idea question takes Esc only when nothing else is open over it.
   if (ui.ideaDelete && !ui.ideaDeleting && ui.screen === "library"
       && !document.querySelector("dialog[open]:not(#ideas-dialog)")) return askDeleteIdea(null);

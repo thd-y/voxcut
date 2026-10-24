@@ -106,7 +106,19 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
   border-bottom: 1px solid var(--border); }
 .lib-row:last-child { border-bottom: 0; }
 .lib-row .error { color: var(--destructive); white-space: pre-wrap; }
-.lib-row pre { white-space: pre-wrap; font-size: 12px; max-height: 160px; overflow: auto; margin: 0; }
+/* D79-D81: the job log; D80: the log under its row */
+.job-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.job-time, .job-dur { font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.job-line { flex: 1; min-width: 12em; }
+.job-note { margin-left: 8px; color: var(--muted-foreground); }
+.job-acts { display: flex; align-items: center; gap: 6px; }
+.job-open .job-line { color: var(--destructive); }
+.job-done .job-line, .job-moot .job-line { color: var(--muted-foreground); }
+.job-log { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--muted); max-height: 320px; overflow: auto;
+  font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }  /* mono: pre, as D77 left it */
+.job-log .stage { color: var(--foreground); font-weight: 600; }
+.job-log .error { color: var(--destructive); }
+.job-group-items { padding-left: 12px; border-left: 2px solid var(--border); }
 .ideas { margin: 0; padding: 0; list-style: none; overflow-y: auto; flex: 1; min-height: 0; }
 .ideas li { padding: 8px 0; }
 .ideas li + li { border-top: 1px solid var(--border); }
