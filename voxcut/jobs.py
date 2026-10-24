@@ -236,14 +236,55 @@ class Jobs:
             self._step()
 
     def list(self) -> list[dict]:
-        """Every queued or running job plus the newest finished ones; .run/jobs/ itself only grows."""
+        """Every queued or running job, every open failure (D84) plus the newest finished ones;
+        .run/jobs/ itself only grows."""
         with self._lock:
-            ids = list(self._jobs)
-            return [self._view(j) for n, j in enumerate(ids) if n >= len(ids) - LIST_MAX
-                    or self._jobs[j]["state"] in ("queued", "running")]
+            ids, failures = list(self._jobs), self._failures()
+            return [self._view(j, failures) for n, j in enumerate(ids) if n >= len(ids) - LIST_MAX
+                    or self._jobs[j]["state"] in ("queued", "running") or failures.get(j) == "open"]
 
-    def _view(self, job_id: str) -> dict:
+    def _failures(self) -> dict[str, str]:
+        """D84, D87: a failure is resolved by a later done job reaching its goal, moot when the goal
+        is gone from inbox/, otherwise open. "Later" is the order of self._jobs (one job at a time)."""
+        out, done = {}, []  # done: (kind, params) of done jobs after the one being judged
+        sources = backups = None
+        for job_id in reversed(self._jobs):
+            rec = self._jobs[job_id]
+            kind, p = rec["job"]["kind"], rec["job"].get("params") or {}
+            if rec["state"] == "done":
+                done.append((kind, p))
+            if rec["state"] != "failed":
+                continue
+            later = [q for k, q in done if k == kind]
+            if kind == "process":
+                resolved = any(q.get("session_id") == p.get("session_id") for q in later)
+            elif kind == "import":
+                files = p.get("files")
+                got = {f for q in later if q.get("source") == p.get("source")
+                       for f in q.get("files") or ()}
+                resolved = bool(files) and set(files) <= got
+            elif kind == "backup":
+                resolved = any(q.get("mode") in (p.get("mode"), "full") for q in later)
+            else:
+                resolved = any(q.get("name") == p.get("name") for q in later)
+            if resolved:
+                out[job_id] = "resolved"
+                continue
+            if kind == "import":
+                sources = library._source_names(self.lay) if sources is None else sources
+                moot = p.get("source") not in sources
+            elif kind == "restore":
+                backups = library._backup_names(self.lay) if backups is None else backups
+                moot = p.get("name") not in backups
+            else:
+                moot = False
+            out[job_id] = "moot" if moot else "open"
+        return out
+
+    def _view(self, job_id: str, failures: dict[str, str] | None = None) -> dict:
         rec, d = self._jobs[job_id], self.lay.jobs / job_id
+        if failures is None:
+            failures = self._failures() if rec["state"] == "failed" else {}
         st = _read(d / "status.json") or {}
         try:
             with open(d / "log.txt", errors="replace") as f:
@@ -257,7 +298,7 @@ class Jobs:
         params = job.get("params") or {}
         return {"job_id": job_id, "kind": job["kind"], "state": rec["state"],
                 "subject": {k: params[k] for k in SUBJECT.get(job["kind"], ()) if k in params},
-                "submitted": job.get("submitted"),
+                "submitted": job.get("submitted"), "failure": failures.get(job_id),
                 "stage": st.get("stage"), "error": error,
                 "started": st.get("started"), "finished": st.get("finished"),
                 "result": st.get("result"), "log_tail": tail}

@@ -390,3 +390,73 @@ def test_view_old_job_without_submitted(lay):
     del job["submitted"]
     (lay.jobs / a / "job.json").write_text(json.dumps(job))
     assert Jobs(lay, run=FakeRun()).list()[0]["submitted"] is None
+
+
+def imp(source, files):
+    return ("import", {"source": source, "chain": 1, "files": files, "start": None})
+
+
+S2 = "2026-08-12_21-30_1h.0badc0df"
+A, B = "voxcut-backup_a_full.tar", "voxcut-backup_b_full.tar"
+
+
+@pytest.mark.parametrize("seq, expected", [
+    ([("process", {"session_id": SID}, "failed"), ("process", {"session_id": SID}, "done")],
+     "resolved"),
+    ([("process", {"session_id": SID}, "failed"), ("process", {"session_id": S2}, "done")], "open"),
+    ([("process", {"session_id": SID}, "failed"), ("process", {"session_id": SID}, "cancelled")],
+     "open"),
+    ([(*imp("s1", ["a.wav", "b.wav"]), "failed"), (*imp("s1", ["a.wav"]), "done"),
+      (*imp("s1", ["b.wav"]), "done")], "resolved"),
+    ([(*imp("s1", ["a.wav", "b.wav"]), "failed"), (*imp("s1", ["a.wav", "c.wav"]), "done")], "open"),
+    ([(*imp("s1", ["a.wav"]), "failed"), (*imp("s2", ["a.wav"]), "done")], "open"),  # D87
+    ([("backup", {"mode": "light"}, "failed"), ("backup", {"mode": "full"}, "done")], "resolved"),
+    ([("backup", {"mode": "light"}, "failed"), ("backup", {"mode": "light"}, "done")], "resolved"),
+    ([("backup", {"mode": "full"}, "failed"), ("backup", {"mode": "light"}, "done")], "open"),
+    ([("backup", {"mode": "full"}, "failed"), ("backup", {"mode": "full"}, "done")], "resolved"),
+    ([("backup", {"mode": "full"}, "failed"), ("process", {"session_id": SID}, "done")], "open"),
+    ([("restore", {"name": A}, "failed"), ("restore", {"name": A}, "done")], "resolved"),
+    ([("restore", {"name": A}, "failed"), ("restore", {"name": B}, "done")], "open"),
+    ([(*imp("gone", ["a.wav"]), "failed")], "moot"),
+    ([("restore", {"name": "voxcut-backup_gone_full.tar"}, "failed")], "moot"),
+    ([(*imp("gone", ["a.wav"]), "failed"), (*imp("gone", ["a.wav"]), "done")], "resolved"),
+])
+def test_failure_state(lay, seq, expected):
+    """D84, D87: resolved > moot > open, computed from the job log and inbox/."""
+    for src in ("s1", "s2"):
+        (lay.inbox / src).mkdir()
+        (lay.inbox / src / "a.wav").write_bytes(b"")
+    for name in (A, B):
+        (lay.inbox / name).write_bytes(b"")
+    ids = [as_job(lay, kind, params, state) for kind, params, state in seq]
+    views = {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}
+    assert views[ids[0]]["failure"] == expected
+    assert all(views[i]["failure"] is None for i, (*_, st) in zip(ids, seq) if st != "failed")
+
+
+def test_failure_done_before_does_not_resolve(lay):
+    (lay.inbox / A).write_bytes(b"")
+    as_job(lay, "restore", {"name": A}, "done")
+    a = as_job(lay, "restore", {"name": A}, "failed")
+    assert {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}[a]["failure"] == "open"
+
+
+def test_failure_import_without_files(lay):
+    """A job.json from before files were required: no crash, the failure stays open."""
+    (lay.inbox / "s1").mkdir()
+    (lay.inbox / "s1" / "a.wav").write_bytes(b"")
+    a = as_job(lay, "import", {"source": "s1", "chain": 1, "start": None}, "failed")
+    as_job(lay, *imp("s1", ["a.wav"]), "done")
+    assert {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}[a]["failure"] == "open"
+
+
+def test_list_keeps_open_failure_beyond_window(lay):
+    """D84: an open failure never drops out of /api/state silently."""
+    (lay.inbox / A).write_bytes(b"")
+    a = as_job(lay, "restore", {"name": A}, "failed")
+    for _ in range(LIST_MAX + 5):
+        as_job(lay, "backup", {"mode": "light"}, "done")
+    view = Jobs(lay, run=FakeRun()).list()
+    assert len(view) == LIST_MAX + 1 and view[0]["job_id"] == a and view[0]["failure"] == "open"
+    as_job(lay, "restore", {"name": A}, "done")
+    assert a not in [v["job_id"] for v in Jobs(lay, run=FakeRun()).list()]
