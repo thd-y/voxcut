@@ -179,7 +179,7 @@ test("no catalogs, null params, plural labels (TODOS minors)", () => {
   } finally {
     globalThis.I18N = saved;
   }
-  assert.equal(i18n.translate("en", "jobs.row", { kind: null, state: "x" }), I18N.en["common.unknown"]);
+  assert.equal(i18n.translate("en", "jobs.line", { kind: null, subject: "s", state: "x" }), I18N.en["common.unknown"]);
   assert.equal(i18n.errText("en", d("source_no_audio", { src: null })), I18N.en["err.unknown"]);
   assert.equal(i18n.label("en", "lib.", "session_clips"), "session_clips");  // a plural value is not a label
 });

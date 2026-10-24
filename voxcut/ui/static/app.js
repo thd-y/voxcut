@@ -1076,6 +1076,9 @@ function renderJobs(st) {
   if (ui.cancelAsk && !st.jobs.some((j) => j.job_id === ui.cancelAsk && (j.state === "queued" || j.state === "running"))) {
     ui.cancelAsk = null;  // the job ended while asked: Esc belongs to others again
   }
+  for (const j of st.jobs) {  // a running log stays open after the job ends: its last line is the news
+    if (j.state === "running" && !ui.logOpen.has(j.job_id)) ui.logOpen.set(j.job_id, true);
+  }
   const had = document.activeElement;
   const fkey = had && box.contains(had) ? had.dataset.focus : null;
   const sig = JSON.stringify([st.jobs, st.sessions.map((s) => [s.session_id, s.name]), [...ui.logOpen],
