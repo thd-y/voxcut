@@ -267,9 +267,10 @@ class Jobs:
                     or self._jobs[j]["state"] in ("queued", "running") or failures.get(j) == "open"]
 
     def _failures(self) -> dict[str, str]:
-        """D84, D87: a failure is resolved by a later done job reaching its goal, moot when the goal
-        is gone from inbox/, otherwise open. "Later" is the order of self._jobs (one job at a time)."""
-        out, done = {}, []  # done: (kind, params) of done jobs after the one being judged
+        """D84, D87, D88: a failure is resolved by a later done job reaching its goal, retried when
+        the same job failed again later, moot when the goal is gone from inbox/, otherwise open.
+        "Later" is the order of self._jobs (one job at a time)."""
+        out, done, failed = {}, [], []  # (kind, params) of done / failed jobs after the one judged
         sources = backups = None
         for job_id in reversed(self._jobs):
             rec = self._jobs[job_id]
@@ -278,6 +279,7 @@ class Jobs:
                 done.append((kind, p))
             if rec["state"] != "failed":
                 continue
+            failed_later, failed = (kind, p) in failed, failed + [(kind, p)]
             later = [q for k, q in done if k == kind]
             if kind == "process":
                 resolved = any(q.get("session_id") == p.get("session_id") for q in later)
@@ -290,8 +292,8 @@ class Jobs:
                 resolved = any(q.get("mode") in (p.get("mode"), "full") for q in later)
             else:
                 resolved = any(q.get("name") == p.get("name") for q in later)
-            if resolved:
-                out[job_id] = "resolved"
+            if resolved or failed_later:  # D88: a later identical failure supersedes this one
+                out[job_id] = "resolved" if resolved else "retried"
                 continue
             if kind == "import":
                 sources = library._source_names(self.lay) if sources is None else sources

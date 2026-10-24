@@ -529,3 +529,16 @@ def test_validate_import_files_present(lay, files, code):
     with pytest.raises(jobs.JobParamsError) as e:
         validate("import", {"source": "s1", "chain": 1, "files": files, "start": None}, lay)
     assert e.value.code == code
+
+
+def test_failure_retried(lay):
+    """D88: a later failure of the same job supersedes it; only the newest stays open."""
+    old = as_job(lay, "backup", {"mode": "full"}, "failed")
+    mid = as_job(lay, "backup", {"mode": "full"}, "failed")
+    other = as_job(lay, "backup", {"mode": "light"}, "failed")
+    new = as_job(lay, "backup", {"mode": "full"}, "failed")
+    got = {v["job_id"]: v["failure"] for v in Jobs(lay, run=FakeRun()).list()}
+    assert [got[old], got[mid], got[other], got[new]] == ["retried", "retried", "open", "open"]
+    as_job(lay, "backup", {"mode": "full"}, "done")
+    got = {v["job_id"]: v["failure"] for v in Jobs(lay, run=FakeRun()).list()}
+    assert [got[old], got[new]] == ["resolved", "resolved"]
