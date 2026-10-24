@@ -130,7 +130,7 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 .job-log:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }  /* the Basecoat ring */
 .job-log .stage { color: var(--foreground); font-weight: 600; }
 .job-log .error { color: var(--destructive); }
-.job-group > .job-head > button { grid-column: 2 / -1; justify-self: start; margin-left: -12px; }  /* text on the line column */
+.job-group > .job-head > button { grid-column: 2 / -1; justify-self: start; padding-inline: 0; background: none; }  /* a text toggle on the line column */
 .job-group-items { align-self: start; }  /* baseline alignment threw the block 33M px up (Chromium) */
 .job-group-items > .lib-row:last-child { padding-bottom: 0; }
 .ideas { margin: 0; padding: 0; list-style: none; overflow-y: auto; flex: 1; min-height: 0; }

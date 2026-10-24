@@ -267,11 +267,11 @@ class Jobs:
                     or self._jobs[j]["state"] in ("queued", "running") or failures.get(j) == "open"]
 
     def _failures(self) -> dict[str, str]:
-        """D84, D87, D88: a failure is resolved by a later done job reaching its goal, retried when
+        """D84, D87, D88, D89: a failure is resolved by a later done job reaching its goal, retried when
         the same job failed again later, moot when the goal is gone from inbox/, otherwise open.
         "Later" is the order of self._jobs (one job at a time)."""
         out, done, failed = {}, [], []  # (kind, params) of done / failed jobs after the one judged
-        sources = backups = None
+        sources = backups = imported = None
         for job_id in reversed(self._jobs):
             rec = self._jobs[job_id]
             kind, p = rec["job"]["kind"], rec["job"].get("params") or {}
@@ -287,6 +287,9 @@ class Jobs:
                 files = p.get("files")
                 got = {f for q in later if q.get("source") == p.get("source")
                        for f in q.get("files") or ()}
+                if files and not set(files) <= got:  # D89: «Обработать» may have finished it
+                    imported = library.imported_files(self.lay) if imported is None else imported
+                    got = imported[0].get(p.get("source"), set())
                 resolved = bool(files) and set(files) <= got
             elif kind == "backup":
                 resolved = any(q.get("mode") in (p.get("mode"), "full") for q in later)
@@ -297,7 +300,11 @@ class Jobs:
                 continue
             if kind == "import":
                 sources = library._source_names(self.lay) if sources is None else sources
-                moot = p.get("source") not in sources
+                files, src = p.get("files") or [], p.get("source")
+                imported = library.imported_files(self.lay) if imported is None else imported
+                moot = src not in sources or any(  # D89: a file neither in its folder nor pending
+                    f == Path(f).name and not (self.lay.inbox / src / f).is_file()
+                    and f not in imported[1].get(src, set()) for f in files)
             elif kind == "restore":
                 backups = library._backup_names(self.lay) if backups is None else backups
                 moot = p.get("name") not in backups

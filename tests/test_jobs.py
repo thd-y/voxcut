@@ -426,6 +426,7 @@ def test_failure_state(lay, seq, expected):
     for src in ("s1", "s2"):
         (lay.inbox / src).mkdir()
         (lay.inbox / src / "a.wav").write_bytes(b"")
+    (lay.inbox / "s1" / "b.wav").write_bytes(b"")  # D89: a file still in its folder keeps it open
     for name in (A, B):
         (lay.inbox / name).write_bytes(b"")
     ids = [as_job(lay, kind, params, state) for kind, params, state in seq]
@@ -542,3 +543,36 @@ def test_failure_retried(lay):
     as_job(lay, "backup", {"mode": "full"}, "done")
     got = {v["job_id"]: v["failure"] for v in Jobs(lay, run=FakeRun()).list()}
     assert [got[old], got[new]] == ["resolved", "resolved"]
+
+
+def session_import(lay, name, source, files, pending=False):
+    d = lay.sessions / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / ("import.pending.json" if pending else "import.json")).write_text(json.dumps(
+        {"source": source, "files": [{"name": f, "sha256": "0" * 64} for f in files]}))
+
+
+@pytest.mark.parametrize("setup, expected", [
+    (lambda lay: session_import(lay, SID, "s1", ["a.wav", "b.wav"]), "resolved"),  # «Обработать» finished it
+    (lambda lay: session_import(lay, SID, "s2", ["a.wav", "b.wav"]), "moot"),  # same names, other folder
+    (lambda lay: session_import(lay, SID, "s1", ["a.wav", "b.wav"], pending=True), "open"),  # to finish
+    (lambda lay: (lay.inbox / "s1" / "a.wav").write_bytes(b""), "moot"),  # b.wav taken away by hand
+    (lambda lay: [(lay.inbox / "s1" / f).write_bytes(b"") for f in ("a.wav", "b.wav")], "open"),
+])
+def test_failure_import_files_where(lay, setup, expected):
+    """D89: resolved once the files are in a session; moot once one is neither in inbox/ nor pending."""
+    (lay.inbox / "s1").mkdir()
+    (lay.inbox / "s1" / "c.wav").write_bytes(b"")  # another chain keeps the folder listed
+    a = as_job(lay, *imp("s1", ["a.wav", "b.wav"]), "failed")
+    setup(lay)
+    assert {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}[a]["failure"] == expected
+
+
+def test_failure_import_bad_session_json(lay):
+    """One unreadable import.json must not take /api/state down."""
+    (lay.inbox / "s1").mkdir()
+    (lay.inbox / "s1" / "a.wav").write_bytes(b"")
+    a = as_job(lay, *imp("s1", ["a.wav"]), "failed")
+    (lay.sessions / SID).mkdir(parents=True)
+    (lay.sessions / SID / "import.json").write_text("{не json")
+    assert {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}[a]["failure"] == "open"

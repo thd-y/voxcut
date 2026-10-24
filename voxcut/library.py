@@ -211,6 +211,24 @@ def _backup_names(lay: Layout) -> list[str]:
     return sorted(p.name for p in entries if p.is_file() and BACKUP_RE.fullmatch(p.name))
 
 
+def imported_files(lay: Layout) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """D89: file names per inbox source in finished (import.json) and unfinished imports."""
+    done: dict[str, set[str]] = {}
+    pending: dict[str, set[str]] = {}
+    for path in sorted(lay.sessions.glob("*/import*.json")):
+        if path.name not in ("import.json", "import.pending.json") or (
+                path.name == "import.pending.json" and (path.parent / "import.json").exists()):
+            continue
+        try:
+            meta = load_json(path)
+            source, names = meta["source"], {f["name"] for f in meta["files"]}
+        except (OSError, ValueError, KeyError, TypeError):  # one bad dir must not take the state down
+            continue
+        if isinstance(source, str):
+            (done if path.name == "import.json" else pending).setdefault(source, set()).update(names)
+    return done, pending
+
+
 def _write_json(path: Path, obj) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w") as f:
