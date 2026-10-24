@@ -86,10 +86,77 @@ function chainText(ch, lang) {
     n: ch.files.length, start: ch.start_local, minutes: (ch.duration_s / 60).toFixed(1) });
 }
 
-function jobText(j, lang) {
-  const params = { kind: label(lang, "job.kind.", j.kind), state: label(lang, "job.state.", j.state),
-    stage: label(lang, "job.stage.", j.stage) };
-  return translate(lang, j.state === "running" && j.stage ? "jobs.row_stage" : "jobs.row", params);  // D75
+// D79: what the job is about; a session through its label, else the raw id
+function jobSubject(j, sessions, lang) {
+  const s = j.subject || {};
+  if (j.kind === "process") {
+    const row = sessions.find((r) => r.session_id === s.session_id);
+    return row ? sessionLabel(row, lang) : s.session_id || "";
+  }
+  if (j.kind === "import") return s.source === "" ? translate(lang, "inbox.root") : s.source || "";
+  return (j.kind === "backup" ? s.mode : j.kind === "restore" ? s.name : "") || "";
+}
+
+// D79: «{kind} {subject} — {state}»; the stage while running and where it failed (refines D75)
+function jobLine(j, sessions, lang) {
+  const params = { kind: label(lang, "job.kind.", j.kind), subject: jobSubject(j, sessions, lang),
+    state: j.state === "running" && j.stage ? label(lang, "job.stage.", j.stage) : label(lang, "job.state.", j.state),
+    stage: label(lang, "job.stage_at.", j.stage) };
+  const key = j.state === "failed" && j.stage ? "jobs.line_failed_at" : "jobs.line";
+  return translate(lang, key, params).replace(/ {2}—/, " —");  // a job without a subject
+}
+
+const jobClock = (j, lang) => ideaTime(j.started || j.submitted || "", lang);
+
+function fmtSpan(seconds, lang) {
+  const t = Math.max(0, Math.floor(seconds));
+  const [h, m] = [Math.floor(t / 3600), Math.floor((t % 3600) / 60)];
+  if (h) return translate(lang, m ? "dur.hm" : "dur.h", { h, m });
+  return m ? translate(lang, "dur.m", { m }) : translate(lang, "dur.s", { s: t });
+}
+
+function jobDuration(j, now, lang) {
+  const from = Date.parse(j.started);
+  if (Number.isNaN(from)) return "";
+  if (j.state === "running") return translate(lang, "jobs.running_for", { dur: fmtSpan((now - from) / 1000, lang) });
+  const to = Date.parse(j.finished);
+  return Number.isNaN(to) ? "" : fmtSpan((to - from) / 1000, lang);
+}
+
+// D81: newest first; two or more done backups in a row become one group
+function journalRows(jobs) {
+  const rows = [];
+  for (const j of jobs.slice().reverse()) {
+    const prev = rows[rows.length - 1];
+    if (j.kind === "backup" && j.state === "done" && prev && prev.run) prev.run.push(j);
+    else rows.push(j.kind === "backup" && j.state === "done" ? { run: [j] } : { job: j });
+  }
+  return rows.map((r) => (!r.run ? r : r.run.length > 1 ? { group: r.run } : { job: r.run[0] }));
+}
+
+const groupLine = (group, lang) => translate(lang, "jobs.backup_group",
+  { n: group.length, time: ideaTime(group[0].finished || group[0].started || "", lang) });
+
+// D84: the newest open failure, and how many more are open
+function failedBadge(jobs) {
+  const open = jobs.filter((j) => j.failure === "open");
+  return open.length ? { job: open[open.length - 1], more: open.length - 1 } : null;
+}
+
+// D85: the session row's mark; a queued or running process outranks an open failure
+function sessionJobMark(jobs, sessionId) {
+  const mine = jobs.filter((j) => j.kind === "process" && j.subject && j.subject.session_id === sessionId);
+  const active = mine.find((j) => j.state === "queued" || j.state === "running");
+  if (active) return { kind: "running", job: active };
+  const failed = mine.filter((j) => j.failure === "open").pop();
+  return failed ? { kind: "failed", job: failed } : null;
+}
+
+// D80: «== stage» lines stand out; a failed job's last non-empty line is the error
+function logLines(tail, failed) {
+  let last = -1;
+  if (failed) tail.forEach((t, i) => { if (t.trim()) last = i; });
+  return tail.map((text, i) => ({ text, cls: text.startsWith("== ") ? "stage" : i === last ? "error" : "" }));
 }
 
 function nextUndecided(clips, from) {
@@ -978,7 +1045,7 @@ function renderLibrary() {
 
   setKids($("jobs"), JSON.stringify(st.jobs), () => (st.jobs.length ? st.jobs.slice().reverse().map((j) => {
     const box = el("div", null, "lib-row");
-    box.append(el("strong", jobText(j, ui.lang)));
+    box.append(el("strong", jobLine(j, st.sessions, ui.lang)));
     if (j.error) box.append(el("div", errText(ui.lang, j.error), "error"));
     if (j.log_tail.length) box.append(el("pre", j.log_tail.join("\n")));
     if (j.state === "queued" || j.state === "running") {
@@ -1537,7 +1604,8 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, statusText, summaryText, chainText, jobText, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
+    counts, statusText, summaryText, chainText, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupLine,
+    failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
     afterOpenError, retryAfter, codedError, errDesc };
 } else {
   start();

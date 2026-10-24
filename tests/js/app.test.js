@@ -279,15 +279,105 @@ test("chainText", () => {  // plural «файл/файла/файлов» (decis
     "chain 1: 2 files, start 2025-03-01T08:29:21, 60.0 min, already imported");
 });
 
-test("jobText", () => {
-  const job = (kind, state, stage = null) => ({ kind, state, stage });
-  assert.equal(app.jobText(job("import", "done"), "ru"), "импорт: готово");
-  assert.equal(app.jobText(job("process", "running", "probs"), "ru"), "обработка: поиск речи");  // D70, D75
-  assert.equal(app.jobText(job("process", "running", "segment"), "en"), "processing: clip boundaries");
-  assert.equal(app.jobText(job("process", "running", "newstage"), "ru"), "обработка: newstage");
-  assert.equal(app.jobText(job("process", "done", "export"), "ru"), "обработка: готово");  // the stage only while running
-  assert.equal(app.jobText(job("process", "failed", "probs"), "en"), "processing: failed");
-  assert.equal(app.jobText(job("__proto__", "новое"), "en"), "__proto__: новое");  // unknown: as is
+const SID = "2026-08-11_21-30_4h16m.0badface";
+const SESSIONS = [{ session_id: SID, name: "2026-08-11_21-30_4h16m" }];
+const job = (kind, state, extra = {}) => ({ job_id: `${kind}-${state}`, kind, state, stage: null,
+  subject: { process: { session_id: SID }, import: { source: "24_oct" }, backup: { mode: "light" },
+    restore: { name: "voxcut-backup_x_full.tar" } }[kind] || {}, failure: null, ...extra });
+
+test("jobSubject", () => {  // D79: the session through sessionLabel, else the raw id
+  assert.equal(app.jobSubject(job("process", "done"), SESSIONS, "ru"), "11 авг., 21:30 · 4 ч 16 мин");
+  assert.equal(app.jobSubject(job("process", "done"), [], "ru"), SID);
+  assert.equal(app.jobSubject(job("import", "done", { subject: { source: "" } }), [], "ru"), "inbox/ (корень)");
+  assert.equal(app.jobSubject(job("restore", "done"), [], "en"), "voxcut-backup_x_full.tar");
+  assert.equal(app.jobSubject(job("odd", "done"), [], "en"), "");
+});
+
+test("jobLine", () => {  // D79: «{kind} {subject} — {state}»; the stage also on a failed one
+  const label = "11 авг., 21:30 · 4 ч 16 мин";
+  assert.equal(app.jobLine(job("process", "failed", { stage: "probs" }), SESSIONS, "ru"),
+    `обработка ${label} — упала на „поиске речи“`);
+  assert.equal(app.jobLine(job("process", "failed", { stage: "probs" }), SESSIONS, "en"),
+    "processing 11 Aug, 21:30 · 4 h 16 min — failed at “speech detection”");
+  assert.equal(app.jobLine(job("process", "failed"), [], "ru"), `обработка ${SID} — упала`);
+  assert.equal(app.jobLine(job("import", "done"), [], "ru"), "импорт 24_oct — готово");
+  assert.equal(app.jobLine(job("backup", "done"), [], "ru"), "бэкап light — готово");
+  assert.equal(app.jobLine(job("process", "running", { stage: "segment" }), SESSIONS, "ru"),
+    `обработка ${label} — разметка клипов`);
+  assert.equal(app.jobLine(job("process", "running"), SESSIONS, "ru"), `обработка ${label} — идёт`);
+  assert.equal(app.jobLine(job("process", "done", { stage: "export" }), SESSIONS, "ru"), `обработка ${label} — готово`);
+  assert.equal(app.jobLine(job("backup", "queued"), [], "en"), "backup light — queued");
+  assert.equal(app.jobLine(job("odd", "failed", { stage: "newstage" }), [], "ru"), "odd — упала на „newstage“");
+});
+
+test("jobClock and jobDuration", () => {  // D79: start (or submission) time; how long it ran or runs
+  const tz = process.env.TZ;
+  process.env.TZ = "Europe/Moscow";
+  try {
+    assert.equal(app.jobClock({ started: "2026-08-11T04:25:00+03:00", submitted: "2026-08-11T04:20:00+03:00" }, "ru"), "11.08, 04:25");
+    assert.equal(app.jobClock({ started: null, submitted: "2026-08-11T04:20:00+03:00" }, "ru"), "11.08, 04:20");
+    assert.equal(app.jobClock({}, "ru"), "");
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+  const now = new Date("2026-10-24T10:12:30+03:00");
+  assert.equal(app.jobDuration({ state: "running", started: "2026-10-24T10:00:00+03:00" }, now, "ru"), "идёт 12 мин");
+  assert.equal(app.jobDuration({ state: "done", started: "2026-10-24T01:00:00+03:00",
+    finished: "2026-10-24T05:16:10+03:00" }, now, "ru"), "4 ч 16 мин");
+  assert.equal(app.jobDuration({ state: "done", started: "2026-10-24T01:00:00+03:00",
+    finished: "2026-10-24T03:00:00+03:00" }, now, "en"), "2 h");
+  assert.equal(app.jobDuration({ state: "failed", started: "2026-10-24T01:00:00+03:00",
+    finished: "2026-10-24T01:00:40+03:00" }, now, "ru"), "40 с");
+  assert.equal(app.jobDuration({ state: "queued", started: null }, now, "ru"), "");
+  assert.equal(app.jobDuration({ state: "cancelled", started: "2026-10-24T01:00:00+03:00", finished: null }, now, "ru"), "");
+});
+
+test("journalRows", () => {  // D81: newest first; done backups in a row become one group
+  const b = (n, state = "done", kind = "backup") => ({ ...job(kind, state), job_id: String(n) });
+  const ids = (rows) => rows.map((r) => (r.group ? r.group.map((j) => j.job_id) : r.job.job_id));
+  assert.deepEqual(ids(app.journalRows([b(1), b(2), b(3, "failed", "process"), b(4), b(5), b(6)])),
+    [["6", "5", "4"], "3", ["2", "1"]]);
+  assert.deepEqual(ids(app.journalRows([b(1), b(2, "done", "import"), b(3)])), ["3", "2", "1"]);
+  assert.deepEqual(ids(app.journalRows([b(1), b(2, "failed"), b(3)])), ["3", "2", "1"]);
+  assert.deepEqual(ids(app.journalRows([b(1), b(2, "cancelled"), b(3), b(4, "running")])), ["4", "3", "2", "1"]);
+  assert.deepEqual(app.journalRows([]), []);
+});
+
+test("groupLine", () => {  // D81: «бэкап ×7 — готово · последний 23.10, 10:37»
+  const tz = process.env.TZ;
+  process.env.TZ = "Europe/Moscow";
+  try {
+    const g = [{ finished: "2026-10-23T10:37:06+03:00" }, { finished: "2026-10-22T10:00:00+03:00" }];
+    assert.equal(app.groupLine(g, "ru"), "бэкап ×2 — готово · последний 23.10, 10:37");
+    assert.equal(app.groupLine(g, "en"), "backup ×2 — done · last 23/10, 10:37");
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+});
+
+test("failedBadge", () => {  // D84: the newest open failure, +N for the rest
+  const f = (id, failure) => ({ ...job("process", "failed"), job_id: id, failure });
+  assert.deepEqual(app.failedBadge([f("a", "open"), f("b", "resolved"), f("c", "open"), job("backup", "running")]),
+    { job: f("c", "open"), more: 1 });
+  assert.equal(app.failedBadge([f("a", "moot"), job("backup", "done")]), null);
+});
+
+test("sessionJobMark", () => {  // D85: a queued or running process outranks an open failure
+  const failed = { ...job("process", "failed"), job_id: "f", failure: "open" };
+  const running = { ...job("process", "running"), job_id: "r" };
+  assert.deepEqual(app.sessionJobMark([failed, running], SID), { kind: "running", job: running });
+  assert.deepEqual(app.sessionJobMark([failed], SID), { kind: "failed", job: failed });
+  assert.equal(app.sessionJobMark([{ ...failed, failure: "resolved" }], SID), null);
+  assert.equal(app.sessionJobMark([failed, running], "other"), null);
+  assert.equal(app.sessionJobMark([{ ...job("backup", "running"), subject: { session_id: SID } }], SID), null);
+});
+
+test("logLines", () => {  // D80: stage lines stand out; a failed job's last non-empty line is red
+  assert.deepEqual(app.logLines(["== probs", "x", "Traceback", ""], true).map((l) => l.cls), ["stage", "", "error", ""]);
+  assert.deepEqual(app.logLines(["== probs", "x"], false).map((l) => l.cls), ["stage", ""]);
+  assert.deepEqual(app.logLines([], true), []);
 });
 
 test("errDesc", () => {  // a thrown null or a body without a descriptor still gives a descriptor
