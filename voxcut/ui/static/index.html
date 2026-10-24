@@ -111,31 +111,35 @@
 </main>
 
 <main id="screen-library" hidden>
-  <section class="card">
-    <header><h2 data-i18n="lib.sessions">Sessions</h2></header>
-    <section id="sessions"></section>
-  </section>
-  <section class="card">
-    <header><h2 data-i18n="inbox.title">Inbox</h2><p><span data-i18n="inbox.hint_before">Recorder files from the product's </span><span class="mono">inbox</span><span data-i18n="inbox.hint_after"> folder.</span></p></header>
-    <section class="row"><button type="button" id="inbox-open" class="btn" data-variant="outline" data-size="sm"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#folder-open"></use></svg><span data-i18n="inbox.open">Open in File Explorer</span></button></section>
-    <section id="inbox"></section>
-  </section>
-  <section class="card">
-    <header><h2 data-i18n="jobs.title">Job log</h2></header>
-    <section id="jobs"></section>
-  </section>
-  <section class="card">
-    <header><h2 data-i18n="backup.title">Backup</h2><p id="backup-info"></p></header>
-    <section class="row">
-      <button type="button" id="backup-full" class="btn" data-variant="outline"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#archive"></use></svg><span data-i18n="backup.full">Full backup</span></button>
-      <button type="button" id="backup-light" class="btn" data-variant="outline"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#archive"></use></svg><span data-i18n="backup.light">Light backup</span></button>
+  <div class="lib-main">
+    <section class="card">
+      <header><h2 data-i18n="lib.sessions">Sessions</h2></header>
+      <section id="sessions"></section>
     </section>
-  </section>
-  <section class="card ideas-card">
-    <header><h2><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#lightbulb"></use></svg><span data-i18n="ideas.title">Ideas</span></h2><p><span data-i18n="ideas.hint_before">New idea: press </span><kbd class="kbd">I</kbd><span data-i18n="ideas.hint_after"> on any screen.</span></p>
-      <div data-slot="card-action"><button type="button" id="ideas-expand" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Expand ideas" title="Expand" data-i18n-aria-label="ideas.expand" data-i18n-title="ideas.expand_short"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#maximize-2"></use></svg></button></div></header>
-    <section><ul id="ideas" class="ideas"></ul></section>
-  </section>
+    <section class="card">
+      <header><h2 data-i18n="jobs.title">Job log</h2></header>
+      <section id="jobs"></section>
+    </section>
+  </div>
+  <div class="lib-side">
+    <section class="card">
+      <header><h2 data-i18n="inbox.title">Inbox</h2><p><span data-i18n="inbox.hint_before">Recorder files from the product's </span><span class="mono">inbox</span><span data-i18n="inbox.hint_after"> folder.</span></p></header>
+      <section class="row"><button type="button" id="inbox-open" class="btn" data-variant="outline" data-size="sm"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#folder-open"></use></svg><span data-i18n="inbox.open">Open in File Explorer</span></button></section>
+      <section id="inbox"></section>
+    </section>
+    <section class="card">
+      <header><h2 data-i18n="backup.title">Backup</h2><p id="backup-info"></p></header>
+      <section class="row">
+        <button type="button" id="backup-full" class="btn" data-variant="outline"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#archive"></use></svg><span data-i18n="backup.full">Full backup</span></button>
+        <button type="button" id="backup-light" class="btn" data-variant="outline"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#archive"></use></svg><span data-i18n="backup.light">Light backup</span></button>
+      </section>
+    </section>
+    <section class="card ideas-card">
+      <header><h2><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#lightbulb"></use></svg><span data-i18n="ideas.title">Ideas</span></h2><p><span data-i18n="ideas.hint_before">New idea: press </span><kbd class="kbd">I</kbd><span data-i18n="ideas.hint_after"> on any screen.</span></p>
+        <div data-slot="card-action"><button type="button" id="ideas-expand" class="btn" data-variant="ghost" data-size="icon-sm" aria-label="Expand ideas" title="Expand" data-i18n-aria-label="ideas.expand" data-i18n-title="ideas.expand_short"><svg class="icon" aria-hidden="true"><use href="/vendor/lucide-sprite.svg#maximize-2"></use></svg></button></div></header>
+      <section><ul id="ideas" class="ideas"></ul></section>
+    </section>
+  </div>
 </main>
 
 <div id="toaster" class="toaster"></div>

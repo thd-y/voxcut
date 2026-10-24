@@ -195,3 +195,16 @@ def test_ui_has_no_cyrillic_outside_catalogs(name):
     for value in DATA_VALUES:
         text = text.replace(value, "")
     assert re.findall(r".*[а-яёА-ЯЁ].*", text) == []
+
+
+def test_library_columns():
+    """D78: a wide column (Sessions, Job log) and a narrow one (Inbox, Backup, Ideas); one column keeps this order."""
+    html = (STATIC_DIR / "index.html").read_text()
+    start = html.index('<main id="screen-library"')
+    lib = html[start:html.index("</main>", start)]
+    tops = re.findall(r'^  <(\w+)[^>]*class="([^"]+)"', lib, re.MULTILINE)
+    assert [cls for _, cls in tops] == ["lib-main", "lib-side"]
+    ids = re.findall(r'id="(sessions|jobs|inbox|backup-info|ideas)"', lib)
+    assert ids == ["sessions", "jobs", "inbox", "backup-info", "ideas"]
+    side = lib.index('class="lib-side"')
+    assert lib.index('id="jobs"') < side < lib.index('id="inbox"')

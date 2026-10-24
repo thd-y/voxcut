@@ -100,8 +100,11 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 .skeleton-row { height: 36px; }
 .skeleton-title { height: 32px; width: 60%; }
 
+/* D78: two columns, cards as tall as their content; the screen scrolls, not the cards (P0) */
 #screen-library { flex: 1; overflow-y: auto; padding: 16px; display: grid; gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); align-content: start; }
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); align-items: start; }
+.lib-main, .lib-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (max-width: 900px) { #screen-library { grid-template-columns: minmax(0, 1fr); } }
 .lib-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 0;
   border-bottom: 1px solid var(--border); }
 .lib-row:last-child { border-bottom: 0; }
