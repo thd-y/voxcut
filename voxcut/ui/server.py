@@ -122,6 +122,7 @@ class App:
         self.route("POST", "/api/journal")(self._journal_post)
         self.route("POST", "/api/jobs")(self._jobs_post)
         self.route("POST", "/api/jobs/{job_id}/cancel")(self._jobs_cancel)
+        self.route("POST", "/api/jobs/{job_id}/retry")(self._jobs_retry)
         self.route("POST", "/api/inbox/open")(self._inbox_open)
 
     def route(self, method: str, template: str):
@@ -282,6 +283,20 @@ class App:
             return {"job": self.jobs.cancel(req.params["job_id"])}
         except KeyError:
             raise HttpError(404, "http_no_job") from None
+
+    def _jobs_retry(self, req: Request) -> dict:
+        if self.jobs is None:
+            raise HttpError(503, "http_jobs_unavailable")
+        if set(req.body) != {"job_id"}:  # D82: kind and params come from the failed job only
+            raise HttpError(400, "http_job_fields")
+        try:
+            return {"job": self.jobs.retry(req.params["job_id"], req.body["job_id"])}
+        except KeyError:
+            raise HttpError(404, "http_no_job") from None
+        except (ValueError, TypeError) as exc:
+            raise HttpError.of(400, exc) from None
+        except JobError as exc:
+            raise HttpError.of(409, exc) from None
 
     def on_done(self, job: dict) -> None:
         """Results of jobs that belong in the journal; the server is its only writer (U5)."""

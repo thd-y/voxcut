@@ -460,3 +460,72 @@ def test_list_keeps_open_failure_beyond_window(lay):
     assert len(view) == LIST_MAX + 1 and view[0]["job_id"] == a and view[0]["failure"] == "open"
     as_job(lay, "restore", {"name": A}, "done")
     assert a not in [v["job_id"] for v in Jobs(lay, run=FakeRun()).list()]
+
+
+def test_retry_resubmits_same_params(lay):
+    old = as_job(lay, "backup", {"mode": "full"}, "failed")
+    new = jid()
+    view = Jobs(lay, run=FakeRun()).retry(old, new)
+    assert view["job_id"] == new and view["kind"] == "backup" and view["state"] == "running"
+    assert json.loads((lay.jobs / new / "job.json").read_text())["params"] == {"mode": "full"}
+
+
+@pytest.mark.parametrize("state, later", [
+    ("done", None), ("cancelled", None),
+    ("failed", ("backup", {"mode": "full"}, "done")),  # resolved
+])
+def test_retry_refusals(lay, state, later):
+    old = as_job(lay, "backup", {"mode": "full"}, state)
+    if later:
+        as_job(lay, *later)
+    with pytest.raises(jobs.JobParamsError) as e:
+        Jobs(lay, run=FakeRun()).retry(old, jid())
+    assert e.value.code == "job_retry_not_open"
+
+
+def test_retry_refuses_moot(lay):
+    old = as_job(lay, "restore", {"name": "voxcut-backup_gone_full.tar"}, "failed")
+    with pytest.raises(jobs.JobParamsError) as e:
+        Jobs(lay, run=FakeRun()).retry(old, jid())
+    assert e.value.code == "job_retry_not_open"
+
+
+def test_retry_unknown_job(lay):
+    with pytest.raises(KeyError):
+        Jobs(lay, run=FakeRun()).retry(jid(), jid())
+
+
+def test_retry_idempotent_and_duplicate(lay):
+    old = as_job(lay, "backup", {"mode": "full"}, "failed")
+    j, new = Jobs(lay, run=FakeRun()), jid()
+    assert j.retry(old, new) == j.retry(old, new)
+    assert len(j.list()) == 2
+    with pytest.raises(jobs.JobParamsError) as e:
+        j.retry(old, jid())
+    assert e.value.code == "job_retry_duplicate"
+
+
+def test_retry_runs_validate(lay):
+    d = lay.sessions / SID
+    d.mkdir()
+    (d / "import.json").write_text("{}")  # light: cannot be processed
+    old = as_job(lay, "process", {"session_id": SID}, "failed")
+    with pytest.raises(jobs.JobParamsError) as e:
+        Jobs(lay, run=FakeRun()).retry(old, jid())
+    assert e.value.code == "job_cannot_process"
+
+
+@pytest.mark.parametrize("files, code", [
+    (["a.wav", "gone.wav"], "job_files_gone"),
+    (["../x.wav"], "job_bad_files"),
+    (["a/b.wav"], "job_bad_files"),
+    (["."], "job_bad_files"),
+    ([".."], "job_bad_files"),
+])
+def test_validate_import_files_present(lay, files, code):
+    """D82: a retry of an import refuses at once; names never probe outside the folder."""
+    (lay.inbox / "s1").mkdir()
+    (lay.inbox / "s1" / "a.wav").write_bytes(b"")
+    with pytest.raises(jobs.JobParamsError) as e:
+        validate("import", {"source": "s1", "chain": 1, "files": files, "start": None}, lay)
+    assert e.value.code == code

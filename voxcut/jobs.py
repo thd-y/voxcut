@@ -65,6 +65,10 @@ def validate(kind: str, params: dict, lay: library.Layout) -> dict:
         if (not isinstance(p["files"], list) or not p["files"]
                 or not all(isinstance(f, str) and f for f in p["files"])):
             raise JobParamsError("job_bad_files")
+        if not all(f == Path(f).name and f not in (".", "..") for f in p["files"]):
+            raise JobParamsError("job_bad_files")  # a name never probes outside the folder
+        if not all((lay.inbox / p["source"] / f).is_file() for f in p["files"]):
+            raise JobParamsError("job_files_gone")  # D82: a retry refuses at once
         if p["start"] is not None:
             if not isinstance(p["start"], str):
                 raise JobParamsError("job_bad_start")
@@ -204,13 +208,32 @@ class Jobs:
         if not isinstance(job_id, str) or not JOB_ID_RE.fullmatch(job_id):
             raise JobParamsError("job_bad_id")
         with self._lock:
-            if job_id not in self._jobs:
-                job = {"job_id": job_id, "kind": kind, "params": validate(kind, params, self.lay),
-                       "submitted": _now()}
-                self._jobs[job_id] = {"job": job, "state": "queued"}
-                self._queue.append(job_id)
-                self._step()
-            return self._view(job_id)
+            return self._add(job_id, kind, params)
+
+    def _add(self, job_id: str, kind: str, params: dict) -> dict:
+        if job_id not in self._jobs:
+            job = {"job_id": job_id, "kind": kind, "params": validate(kind, params, self.lay),
+                   "submitted": _now()}
+            self._jobs[job_id] = {"job": job, "state": "queued"}
+            self._queue.append(job_id)
+            self._step()
+        return self._view(job_id)
+
+    def retry(self, job_id: str, new_id: str) -> dict:
+        """D82: the same kind and params as a failed job whose failure is open; none from the browser."""
+        if not isinstance(new_id, str) or not JOB_ID_RE.fullmatch(new_id):
+            raise JobParamsError("job_bad_id")
+        with self._lock:
+            if new_id in self._jobs:
+                return self._view(new_id)
+            rec = self._jobs[job_id]  # KeyError: no such job
+            if rec["state"] != "failed" or self._failures().get(job_id) != "open":
+                raise JobParamsError("job_retry_not_open")
+            kind, params = rec["job"]["kind"], rec["job"]["params"]
+            if any(r["state"] in ("queued", "running") and r["job"]["kind"] == kind
+                   and r["job"]["params"] == params for r in self._jobs.values()):
+                raise JobParamsError("job_retry_duplicate")
+            return self._add(new_id, kind, params)
 
     def cancel(self, job_id: str) -> dict:
         with self._lock:

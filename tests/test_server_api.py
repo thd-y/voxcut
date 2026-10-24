@@ -605,3 +605,25 @@ def test_jobs_kind_not_a_string(wapi):
     status, _, body = post(wapi, "/api/jobs", {"job_id": uuid.uuid4().hex, "kind": ["x"],
                                                "params": {}})
     assert status == 400 and body["error"]["code"] == "job_unknown_kind"
+
+
+def test_jobs_retry_route(wapi):
+    """D82: the server takes kind and params from the failed job; the body names only the new id."""
+    old, new = uuid.uuid4().hex, uuid.uuid4().hex
+    post(wapi, "/api/jobs", {"job_id": old, "kind": "backup", "params": {"mode": "full"}})
+    (wapi.lay.jobs / old / "status.json").write_text(json.dumps({"state": "failed"}))
+    wapi.jobs.poll()
+    assert post(wapi, f"/api/jobs/{old}/retry", {"job_id": new, "params": {"mode": "light"}})[0] \
+        == 400
+    status, _, _ = wapi.req("POST", f"/api/jobs/{old}/retry", {"job_id": new}, key=wapi.k,
+                            origin=False, headers={"Sec-Fetch-Site": "same-origin"})
+    assert status == 403
+    assert post(wapi, f"/api/jobs/{uuid.uuid4().hex}/retry", {"job_id": new})[0] == 404
+    status, _, body = post(wapi, f"/api/jobs/{old}/retry", {"job_id": new})
+    assert status == 200 and body["job"]["job_id"] == new and body["job"]["kind"] == "backup"
+    assert json.loads((wapi.lay.jobs / new / "job.json").read_text())["params"] == {"mode": "full"}
+    (wapi.lay.jobs / new / "status.json").write_text(json.dumps(
+        {"state": "done", "result": "voxcut-backup_2026-10-24_10-00_full.tar"}))
+    wapi.jobs.poll()
+    status, _, body = post(wapi, f"/api/jobs/{new}/retry", {"job_id": uuid.uuid4().hex})
+    assert status == 400 and body["error"]["code"] == "job_retry_not_open"
