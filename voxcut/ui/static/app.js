@@ -409,6 +409,8 @@ function stickyToast(title, text, action, key) {
   t.setAttribute("aria-hidden", "false");
   t.dataset.category = "error";
   const close = () => {
+    // a cross pressed from the keyboard must not drop focus to <body>: back to the card (audit 2026-10-25)
+    if (t.contains(document.activeElement) && ui.screen === "session") $("card").focus({ preventScroll: true });
     t.setAttribute("aria-hidden", "true");
     setTimeout(() => t.remove(), 400);
   };
