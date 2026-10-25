@@ -34,6 +34,7 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
   border-radius: var(--radius); background: var(--muted); cursor: pointer; }
 #work { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 340px) 1fr;
   border-top: 1px solid var(--border); }
+#work > * { min-width: 0; }  /* a long note must not widen the grid (D102(1)) */
 #session-empty { padding: 48px 16px; }
 #session-empty-text, .toast p { white-space: pre-line; }  /* an error and the advice after it: two lines */
 
@@ -49,6 +50,8 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 #clip-list .item.selected { background: var(--accent); }
 html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0:1; 40% toward fg ≈ 5.9:1 */
   color: color-mix(in oklch, var(--muted-foreground), var(--foreground) 40%); }
+#clip-list .item > section { min-width: 0; }
+#clip-list .item > aside { flex-shrink: 0; }
 #clip-list .item h4 { font-variant-numeric: tabular-nums; }
 #clip-list .item .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   max-width: 100%; }
@@ -85,7 +88,7 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 #clip-alert { margin: 0 24px; width: auto; }
 #card-body { overflow-y: auto; padding: 0 24px 4px; display: flex; flex-direction: column; gap: 10px; }
 #note-box textarea { width: 100%; }
-.note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 70ch; }
 .note-text.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   line-clamp: 2; overflow: hidden; }
 .other-note { border-left: 2px solid var(--border); padding-left: 8px; }
@@ -165,6 +168,8 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 @media (max-width: 900px) {
   #work { grid-template-columns: 1fr; grid-template-rows: minmax(160px, 40%) 1fr; }
   #list-pane { border-right: 0; border-bottom: 1px solid var(--border); }
+  #card { overflow-y: auto; }  /* short pane: the body squeezed to a sliver hid its focus; scroll the card */
+  #card-body { overflow: visible; }
 }
 .icon { width: 16px; height: 16px; flex-shrink: 0; }
 h2 > .icon { display: inline-block; margin-right: 6px; vertical-align: -2px; }
