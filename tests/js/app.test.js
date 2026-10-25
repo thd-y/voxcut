@@ -403,3 +403,17 @@ test("errDesc", () => {  // a thrown null or a body without a descriptor still g
   const desc = { code: "offline", params: {} };
   assert.equal(app.errDesc({ descriptor: desc }), desc);
 });
+
+test("splitHidden", () => {  // D91: hidden sessions go under «Hidden: N», order kept
+  const s = [{ session_id: "a", hidden: false }, { session_id: "b", hidden: true },
+    { session_id: "c" }, { session_id: "d", hidden: true }];
+  const { shown, hidden } = app.splitHidden(s);
+  assert.deepEqual(shown.map((x) => x.session_id), ["a", "c"]);
+  assert.deepEqual(hidden.map((x) => x.session_id), ["b", "d"]);
+});
+
+test("jobSubject of a delete", () => {  // D94: the session as for process; gone → the raw id
+  const del = { job_id: "d", kind: "delete", state: "done", subject: { session_id: SID } };
+  assert.equal(app.jobSubject(del, SESSIONS, "en"), "11 Aug 2026, 21:30 · 4 h 16 min");
+  assert.equal(app.jobSubject(del, [], "en"), SID);
+});

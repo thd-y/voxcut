@@ -142,6 +142,9 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 .idea-ask { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .idea-del { opacity: .4; transition: opacity .1s; }
 .idea-del:hover, .idea-del:focus-visible { opacity: 1; }
+.session-hide { order: 1; margin-left: auto; }  /* D91: the cross sits at the row's end */
+.session-hidden strong { color: var(--muted-foreground); font-weight: 500; }
+.hidden-foot { align-items: center; gap: 4px; padding-top: 8px; }
 /* D57: the ideas card never grows past the window; its list scrolls instead */
 .ideas-card { display: flex; flex-direction: column; max-height: calc(100dvh - 96px); min-width: 0; }
 .ideas-card > section { display: flex; flex-direction: column; flex: 1; min-height: 0; }

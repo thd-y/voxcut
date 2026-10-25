@@ -95,7 +95,7 @@ function chainText(ch, lang) {
 // D79: what the job is about; a session through its label, else the raw id
 function jobSubject(j, sessions, lang) {
   const s = j.subject || {};
-  if (j.kind === "process") {
+  if (j.kind === "process" || j.kind === "delete") {
     const row = sessions.find((r) => r.session_id === s.session_id);
     return row ? sessionLabel(row, lang) : s.session_id || "";
   }
@@ -152,6 +152,15 @@ function failedBadge(jobs) {
 }
 
 // D85: the session row's mark; a queued or running process outranks an open failure
+// D91: hidden sessions leave the list for «Hidden: N»; the order is kept
+function splitHidden(sessions) {
+  return { shown: sessions.filter((s) => !s.hidden), hidden: sessions.filter((s) => s.hidden) };
+}
+
+// D94: no hide or delete while a job of the session is queued or running
+const sessionBusy = (jobs, sessionId) => jobs.some((j) => (j.state === "queued" || j.state === "running")
+  && j.subject && j.subject.session_id === sessionId);
+
 function sessionJobMark(jobs, sessionId) {
   const mine = jobs.filter((j) => j.kind === "process" && j.subject && j.subject.session_id === sessionId);
   const active = mine.find((j) => j.state === "queued" || j.state === "running");
@@ -297,6 +306,7 @@ const ui = {
   ideaDelete: null, ideaDeleting: false,  // D56: the idea asked about, a delete in flight
   logOpen: new Map(), logPinned: new Map(), logScroll: new Map(),  // D80: by job_id, window memory only
   groupOpen: new Set(), cancelAsk: null,  // D81: open backup groups; D83: the job asked about
+  hiddenOpen: false, deleteAsk: null,  // D91: the hidden list is open; the hidden session asked about
   noteStatus: null, ideaStatus: null,  // null | {key, params}: drawn in the current language (L13)
 };
 const GAP_MIN_S = 120;  // one recording: 131 gaps >= 30 s (noise), 12 >= 120 s (real breaks)
@@ -969,11 +979,22 @@ function renderLibrary() {
   const st = serverState;
   if (!st) return;
   const runs = sid && view ? [sid, runId, view.run_id, view.runs] : null;
-  const marks = st.sessions.map((s) => sessionJobMark(st.jobs, s.session_id));
+  const { shown, hidden } = splitHidden(st.sessions);
+  if (ui.deleteAsk && !hidden.some((s) => s.session_id === ui.deleteAsk)) ui.deleteAsk = null;
+  const marks = shown.map((s) => sessionJobMark(st.jobs, s.session_id));
   const markSig = marks.map((m) => m && [m.kind, m.job.job_id, m.job.state, m.job.stage]);  // not log_tail: no rebuild per poll
-  setKids($("sessions"), JSON.stringify([st.sessions, runs, markSig]), () => (st.sessions.length ? st.sessions.map((s, i) => {
+  const busy = st.sessions.map((s) => sessionBusy(st.jobs, s.session_id));
+  setKids($("sessions"), JSON.stringify([st.sessions, runs, markSig, busy, ui.hiddenOpen, ui.deleteAsk]), () => [
+    ...(shown.length ? shown.map((s, i) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
+    const hide = button("", () => setHidden(s.session_id, true), "ghost", "icon-sm", "x");
+    hide.classList.add("idea-del", "session-hide");
+    hide.setAttribute("aria-label", tr("lib.hide"));
+    hide.title = tr("lib.hide");
+    hide.disabled = sessionBusy(st.jobs, s.session_id);
+    hide.dataset.focus = `${s.session_id}:hide`;
+    head.append(hide);
     head.append(el("strong", sessionLabel(s, ui.lang)),
       el("span", s.n_clips !== null
         ? tr("lib.session_clips", { state: label(ui.lang, "session.state.", s.state), n: s.n_clips })
@@ -1020,7 +1041,8 @@ function renderLibrary() {
     }
     if (s.error) row.append(el("div", errText(ui.lang, s.error), "error"));
     return row;
-  }) : [el("p", tr("lib.no_sessions"), "muted")]));
+  }) : [el("p", tr("lib.no_sessions"), "muted")]),
+    ...hiddenRows(hidden, st)]);
 
   // Inputs being typed into are kept: re-render inbox only when its content or the language changed,
   // and carry typed starts over by (source, chain files) (L13).
@@ -1135,7 +1157,7 @@ function jobEl(j, st) {
     b.setAttribute("aria-controls", `log-${id}`);
   }
   if (j.failure === "open") act(button(tr("jobs.retry"), (e) => retryJob(j, e.currentTarget), "outline"), "job-retry");
-  if (j.state === "queued" || j.state === "running") {
+  if ((j.state === "queued" || j.state === "running") && j.kind !== "delete") {  // D94: no cancel
     if (ui.cancelAsk === id) {  // D83: two steps in the row, like deleting an idea
       acts.append(el("span", tr("jobs.cancel_question")));
       act(button(tr("common.yes"), (e) => cancelJob(id, e.currentTarget), "destructive"), "job-yes");
@@ -1263,6 +1285,68 @@ function ideaRow(idea) {
   }
   li.append(head, el("p", idea.value));
   return li;
+}
+
+// D91: «Hidden: N · show», then muted rows with «Restore» and a two-step «Delete…» (D83)
+function hiddenRows(hidden, st) {
+  if (!hidden.length) return [];
+  const foot = el("div", null, "row hidden-foot muted small");
+  const toggle = button(tr(ui.hiddenOpen ? "lib.hidden_hide" : "lib.hidden_show"), () => {
+    ui.hiddenOpen = !ui.hiddenOpen;
+    renderLibrary();
+  }, "link");
+  toggle.setAttribute("aria-expanded", String(ui.hiddenOpen));
+  toggle.dataset.focus = "hidden-toggle";
+  foot.append(el("span", tr("lib.hidden_count", { n: hidden.length })), toggle);
+  if (!ui.hiddenOpen) return [foot];
+  return [foot, ...hidden.map((s) => {
+    const row = el("div", null, "lib-row session-hidden");
+    const head = el("div", null, "row");
+    head.append(el("strong", sessionLabel(s, ui.lang)));
+    const busy = sessionBusy(st.jobs, s.session_id);
+    const mark = (b, key) => {
+      b.dataset.focus = `${s.session_id}:${key}`;
+      b.disabled = busy;
+      return b;
+    };
+    if (ui.deleteAsk === s.session_id) {
+      const ask = el("span", null, "idea-ask");
+      ask.append(el("span", tr("lib.delete_question")),
+        mark(button(tr("common.yes"), () => deleteSession(s.session_id), "destructive"), "yes"),
+        mark(button(tr("common.no"), () => askDelete(null), "outline"), "no"));
+      head.append(ask);
+    } else {
+      head.append(mark(button(tr("lib.unhide"), () => setHidden(s.session_id, false), "outline"), "unhide"),
+        mark(button(tr("lib.delete"), () => askDelete(s.session_id), "outline"), "delete"));
+    }
+    row.append(head);
+    if (s.error) row.append(el("div", errText(ui.lang, s.error), "error"));
+    return row;
+  })];
+}
+
+async function setHidden(id, hidden) {  // D92: a journal event; the server refuses a busy session
+  try {
+    await api("POST", "/api/journal", { event_id: newId(), kind: hidden ? "session_hidden" : "session_shown",
+      session_id: id });
+    await poll();
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function askDelete(id) {
+  const was = ui.deleteAsk;
+  ui.deleteAsk = id;
+  renderLibrary();
+  const key = id ? `${id}:no` : was && `${was}:delete`;
+  const back = key && [...$("sessions").querySelectorAll("[data-focus]")].find((e) => e.dataset.focus === key);
+  if (back) back.focus({ preventScroll: true });
+}
+
+function deleteSession(id) {
+  ui.deleteAsk = null;
+  return submit("delete", { session_id: id });
 }
 
 function askDeleteIdea(id) {
@@ -1616,6 +1700,7 @@ async function saveIdea() {
 }
 
 function escape(target) {
+  if (ui.deleteAsk && ui.screen === "library" && !document.querySelector("dialog[open]")) return askDelete(null);
   if (ui.cancelAsk && ui.screen === "library" && !document.querySelector("dialog[open]")) return askCancel(null);
   // The idea question takes Esc only when nothing else is open over it.
   if (ui.ideaDelete && !ui.ideaDeleting && ui.screen === "library"
@@ -1780,7 +1865,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, statusText, summaryText, chainText, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
+    counts, statusText, summaryText, chainText, splitHidden, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
     afterOpenError, retryAfter, codedError, errDesc };
 } else {

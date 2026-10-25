@@ -177,6 +177,12 @@
   "jobs.running_for": "running {dur}",
   "jobs.backup_group": "backup ×{n} — done · last {time}",
   "top.job_failed_more": "{kind} failed +{n}",
+  "lib.hide": "Hide session",
+  "lib.hidden_show": "show",
+  "lib.hidden_hide": "collapse",
+  "lib.unhide": "Restore",
+  "lib.delete": "Delete…",
+  "lib.delete_question": "Delete the session? Its recordings go back to Inbox.",
   "lib.session_running": "processing: {stage}",
   "lib.session_failed": "processing failed → log",
   "jobs.none": "No jobs.",
@@ -199,6 +205,10 @@
   "toast.note_kept": "{error}\nThe text is kept in this clip's note field.",
   "toast.idea_saved": "Idea saved",
   "toast.explorer_failed": "File Explorer did not open",
+  "lib.hidden_count": {
+    one: "Hidden: {n}",
+    other: "Hidden: {n}",
+  },
   "lib.session_clips": {
     one: "{state}, {n} clip",
     other: "{state}, {n} clips",
