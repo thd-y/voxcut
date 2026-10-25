@@ -85,6 +85,7 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 .decisions { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 24px; }
 .decisions .kbd { margin-left: 6px; }
 @container (max-width: 740px) { .decisions .icon { display: none; } }  /* D102(5): five decisions in one row; label and key stay */
+@container (max-width: 620px) { .decisions { gap: 4px; } .decisions .btn { padding-inline: 10px; } }  /* D108(3): still one row at 640 */
 .rechoose { padding: 0 24px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .rechoose .kbd { margin-left: 6px; }
 #rechoose-btn { font-size: 12px; height: auto; padding: 2px 0; gap: 4px; }  /* owner: smaller */

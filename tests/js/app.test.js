@@ -586,3 +586,10 @@ test("afterFoldClose", () => {
   assert.equal(app.afterFoldClose(cs, ["g", "h"]), "f");  // the list's end: the clip before (rule 5)
   assert.equal(app.afterFoldClose([clip("x", [], "шум")], ["x"]), null);
 });
+
+test("notSavedText", () => {  // D108(2): the title already says «Не сохранено»; other causes stay named
+  assert.equal(app.notSavedText(app.codedError({ code: "not_saved", params: {} }), "ru"), "");
+  const off = app.codedError({ code: "offline", params: {} });
+  assert.equal(app.notSavedText(off, "ru"), "нет связи с VoxCut");
+  assert.equal(app.notSavedText(off, "en"), "no connection to VoxCut");
+});

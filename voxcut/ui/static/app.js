@@ -85,6 +85,12 @@ function progressText(c, lang) {
   return c.undecided === 0 ? translate(lang, "top.done") : translate(lang, "top.progress", { done: c.all - c.undecided, all: c.all });
 }
 
+// D108(2): the toast's second line; a plain «не сохранено» would only repeat the title.
+function notSavedText(err, lang) {
+  const desc = errDesc(err);
+  return desc.code === "not_saved" ? "" : errText(lang, desc);
+}
+
 const isDecided = (clip) => ["kept", "rejected"].includes(status(clip).kind);
 
 function counts(clips) {
@@ -1763,7 +1769,7 @@ function setMark(clip, value) {
   }, (e) => {
     ui.pending.delete(clip.clip_id);
     Object.assign(clip, before);
-    stickyToast(notSavedTitle(clip, value, ui.lang), errText(ui.lang, errDesc(e)),
+    stickyToast(notSavedTitle(clip, value, ui.lang), notSavedText(e, ui.lang),
       { label: tr("toast.go_to_clip"), run: () => goToClip(at, atRun, clip.clip_id) }, clip.clip_id);
     render();
     throw e;
@@ -2173,7 +2179,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, playFailText, progressText, afterDecision, tabReturn, showGaps,
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, notSavedText, playFailText, progressText, afterDecision, tabReturn, showGaps,
     foldable, foldRun, listRows, afterFoldClose };
 } else {
   start();
