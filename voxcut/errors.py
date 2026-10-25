@@ -108,6 +108,8 @@ CODES: dict[str, tuple[tuple[str, ...], str]] = {
     "eval_sha_mismatch": (("dir",),
         "{dir}: source_sha256 манифеста, run.json и probs.json не совпадают"),
     # library.py
+    "session_delete_pending": (("session",),
+        "удаление сессии {session} оборвалось: «Повторить» в журнале задач доделает его"),
     "session_import_pending": (("session",),
         ("незавершённый импорт: файлы записи внутри {session}, не удаляйте их; «Обработать» "
          "сверит sha256 и завершит импорт")),

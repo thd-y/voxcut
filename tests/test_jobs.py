@@ -691,3 +691,34 @@ def test_view_retrying(lay):
     finish(lay, new, "failed")
     j.poll()
     assert {v["job_id"]: v for v in j.list()}[old]["retrying"] is False
+
+
+def test_retry_delete_cut_after_rename(lay):
+    """Layer-1 review: the session dir is already sessions/<sid>.tmp; a retry must finish it."""
+    gone = lay.sessions / f"{SID}.tmp"
+    gone.mkdir()
+    (gone / "delete.pending.json").write_text(json.dumps({"files": {}, "start": None, "notes": 0,
+                                                          "notes_text": ""}))
+    old = as_job(lay, "delete", {"session_id": SID}, "failed")
+    j = Jobs(lay, run=FakeRun(), hidden=lambda s: False)  # no session row, so no hidden flag either
+    assert {v["job_id"]: v for v in j.list()}[old]["failure"] == "open"
+    assert j.retry(old, jid())["state"] == "running"
+
+
+@pytest.mark.parametrize("later, expected", [("done", "resolved"), (None, "moot")])
+def test_failure_delete(lay, later, expected):
+    a_session(lay, S3 := "2026-10-15_10-00_1h00m.0000aaaa")
+    old = as_job(lay, "delete", {"session_id": SID}, "failed")
+    as_job(lay, "delete", {"session_id": S3}, "done")  # another session's delete resolves nothing
+    if later:
+        as_job(lay, "delete", {"session_id": SID}, later)
+    assert {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}[old]["failure"] == expected
+
+
+def test_order_survives_offset_change(lay):
+    a = as_job(lay, "backup", {"mode": "light"}, "done")
+    b = as_job(lay, "backup", {"mode": "full"}, "done")
+    for job_id, ts in ((a, "2026-10-25T02:30:00+03:00"), (b, "2026-10-25T02:10:00+02:00")):
+        job = json.loads((lay.jobs / job_id / "job.json").read_text())  # a DST change in between
+        (lay.jobs / job_id / "job.json").write_text(json.dumps(job | {"submitted": ts}))
+    assert [v["job_id"] for v in Jobs(lay, run=FakeRun()).list()] == [a, b]

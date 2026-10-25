@@ -1077,3 +1077,30 @@ def test_reimport_after_delete_same_session_id(lay, no_check):
     assert not (lay.inbox / sid / "start.txt").exists()
     assert (lay.inbox / sid / "notes.txt").is_file()  # the owner's text: never touched
     assert _shas((lay.sessions / sid / "originals").iterdir()) == shas
+
+
+def test_delete_pending_session_is_not_processable(lay, no_check, monkeypatch):
+    """Layer-1 review: a cut delete must not look like a healthy session."""
+    sid, _ = imported(lay)
+    real = os.rename
+    calls = []
+
+    def rename(a, b):
+        calls.append(a)
+        if len(calls) == 2:
+            raise SystemExit(143)
+        return real(a, b)
+
+    monkeypatch.setattr(library_mod.os, "rename", rename)
+    with pytest.raises(SystemExit):
+        delete_session(lay, sid, _quiet)
+    row = session_row(lay, sid)
+    assert row["state"] == "incomplete" and row["can_process"] is False
+    assert row["error"]["code"] == "session_delete_pending"
+
+
+def test_delete_replaces_stale_empty_gone_dir(lay, no_check):
+    sid, shas = imported(lay)
+    (lay.sessions / f"{sid}.tmp" / "x.c0.raw").mkdir(parents=True)  # junk of an earlier cut erase
+    delete_session(lay, sid, _quiet)
+    assert_deleted(lay, sid, shas)

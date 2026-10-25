@@ -271,6 +271,7 @@
   "err.seg_probs_replaced": "{dir}: probs.npy подменён после сегментации.\nУдалите каталог и запустите заново: rm -rf {rm}",
   "err.seg_seam_tol_changed": "{dir}: seam_tol_s было {was}, сейчас {now}.\nУдалите каталог и запустите заново: rm -rf {rm}",
   "err.eval_sha_mismatch": "{dir}: source_sha256 манифеста, run.json и probs.json не совпадают",
+  "err.session_delete_pending": "удаление сессии {session} оборвалось: «Повторить» в журнале задач доделает его",
   "err.session_import_pending": "незавершённый импорт: файлы записи внутри {session}, не удаляйте их; «Обработать» сверит sha256 и завершит импорт",
   "err.session_import_manual": "незавершённый импорт: файлы записи внутри {session}, не удаляйте их; нужна ручная проверка",
   "err.session_unreadable": "{detail}",

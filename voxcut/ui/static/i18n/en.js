@@ -263,6 +263,7 @@
   "err.seg_probs_replaced": "{dir}: probs.npy was replaced after segmentation.\nDelete the folder and run again: rm -rf {rm}",
   "err.seg_seam_tol_changed": "{dir}: seam_tol_s was {was}, now {now}.\nDelete the folder and run again: rm -rf {rm}",
   "err.eval_sha_mismatch": "{dir}: source_sha256 of the manifest, run.json and probs.json do not match",
+  "err.session_delete_pending": "deleting session {session} was cut short: Retry in the job log finishes it",
   "err.session_import_pending": "unfinished import: the recording files are inside {session}, do not delete them; “Process” will check sha256 and finish the import",
   "err.session_import_manual": "unfinished import: the recording files are inside {session}, do not delete them; a manual check is needed",
   "err.session_unreadable": "{detail}",

@@ -100,16 +100,19 @@ def _session_row(lay: Layout, sdir: Path) -> dict:
         state = "imported"
     pending = (sdir / "import.pending.json").is_file() and not (sdir / "import.json").is_file()
     error = None
-    if state == "incomplete" and any(sdir.glob("originals*/*")):
+    deleting = (sdir / "delete.pending.json").is_file()  # a cut delete: only its retry finishes it
+    if deleting:
+        state, error = "incomplete", {"code": "session_delete_pending", "params": {"session": sid}}
+    elif state == "incomplete" and any(sdir.glob("originals*/*")):
         error = {"code": "session_import_pending" if pending else "session_import_manual",
                  "params": {"session": sdir.name}}
     return {
         "session_id": sid,
         "name": sid.rsplit(".", 1)[0],
         "state": state,
-        "can_process": (pending and all(_pending_files(lay, sdir, load_json(
+        "can_process": not deleting and ((pending and all(_pending_files(lay, sdir, load_json(
             sdir / "import.pending.json")).values())) or (state != "incomplete"
-                                   and ((sdir / "originals").is_dir() or wav)),
+                                   and ((sdir / "originals").is_dir() or wav))),
         "duration_s": meta["n_samples"] / meta["sr"] if meta else None,
         "n_clips": len(read_jsonl(runs[0]["seg_dir"] / "clips" / "manifest.jsonl"))
         if runs else None,
@@ -513,6 +516,8 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
         os.replace(tmp, dst)
     elif _files_ok(dst, files):  # not the files this delete moved there
         raise SessionError("delete_inbox_exists", dir=str(dst))
+    if gone.exists():  # junk of an earlier cut erase; _erase refuses it if a recording is there
+        _erase(gone, log)
     os.replace(sdir, gone)
     _erase(gone, log)
     log(f"сессия {sid} удалена: {len(files)} файлов возвращены в inbox/{sid}/")

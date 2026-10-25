@@ -91,9 +91,13 @@ def validate(kind: str, params: dict, lay: library.Layout, hidden=None) -> dict:
     elif kind == "delete":  # D91, D94
         if not isinstance(p["session_id"], str):
             raise JobParamsError("job_bad_session_id")
-        if library.session_row(lay, p["session_id"]) is None:
+        sid = p["session_id"]
+        if library.SESSION_ID_RE.fullmatch(sid) and any(  # a cut delete: its retry finishes it
+                (lay.sessions / n / "delete.pending.json").is_file() for n in (sid, f"{sid}.tmp")):
+            return p
+        if library.session_row(lay, sid) is None:
             raise JobParamsError("job_no_session")
-        if hidden is None or not hidden(p["session_id"]):
+        if hidden is None or not hidden(sid):
             raise JobParamsError("job_session_not_hidden")
     elif kind == "backup":
         if p["mode"] not in ("full", "light"):
@@ -132,8 +136,12 @@ def _write(path: Path, obj) -> None:
     os.replace(tmp, path)
 
 
-def _mtime_iso(t: float) -> str:
-    return datetime.fromtimestamp(t).astimezone().isoformat(timespec="seconds")
+def _when(submitted: str, mtime: float) -> float:
+    """Seconds since the epoch: ISO strings with different UTC offsets do not sort as text."""
+    try:
+        return datetime.fromisoformat(submitted).timestamp()
+    except ValueError:
+        return mtime
 
 
 def _read(path: Path) -> dict | None:
@@ -157,7 +165,7 @@ class Jobs:
                     job["params"] = {}
                 found.append((str(job.get("submitted") or ""), d.stat().st_mtime, d.name, job))
         # D96: "later" (D84) is the submission order; mtime only for jobs from before submitted
-        for *_, name, job in sorted(found, key=lambda f: (f[0] or _mtime_iso(f[1]), f[1])):
+        for *_, name, job in sorted(found, key=lambda f: (_when(f[0], f[1]), f[1])):
             self._jobs[name] = {"job": job, "state": "running"}
         with self._lock:
             self._refresh()
@@ -344,6 +352,8 @@ class Jobs:
                 resolved = bool(files) and set(files) <= got
             elif kind == "backup":
                 resolved = any(q.get("mode") in (p.get("mode"), "full") for q in later)
+            elif kind == "delete":
+                resolved = any(q.get("session_id") == p.get("session_id") for q in later)
             else:
                 resolved = any(q.get("name") == p.get("name") for q in later)
             if resolved or failed_later:  # D88: a later identical failure supersedes this one
@@ -359,6 +369,10 @@ class Jobs:
             elif kind == "restore":
                 backups = library._backup_names(self.lay) if backups is None else backups
                 moot = p.get("name") not in backups
+            elif kind == "delete":  # nothing of the session left to finish
+                sid = p.get("session_id")
+                moot = not isinstance(sid, str) or not library.SESSION_ID_RE.fullmatch(sid) or not any(
+                    (self.lay.sessions / n).exists() for n in (sid, f"{sid}.tmp"))
             elif kind == "process":  # D96: the session is gone or can no longer be processed
                 row = library.session_row(self.lay, p["session_id"]) \
                     if isinstance(p.get("session_id"), str) else None
