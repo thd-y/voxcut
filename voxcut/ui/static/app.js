@@ -381,6 +381,39 @@ function toast(title, text, error) {
   }, error ? 6000 : 2500);
 }
 
+// D101: an error toast that stays until its action or its cross; several stack in #toaster (column-reverse).
+function stickyToast(title, text, action) {
+  const t = el("div", null, "toast");
+  t.setAttribute("role", "alert");
+  t.setAttribute("aria-hidden", "false");
+  t.dataset.category = "error";
+  const close = () => {
+    t.setAttribute("aria-hidden", "true");
+    setTimeout(() => t.remove(), 400);
+  };
+  const content = el("div", null, "toast-content");
+  const sec = el("section");
+  sec.append(el("h2", title));
+  if (text) sec.append(el("p", text));
+  const foot = el("footer");
+  if (action) {
+    const b = button(action.label, () => {
+      close();
+      action.run();
+    }, "outline");
+    b.dataset.toastAction = "";
+    foot.append(b);
+  }
+  const x = button(null, close, "ghost", "icon-sm", "x");
+  x.dataset.toastCancel = "";
+  x.setAttribute("aria-label", tr("toast.close"));
+  foot.append(x);
+  content.append(sec, foot);
+  t.append(content);
+  $("toaster").append(t);
+  return t;
+}
+
 async function api(method, path, body) {
   const opts = { method, headers: { Authorization: `Bearer ${KEY}` } };
   if (body !== undefined) {
@@ -1576,6 +1609,7 @@ function journal(kind, value, clip) {
 
 // Optimistic: the clip shows the new decision at once; a failed write puts the old one back.
 function setMark(clip, value) {
+  const at = sid;  // the owner may be in another session when the write fails (D101)
   const before = { own_mark: clip.own_mark, marks: clip.marks.slice(), heard: clip.heard };
   const others = clip.marks.filter((m) => !(before.own_mark && m === before.own_mark));
   clip.own_mark = value;
@@ -1590,10 +1624,26 @@ function setMark(clip, value) {
   }, (e) => {
     ui.pending.delete(clip.clip_id);
     Object.assign(clip, before);
-    toast(tr("toast.not_saved"), errText(ui.lang, errDesc(e)), true);
+    stickyToast(notSavedTitle(clip, value, ui.lang), errText(ui.lang, errDesc(e)),
+      { label: tr("toast.go_to_clip"), run: () => goToClip(at, clip.clip_id).catch(fail) });
     render();
     throw e;
   });
+}
+
+// D101 «к клипу»: the clip's session on Review, the clip selected and silent, filter reset if it hides it.
+async function goToClip(sessionId, clipId) {
+  if (sessionId !== sid) await openSession(sessionId);
+  ui.screen = "session";
+  if (!view.clips.some((c) => c.clip_id === clipId)) {
+    render();
+    toast(tr("toast.undo_other_run"), tr("toast.undo_skipped"));
+    return;
+  }
+  if (!shown().some((c) => c.clip_id === clipId)) ui.tab = "review";
+  if (!shown().some((c) => c.clip_id === clipId)) ui.filter = "all";
+  select(clipId, { play: false });
+  $("card").focus({ preventScroll: true });
 }
 
 function decide(value) {

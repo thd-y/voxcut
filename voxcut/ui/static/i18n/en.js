@@ -200,7 +200,6 @@
   "toast.journal": "Journal",
   "toast.idea_not_deleted": "Idea not deleted",
   "toast.job_submitted": "Job queued",
-  "toast.not_saved": "Not saved",
   "toast.not_saved_clip": "Not saved: {time} — {decision}",
   "toast.go_to_clip": "go to clip",
   "toast.close": "Close",
