@@ -526,3 +526,59 @@ test("progressText", () => {  // D106: a reviewed session says so briefly
   assert.equal(app.progressText({ all: 0, undecided: 0 }, "ru"), "");
   assert.equal(app.progressText(null, "ru"), "");
 });
+
+// D107 fixture: a undecided, b–d rejected, e kept, f rejected with others, a pause, g–h rejected
+const foldList = () => {
+  const at = (c, i) => ({ ...c, start_s: i * 2, end_s: i * 2 + 1 });
+  const cs = [clip("a"), clip("b", [], "шум"), clip("c", [], "шум"), clip("d", [], "шум"), clip("e", [], "моё"),
+    clip("f", ["шум", "моё"], "шум")].map(at);
+  return [...cs, { ...clip("g", [], "шум"), start_s: 11 + 121, end_s: 133 }, { ...clip("h", [], "шум"), start_s: 134, end_s: 135 }];
+};
+const shape = (rows) => rows.map((r) => r.kind === "clip" ? r.clip.clip_id : `${r.open ? "open" : "fold"}[${r.ids}]`);
+
+test("foldable", () => {
+  const cs = foldList();
+  assert.deepEqual(cs.map(app.foldable), [false, true, true, true, false, false, true, true]);
+});
+
+test("foldRun", () => {
+  const cs = foldList();
+  assert.deepEqual(app.foldRun(cs, "c", 120), ["b", "c", "d"]);
+  assert.deepEqual(app.foldRun(cs, "b", 120), ["b", "c", "d"]);
+  assert.deepEqual(app.foldRun(cs, "f", 120), []);  // others: stays visible (rule 6)
+  assert.deepEqual(app.foldRun(cs, "g", 120), ["g", "h"]);  // the pause breaks the run (rule 9)
+  assert.deepEqual(app.foldRun(cs, "a", 120), []);
+  assert.deepEqual(app.foldRun(cs, "zz", 120), []);
+  const lone = [clip("k", [], "моё"), clip("x", [], "шум"), clip("m", [], "моё")];
+  assert.deepEqual(app.foldRun(lone, "x", 120), ["x"]);  // a single one folds too (rule 2)
+  const split = [clip("p", [], "шум", [], 0, 1), clip("q", [], "шум", [], 200, 201)];
+  assert.deepEqual(app.foldRun(split, "p", 120), ["p"]);  // the pause breaks it both ways
+  assert.deepEqual(app.foldRun(split, "q", 120), ["q"]);
+});
+
+test("listRows", () => {
+  const cs = foldList();
+  const rows = app.listRows(cs, { selectedId: "a", unfolded: new Set(), gapMin: 120 });
+  assert.deepEqual(shape(rows), ["a", "fold[b,c,d]", "e", "f", "fold[g,h]"]);
+  assert.equal(rows[1].gap, null);
+  assert.equal(rows[4].gap, 121);
+  assert.deepEqual(shape(app.listRows(cs, { selectedId: "a", unfolded: new Set(["c"]), gapMin: 120 })),
+    ["a", "open[b,c,d]", "b", "c", "d", "e", "f", "fold[g,h]"]);
+  // the selected clip never hides: the run breaks around it (rule 7)
+  assert.deepEqual(shape(app.listRows(cs, { selectedId: "c", unfolded: new Set(), gapMin: 120 })),
+    ["a", "fold[b]", "c", "fold[d]", "e", "f", "fold[g,h]"]);
+  const open = app.listRows(cs, { selectedId: "a", unfolded: new Set(["g"]), gapMin: 120 });
+  assert.deepEqual([open[4].gap, open[5].gap, open[6].gap], [121, null, null]);  // the pause sits above the fold row
+  assert.deepEqual(app.listRows([], { selectedId: null, unfolded: new Set(), gapMin: 120 }), []);
+  const split = [clip("p", [], "шум", [], 0, 1), clip("q", [], "шум", [], 200, 201)];
+  const two = app.listRows(split, { selectedId: null, unfolded: new Set(), gapMin: 120 });
+  assert.deepEqual(shape(two), ["fold[p]", "fold[q]"]);  // two folds, the pause between them (rule 9)
+  assert.equal(two[1].gap, 199);
+});
+
+test("afterFoldClose", () => {
+  const cs = foldList();
+  assert.equal(app.afterFoldClose(cs, ["b", "c", "d"]), "e");
+  assert.equal(app.afterFoldClose(cs, ["g", "h"]), "f");  // the list's end: the clip before (rule 5)
+  assert.equal(app.afterFoldClose([clip("x", [], "шум")], ["x"]), null);
+});

@@ -260,6 +260,50 @@ function gapBefore(clips, i, min = 30) {
   return gap >= min ? gap : null;
 }
 
+// D107: in «все» on Review a run of rejected clips folds into one row. A clip whose span another run
+// decides differently stays visible (rule 6); a pause breaks a run (rule 9).
+const foldable = (c) => { const s = status(c); return s.kind === "rejected" && !s.others; };
+
+function foldRun(clips, clipId, gapMin) {
+  let i = clips.findIndex((c) => c.clip_id === clipId);
+  if (i < 0 || !foldable(clips[i])) return [];
+  let j = i;
+  while (i > 0 && foldable(clips[i - 1]) && gapBefore(clips, i, gapMin) === null) i--;
+  while (j + 1 < clips.length && foldable(clips[j + 1]) && gapBefore(clips, j + 1, gapMin) === null) j++;
+  return clips.slice(i, j + 1).map((c) => c.clip_id);
+}
+
+// Rows: { kind: "clip", clip, gap } or { kind: "fold", ids, open, gap }; gap = the pause above the row.
+// The selected clip never folds (rule 7); a run is open when any of its clips is in `unfolded`.
+function listRows(clips, { selectedId, unfolded, gapMin }) {
+  const rows = [];
+  for (let i = 0; i < clips.length;) {
+    const gap = gapBefore(clips, i, gapMin);
+    const inRun = (k) => foldable(clips[k]) && clips[k].clip_id !== selectedId;
+    if (!inRun(i)) {
+      rows.push({ kind: "clip", clip: clips[i], gap });
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    while (j < clips.length && inRun(j) && gapBefore(clips, j, gapMin) === null) j++;
+    const run = clips.slice(i, j);
+    const open = run.some((c) => unfolded.has(c.clip_id));
+    rows.push({ kind: "fold", ids: run.map((c) => c.clip_id), open, gap });
+    if (open) for (const c of run) rows.push({ kind: "clip", clip: c, gap: null });
+    i = j;
+  }
+  return rows;
+}
+
+// Rule 5: closing the fold that holds the selection moves it to the clip after the run, else before.
+function afterFoldClose(clips, ids) {
+  const last = clips.findIndex((c) => c.clip_id === ids[ids.length - 1]);
+  const first = clips.findIndex((c) => c.clip_id === ids[0]);
+  if (last >= 0 && last + 1 < clips.length) return clips[last + 1].clip_id;
+  return first > 0 ? clips[first - 1].clip_id : null;
+}
+
 // Local time through Intl of the UI language (D68): ru «22.10, 04:25» (D51), with the year
 // «22.10.2026, 04:25» (D61); "" if unparsable.
 function localTime(ts, withYear, lang) {
@@ -2093,7 +2137,8 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, playFailText, progressText, afterDecision, tabReturn, showGaps };
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, playFailText, progressText, afterDecision, tabReturn, showGaps,
+    foldable, foldRun, listRows, afterFoldClose };
 } else {
   start();
 }
