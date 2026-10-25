@@ -129,6 +129,20 @@ function jobDuration(j, now, lang) {
   return Number.isNaN(to) ? "" : fmtSpan((to - from) / 1000, lang);
 }
 
+// D96: a job whose state changed since the last poll is read out (aria-live); new jobs have a toast
+function jobAnnouncements(prev, jobs, sessions, lang) {
+  if (!prev) return [];
+  const was = new Map(prev.map((j) => [j.job_id, j.state]));
+  return jobs.filter((j) => was.has(j.job_id) && was.get(j.job_id) !== j.state)
+    .map((j) => jobLine(j, sessions, lang));
+}
+
+// D96: the log redraws every second while a job is in its first minute («running 5 s»), else every minute
+function jobTick(jobs, now) {
+  const young = jobs.some((j) => j.state === "running" && now - Date.parse(j.started) < 60000);
+  return young ? `s${Math.floor(now / 1000)}` : `m${Math.floor(now / 60000)}`;
+}
+
 // D81: newest first; two or more done backups in a row become one group
 function journalRows(jobs) {
   const rows = [];
@@ -288,6 +302,7 @@ let autoTried = null;      // session id the automatic open already tried
 let retryOpen = null;      // [id, run] of the newest open lost with the link and nothing on screen
 let runId = null;          // explicit run, null = newest
 let openSeq = 0;           // only the newest session response is applied
+let lastJobs = null;       // the jobs of the previous poll, for the aria-live line (D96)
 let queue = Promise.resolve();  // journal writes in key-press order
 let audioCtl = null;       // AbortController of the clip fetch in flight
 let audioUrl = null;       // object URL of the clip in the player
@@ -1131,9 +1146,12 @@ function renderJobs(st) {
   const had = document.activeElement;
   const fkey = had && box.contains(had) ? had.dataset.focus : null;
   const sig = JSON.stringify([st.jobs, st.sessions.map((s) => [s.session_id, s.name]), [...ui.logOpen],
-    ui.cancelAsk, [...ui.groupOpen], Math.floor(Date.now() / 60000)]);  // the minute: «running 12 min»
+    ui.cancelAsk, [...ui.groupOpen], jobTick(st.jobs, Date.now())]);
   setKids(box, sig, () => (st.jobs.length ? journalRows(st.jobs).map((r) => (r.group ? groupEl(r.group, st)
-    : jobEl(r.job, st))) : [el("p", tr("jobs.none"), "muted")]));
+    : jobEl(r.job, st))) : [el("li", tr("jobs.none"), "muted jobs-none")]));
+  const said = jobAnnouncements(lastJobs, st.jobs, st.sessions, ui.lang);
+  if (said.length) $("jobs-live").textContent = said.join(". ");
+  lastJobs = st.jobs;
   for (const pre of box.querySelectorAll(".job-log")) {
     const id = pre.dataset.job;
     pre.scrollTop = ui.logPinned.get(id) === false ? ui.logScroll.get(id) || 0 : pre.scrollHeight;
@@ -1150,7 +1168,7 @@ function jobEl(j, st) {
   const id = j.job_id;
   const cls = { open: "job-open", moot: "job-moot", retried: "job-moot", resolved: "job-resolved" }[j.failure]
     || (j.state === "done" ? "job-done" : "");
-  const row = el("div", null, `lib-row job-row ${cls}`.trim());
+  const row = el("li", null, `lib-row job-row ${cls}`.trim());
   row.id = `job-${id}`;
   row.tabIndex = -1;  // D84: the red badge brings focus here
   row.dataset.focus = id;
@@ -1175,9 +1193,9 @@ function jobEl(j, st) {
       renderLibrary();
     }, "ghost"), "job-log-btn");
     b.setAttribute("aria-expanded", String(open));
-    b.setAttribute("aria-controls", `log-${id}`);
+    if (open) b.setAttribute("aria-controls", `log-${id}`);  // only an element that exists
   }
-  if (j.failure === "open") act(button(tr("jobs.retry"), (e) => retryJob(j, e.currentTarget), "outline"), "job-retry");
+  if (j.failure === "open" && !j.retrying) act(button(tr("jobs.retry"), (e) => retryJob(j, e.currentTarget), "outline"), "job-retry");
   if ((j.state === "queued" || j.state === "running") && j.kind !== "delete") {  // D94: no cancel
     if (ui.cancelAsk === id) {  // D83: two steps in the row, like deleting an idea
       acts.append(el("span", tr("jobs.cancel_question")));
@@ -1212,7 +1230,7 @@ function jobEl(j, st) {
 function groupEl(group, st) {
   const key = groupKey(group);
   const open = ui.groupOpen.has(key);
-  const row = el("div", null, "lib-row job-group job-done");
+  const row = el("li", null, "lib-row job-group job-done");
   const head = el("div", null, "job-head");
   const b = button(`${groupLine(group, ui.lang)} ${open ? "▾" : "▸"}`, () => {
     if (open) ui.groupOpen.delete(key);
@@ -1224,7 +1242,7 @@ function groupEl(group, st) {
   head.append(el("time", jobClock(group[0], ui.lang), "job-time"), b);
   row.append(head);
   if (open) {
-    const items = el("div", null, "job-group-items");
+    const items = el("ul", null, "job-group-items");
     items.append(...group.map((j) => jobEl(j, st)));
     row.append(items);
   }
@@ -1270,6 +1288,7 @@ async function retryJob(j, b) {  // D82: the server takes kind and params from t
     toast(tr("toast.job_submitted"), label(ui.lang, "job.kind.", j.kind));
     await poll();
   } catch (e) {
+    b.disabled = false;  // D96: the log is not rebuilt until the minute changes
     fail(e);
   }
 }
@@ -1886,7 +1905,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, statusText, summaryText, chainText, splitHidden, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
+    counts, statusText, summaryText, chainText, splitHidden, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
     afterOpenError, retryAfter, startValue, codedError, errDesc };
 } else {

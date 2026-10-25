@@ -431,3 +431,22 @@ test("startValue", () => {  // D94: the start a delete left; what the owner type
   assert.equal(app.startValue(new Map([["k", "x"]]), "k", null), "x");
   assert.equal(app.startValue(new Map(), "k", null), "");
 });
+
+test("jobAnnouncements", () => {  // D96: a state change is read out; the first poll is silent
+  const run = job("backup", "running");
+  assert.deepEqual(app.jobAnnouncements(null, [run], SESSIONS, "en"), []);
+  assert.deepEqual(app.jobAnnouncements([run], [run], SESSIONS, "en"), []);
+  const done = { ...run, state: "done" };
+  assert.deepEqual(app.jobAnnouncements([run], [done], SESSIONS, "en"), [app.jobLine(done, SESSIONS, "en")]);
+  assert.deepEqual(app.jobAnnouncements([], [run], SESSIONS, "en"), []);  // a new job has its toast
+});
+
+test("jobTick", () => {  // D96: «running 5 s» counts by the second for the first minute only
+  const now = Date.parse("2026-10-25T10:00:30+03:00");
+  const young = [{ state: "running", started: "2026-10-25T10:00:00+03:00" }];
+  const old = [{ state: "running", started: "2026-10-25T09:58:00+03:00" }];
+  assert.notEqual(app.jobTick(young, now), app.jobTick(young, now + 1000));
+  assert.equal(app.jobTick(old, now), app.jobTick(old, now + 1000));
+  assert.notEqual(app.jobTick(old, now), app.jobTick(old, now + 60000));
+  assert.equal(app.jobTick([], now), app.jobTick([], now + 1000));
+});
