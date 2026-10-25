@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -16,7 +17,7 @@ from voxcut import library
 from voxcut.errors import Coded, descriptor
 from voxcut.intervals import parse_start
 
-KINDS = ("import", "process", "backup", "restore")
+KINDS = ("import", "process", "backup", "restore", "delete")
 HEAVY = KINDS  # all heavy, one at a time
 SLICE = "voxcut.slice"
 JOB_ID_RE = re.compile(r"[0-9a-f]{32}")
@@ -33,7 +34,7 @@ class JobParamsError(Coded, ValueError):
 
 
 SUBJECT = {"process": ("session_id",), "import": ("source",), "backup": ("mode",),
-           "restore": ("name",)}  # D79: whitelist, nothing else leaves job.json
+           "restore": ("name",), "delete": ("session_id",)}  # D79: whitelist, nothing else leaves job.json
 LIST_MAX = 20  # (агент) jobs shown in /api/state; older finished ones stay on disk
 
 
@@ -48,10 +49,12 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def validate(kind: str, params: dict, lay: library.Layout) -> dict:
-    """Narrow contract (U9): no paths, commands or unit properties from the browser."""
+def validate(kind: str, params: dict, lay: library.Layout, hidden=None) -> dict:
+    """Narrow contract (U9): no paths, commands or unit properties from the browser.
+
+    `hidden(session_id) -> bool` comes from the journal (D92): only a hidden session is deleted."""
     keys = {"import": {"source", "chain", "files", "start"}, "process": {"session_id"},
-            "backup": {"mode"}, "restore": {"name"}}
+            "backup": {"mode"}, "restore": {"name"}, "delete": {"session_id"}}
     if not isinstance(kind, str) or kind not in keys:
         raise JobParamsError("job_unknown_kind", kind=repr(kind))
     if not isinstance(params, dict) or set(params) != keys[kind]:
@@ -81,6 +84,13 @@ def validate(kind: str, params: dict, lay: library.Layout) -> dict:
             raise JobParamsError("job_no_session")
         if not row["can_process"]:
             raise JobParamsError("job_cannot_process")
+    elif kind == "delete":  # D91, D94
+        if not isinstance(p["session_id"], str):
+            raise JobParamsError("job_bad_session_id")
+        if library.session_row(lay, p["session_id"]) is None:
+            raise JobParamsError("job_no_session")
+        if hidden is None or not hidden(p["session_id"]):
+            raise JobParamsError("job_session_not_hidden")
     elif kind == "backup":
         if p["mode"] not in ("full", "light"):
             raise JobParamsError("job_bad_mode")
@@ -126,8 +136,8 @@ def _read(path: Path) -> dict | None:
 
 
 class Jobs:
-    def __init__(self, lay: library.Layout, run=subprocess.run, on_done=None):
-        self.lay, self.run, self.on_done = lay, run, on_done
+    def __init__(self, lay: library.Layout, run=subprocess.run, on_done=None, hidden=None):
+        self.lay, self.run, self.on_done, self.hidden = lay, run, on_done, hidden
         self._lock = threading.Lock()
         self._jobs: dict[str, dict] = {}  # job_id -> {"job": job.json, "state", ...}
         self._queue: list[str] = []  # in memory only: lost on restart (see plan)
@@ -190,6 +200,10 @@ class Jobs:
 
     def _step(self) -> None:
         self._refresh()
+        for job_id, rec in list(self._jobs.items()):  # D94: a deleted session's jobs go with it
+            if rec["job"]["kind"] == "delete" and rec["state"] == "done" \
+                    and not (self.lay.jobs / job_id / "on_done").exists():
+                self._forget(rec["job"]["params"].get("session_id"))
         for job_id, rec in self._jobs.items():
             marker = self.lay.jobs / job_id / "on_done"
             if rec["state"] == "done" and self.on_done and not marker.exists():
@@ -204,6 +218,13 @@ class Jobs:
         if self._queue and not any(r["state"] == "running" for r in self._jobs.values()):
             self._start(self._queue.pop(0))
 
+    def _forget(self, session_id: str) -> None:
+        for job_id in [j for j, r in self._jobs.items() if r["job"]["kind"] == "process"
+                       and (r["job"].get("params") or {}).get("session_id") == session_id
+                       and r["state"] not in ("queued", "running")]:
+            shutil.rmtree(self.lay.jobs / job_id, ignore_errors=True)
+            del self._jobs[job_id]
+
     def submit(self, job_id: str, kind: str, params: dict) -> dict:
         if not isinstance(job_id, str) or not JOB_ID_RE.fullmatch(job_id):
             raise JobParamsError("job_bad_id")
@@ -212,8 +233,10 @@ class Jobs:
 
     def _add(self, job_id: str, kind: str, params: dict) -> dict:
         if job_id not in self._jobs:
-            job = {"job_id": job_id, "kind": kind, "params": validate(kind, params, self.lay),
-                   "submitted": _now()}
+            p = validate(kind, params, self.lay, self.hidden)
+            if kind in ("process", "delete") and self._busy(p["session_id"]):
+                raise JobParamsError("job_session_busy")
+            job = {"job_id": job_id, "kind": kind, "params": p, "submitted": _now()}
             self._jobs[job_id] = {"job": job, "state": "queued"}
             self._queue.append(job_id)
             self._step()
@@ -240,6 +263,8 @@ class Jobs:
             rec = self._jobs.get(job_id)
             if rec is None:
                 raise KeyError(job_id)
+            if rec["job"]["kind"] == "delete" and rec["state"] in ("queued", "running"):
+                raise JobParamsError("job_cancel_delete")  # D94: short; a re-run finishes a cut one
             if rec["state"] == "queued":
                 self._queue.remove(job_id)
                 rec["state"] = "cancelled"
@@ -257,7 +282,10 @@ class Jobs:
     def busy(self, session_id: str) -> bool:
         """A queued or running job of this session (D94: no hide or delete under it)."""
         with self._lock:
-            return any(r["state"] in ("queued", "running")
+            return self._busy(session_id)
+
+    def _busy(self, session_id: str) -> bool:
+        return any(r["state"] in ("queued", "running")
                        and (r["job"].get("params") or {}).get("session_id") == session_id
                        for r in self._jobs.values())
 
@@ -377,6 +405,8 @@ def main(argv: list[str]) -> int:
                 result = library.make_backup(lay, p["mode"], datetime.now())
             elif job["kind"] == "restore":
                 result = library.restore_backup(lay, p["name"], d / "journal.jsonl")
+            elif job["kind"] == "delete":
+                result = library.delete_session(lay, p["session_id"], log)
             else:
                 raise JobError("job_unit_unknown_kind", kind=repr(job["kind"]))
         except Exception as exc:  # noqa: BLE001 - every failure becomes a visible status

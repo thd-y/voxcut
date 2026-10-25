@@ -294,6 +294,8 @@ class App:
             return {"job": self.jobs.cancel(req.params["job_id"])}
         except KeyError:
             raise HttpError(404, "http_no_job") from None
+        except ValueError as exc:
+            raise HttpError.of(400, exc) from None
 
     def _jobs_retry(self, req: Request) -> dict:
         if self.jobs is None:
@@ -314,6 +316,10 @@ class App:
         if job["kind"] == "backup":
             eid = hashlib.sha256((job["job_id"] + "backup").encode()).hexdigest()[:32]
             self.journal.append({"event_id": eid, "kind": "backup", "value": job["result"]})
+        elif job["kind"] == "delete":  # D94: a session back from re-import or a backup is visible
+            eid = hashlib.sha256((job["job_id"] + "shown").encode()).hexdigest()[:32]
+            self.journal.append({"event_id": eid, "kind": "session_shown", "value": "",
+                                 "session_id": job["subject"]["session_id"]})
         elif job["kind"] == "restore":
             try:
                 events, _ = jr.load(self.lay.jobs / job["job_id"] / "journal.jsonl")
@@ -478,5 +484,6 @@ def make_server(lay: Layout, host: str = HOST, port: int = 0, jobs=None,
     app = App(lay, server.server_address[1], jobs, journal)
     if jobs is not None:
         jobs.on_done = app.on_done
+        jobs.hidden = lambda sid: sid in jr.hidden_sessions(app.journal.events())
     handler.app = app
     return server, app

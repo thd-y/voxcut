@@ -136,7 +136,7 @@ test("keys used exist", () => {
   const used = [...html.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g), ...js.matchAll(/\btr\("([^"]+)"/g)]
     .map((m) => m[1]);
   const labels = {
-    "job.kind.": ["process", "import", "backup", "restore"],
+    "job.kind.": ["process", "import", "backup", "restore", "delete"],
     "job.state.": ["queued", "running", "done", "failed", "cancelled"],
     "session.state.": ["imported", "assembled", "probs", "segmented", "clips", "incomplete"],
     "mark.": app.DECISIONS,

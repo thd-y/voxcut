@@ -576,3 +576,63 @@ def test_failure_import_bad_session_json(lay):
     (lay.sessions / SID).mkdir(parents=True)
     (lay.sessions / SID / "import.json").write_text("{не json")
     assert {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}[a]["failure"] == "open"
+
+
+# --- delete a hidden session (D94) ---
+
+def a_session(lay, sid=SID):
+    d = lay.sessions / sid
+    (d / "originals").mkdir(parents=True)
+    (d / "import.json").write_text("{}")
+    return sid
+
+
+@pytest.mark.parametrize("sid, hidden, code", [
+    (SID, lambda s: False, "job_session_not_hidden"),
+    (SID, None, "job_session_not_hidden"),
+    ("2026-01-01_00-00_1h00m.00000000", lambda s: True, "job_no_session"),
+    ("../x", lambda s: True, "job_no_session"),
+    (5, lambda s: True, "job_bad_session_id"),
+])
+def test_validate_delete(lay, sid, hidden, code):
+    a_session(lay)
+    with pytest.raises(ValueError) as e:
+        validate("delete", {"session_id": sid}, lay, hidden)
+    assert e.value.code == code
+    assert validate("delete", {"session_id": SID}, lay, lambda s: s == SID) == {"session_id": SID}
+
+
+def test_busy_session_refuses(lay):
+    a_session(lay)
+    j = Jobs(lay, run=FakeRun(), hidden=lambda s: True)
+    j.submit(jid(), "process", {"session_id": SID})
+    assert j.busy(SID)
+    with pytest.raises(ValueError) as e:
+        j.submit(jid(), "delete", {"session_id": SID})
+    assert e.value.code == "job_session_busy"
+
+
+def test_delete_job_forgets_process_jobs(lay):
+    a_session(lay)
+    mine = [as_job(lay, "process", {"session_id": SID}, state) for state in ("failed", "done")]
+    other = as_job(lay, "process", {"session_id": S2}, "failed")
+    j = Jobs(lay, run=FakeRun(), hidden=lambda s: True)
+    d = jid()
+    j.submit(d, "delete", {"session_id": SID})
+    finish(lay, d)
+    j.poll()
+    ids = [v["job_id"] for v in j.list()]
+    assert other in ids and d in ids and not set(mine) & set(ids)
+    assert not any((lay.jobs / m).exists() for m in mine)
+    assert [v["job_id"] for v in Jobs(lay, run=FakeRun()).list()] == ids  # also after a restart
+
+
+def test_cancel_delete_refused(lay):
+    a_session(lay)
+    j = Jobs(lay, run=FakeRun(), hidden=lambda s: True)
+    d = jid()
+    j.submit(d, "delete", {"session_id": SID})
+    with pytest.raises(ValueError) as e:
+        j.cancel(d)
+    assert e.value.code == "job_cancel_delete"
+    assert j.list()[0]["state"] == "running"

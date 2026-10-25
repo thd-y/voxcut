@@ -661,3 +661,24 @@ def test_hide_refused_while_job_runs(wapi):
     status, _, body = hide(wapi)
     assert status == 409 and body["error"]["code"] == "http_session_busy"
     assert not wapi.lay.journal.exists() or "session_hidden" not in wapi.lay.journal.read_text()
+
+
+def test_delete_needs_hidden_and_cannot_be_cancelled(wapi):
+    body = {"job_id": uuid.uuid4().hex, "kind": "delete", "params": {"session_id": SID}}
+    status, _, b = post(wapi, "/api/jobs", body)
+    assert status == 400 and b["error"]["code"] == "job_session_not_hidden"
+    assert hide(wapi)[0] == 200
+    status, _, b = post(wapi, "/api/jobs", body)
+    assert status == 200 and b["job"]["subject"] == {"session_id": SID}
+    status, _, b = post(wapi, f"/api/jobs/{body['job_id']}/cancel", {})
+    assert status == 400 and b["error"]["code"] == "job_cancel_delete"
+
+
+def test_delete_done_writes_session_shown(wapi):
+    assert hide(wapi)[0] == 200
+    job = {"job_id": uuid.uuid4().hex, "kind": "delete", "subject": {"session_id": SID}}
+    wapi.app.on_done(job)
+    wapi.app.on_done(job)
+    shown = [e for e in wapi.app.journal.events() if e["kind"] == "session_shown"]
+    assert len(shown) == 1 and shown[0]["session_id"] == SID
+    assert journal_mod.hidden_sessions(wapi.app.journal.events()) == set()
