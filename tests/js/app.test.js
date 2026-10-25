@@ -568,6 +568,9 @@ test("listRows", () => {
   // the selected clip never hides: the run breaks around it (rule 7)
   assert.deepEqual(shape(app.listRows(cs, { selectedId: "c", unfolded: new Set(), gapMin: 120 })),
     ["a", "fold[b]", "c", "fold[d]", "e", "f", "fold[g,h]"]);
+  // …but an open run keeps it: one «▾ 3», not «▾ 1», c, «▾ 1»
+  assert.deepEqual(shape(app.listRows(cs, { selectedId: "c", unfolded: new Set(["b"]), gapMin: 120 })),
+    ["a", "open[b,c,d]", "b", "c", "d", "e", "f", "fold[g,h]"]);
   const open = app.listRows(cs, { selectedId: "a", unfolded: new Set(["g"]), gapMin: 120 });
   assert.deepEqual([open[4].gap, open[5].gap, open[6].gap], [121, null, null]);  // the pause sits above the fold row
   assert.deepEqual(app.listRows([], { selectedId: null, unfolded: new Set(), gapMin: 120 }), []);

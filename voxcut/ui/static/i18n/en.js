@@ -216,6 +216,14 @@
   "toast.note_kept": "{error}\nThe text is kept in this clip's note field.",
   "toast.idea_saved": "Idea saved",
   "toast.explorer_failed": "File Explorer did not open",
+  "list.folded": {
+    one: "▸ {n} rejected",
+    other: "▸ {n} rejected",
+  },
+  "list.unfolded": {
+    one: "▾ {n} rejected",
+    other: "▾ {n} rejected",
+  },
   "lib.hidden_count": {
     one: "Hidden: {n}",
     other: "Hidden: {n}",

@@ -216,6 +216,18 @@
   "toast.note_kept": "{error}\nТекст сохранён в поле заметки этого клипа.",
   "toast.idea_saved": "Идея записана",
   "toast.explorer_failed": "Проводник не открылся",
+  "list.folded": {
+    one: "▸ {n} отброшен",
+    few: "▸ {n} отброшено",
+    many: "▸ {n} отброшено",
+    other: "▸ {n} отброшено",
+  },
+  "list.unfolded": {
+    one: "▾ {n} отброшен",
+    few: "▾ {n} отброшено",
+    many: "▾ {n} отброшено",
+    other: "▾ {n} отброшено",
+  },
   "lib.hidden_count": {
     one: "Скрытых: {n}",
     few: "Скрытых: {n}",

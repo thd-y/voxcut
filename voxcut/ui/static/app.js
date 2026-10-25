@@ -274,23 +274,31 @@ function foldRun(clips, clipId, gapMin) {
 }
 
 // Rows: { kind: "clip", clip, gap } or { kind: "fold", ids, open, gap }; gap = the pause above the row.
-// The selected clip never folds (rule 7); a run is open when any of its clips is in `unfolded`.
+// A run is open when any of its clips is in `unfolded`. The selected clip never hides (rule 7):
+// it breaks a closed run in two.
 function listRows(clips, { selectedId, unfolded, gapMin }) {
   const rows = [];
+  const fold = (run, gap) => rows.push({ kind: "fold", ids: run.map((c) => c.clip_id), open: false, gap });
   for (let i = 0; i < clips.length;) {
     const gap = gapBefore(clips, i, gapMin);
-    const inRun = (k) => foldable(clips[k]) && clips[k].clip_id !== selectedId;
-    if (!inRun(i)) {
+    if (!foldable(clips[i])) {
       rows.push({ kind: "clip", clip: clips[i], gap });
       i++;
       continue;
     }
     let j = i + 1;
-    while (j < clips.length && inRun(j) && gapBefore(clips, j, gapMin) === null) j++;
+    while (j < clips.length && foldable(clips[j]) && gapBefore(clips, j, gapMin) === null) j++;
     const run = clips.slice(i, j);
-    const open = run.some((c) => unfolded.has(c.clip_id));
-    rows.push({ kind: "fold", ids: run.map((c) => c.clip_id), open, gap });
-    if (open) for (const c of run) rows.push({ kind: "clip", clip: c, gap: null });
+    const k = run.findIndex((c) => c.clip_id === selectedId);
+    if (run.some((c) => unfolded.has(c.clip_id))) {
+      rows.push({ kind: "fold", ids: run.map((c) => c.clip_id), open: true, gap });
+      for (const c of run) rows.push({ kind: "clip", clip: c, gap: null });
+    } else if (k < 0) fold(run, gap);
+    else {
+      if (k > 0) fold(run.slice(0, k), gap);
+      rows.push({ kind: "clip", clip: run[k], gap: k > 0 ? null : gap });
+      if (k + 1 < run.length) fold(run.slice(k + 1), null);
+    }
     i = j;
   }
   return rows;
@@ -400,7 +408,7 @@ let scrolledId = null;
 const shownWarnings = new Set();
 const ui = {
   screen: "session", tab: "review", filter: "all", mineFilter: "mine", query: "", inOrder: false,
-  selectedId: null, tabSel: { review: null, mine: null }, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,  // tabSel: each tab's own clip (D100)
+  selectedId: null, tabSel: { review: null, mine: null }, unfolded: new Set(), undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,  // tabSel: each tab's own clip (D100)
   lang: "en",  // D69: page memory only, every launch starts in English
   loaded: false, openError: null, audio: "idle", audioError: null, playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
@@ -734,6 +742,7 @@ async function openSession(id, run) {
     ui.hideSummary = false;
     ui.selectedId = null;
     ui.tabSel = { review: null, mine: null };
+    ui.unfolded = new Set();  // D107 rule 11: open folds live while the session is open
     ui.filter = "all";
     ui.query = "";
     $("search").value = "";
@@ -956,9 +965,29 @@ const firstLine = (clip) => {
   return n ? n.value.split("\n")[0] : "";
 };
 
+// D107: «▸ N отброшено» opens the run silently (rule 10); «▾ N» closes it, and a selection inside
+// moves to the clip after it, silent (rule 5).
+function foldRow({ ids, open }) {
+  const b = el("button", tr(open ? "list.unfolded" : "list.folded", { n: ids.length }), "fold");
+  b.type = "button";
+  b.setAttribute("aria-expanded", String(open));
+  b.addEventListener("click", () => {
+    if (!open) {
+      for (const id of ids) ui.unfolded.add(id);
+      return render();
+    }
+    for (const id of ids) ui.unfolded.delete(id);
+    if (!ids.includes(ui.selectedId)) return render();
+    const next = afterFoldClose(shown(), ids);
+    if (next) select(next, { play: false });
+    else render();
+  });
+  return b;
+}
+
 function renderList() {
   const list = shown();
-  const sig = JSON.stringify([ui.lang, ui.selectedId, [...ui.pending], showGaps(ui.tab, ui.filter), list.map((c) =>
+  const sig = JSON.stringify([ui.lang, ui.selectedId, [...ui.pending], [...ui.unfolded], showGaps(ui.tab, ui.filter), list.map((c) =>
     [c.clip_id, c.own_mark, c.marks, c.heard, firstLine(c)])]);
   if (sig === listSig) return;  // polls must not rebuild the list (scroll, hover)
   listSig = sig;
@@ -974,10 +1003,7 @@ function renderList() {
     $("clip-list").replaceChildren(box);
     return;
   }
-  const rows = [];
-  list.forEach((c, i) => {
-    const gap = showGaps(ui.tab, ui.filter) ? gapBefore(list, i, GAP_MIN_S) : null;
-    if (gap !== null) rows.push(el("p", gapLabel(gap, ui.lang), "gap"));
+  const clipRow = (c) => {
     const item = el("article", null, `item${c.clip_id === ui.selectedId ? " selected" : ""}`);
     if (c.clip_id === ui.selectedId) item.setAttribute("aria-current", "true");
     item.dataset.size = "xs";
@@ -999,8 +1025,16 @@ function renderList() {
     if ((s.kind !== "undecided" || pending) && (ui.tab !== "mine" || s.others || pending)) aside.append(statusBadge(c));
     item.append(sec, aside);
     item.addEventListener("click", () => select(c.clip_id, { play: true }));  // D53
-    rows.push(item);
-  });
+    return item;
+  };
+  const lines = showGaps(ui.tab, ui.filter)
+    ? listRows(list, { selectedId: ui.selectedId, unfolded: ui.unfolded, gapMin: GAP_MIN_S })
+    : list.map((clip) => ({ kind: "clip", clip, gap: null }));
+  const rows = [];
+  for (const r of lines) {
+    if (r.gap !== null) rows.push(el("p", gapLabel(r.gap, ui.lang), "gap"));
+    rows.push(r.kind === "clip" ? clipRow(r.clip) : foldRow(r));
+  }
   $("clip-list").replaceChildren(...rows);
   if (scrolledId !== ui.selectedId) {
     scrolledId = ui.selectedId;
@@ -1683,6 +1717,8 @@ function select(clipId, { play = false } = {}) {
     ui.noteStatus = null;
     ui.expanded = false;
     ui.selectedId = clipId;
+    // D107 rule 8: whatever moves the selection (arrow, Ctrl+Z, «к клипу», timeline, tab return) opens its fold
+    if (showGaps(ui.tab, ui.filter)) for (const id of foldRun(shown(), clipId, GAP_MIN_S)) ui.unfolded.add(id);
     $("player").pause();  // the old clip must not end (and become «heard») as the new one
   }
   render();

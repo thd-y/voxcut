@@ -61,6 +61,11 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
   max-width: 100%; }
 .gap { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted-foreground); }
 .gap::before, .gap::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+/* D107: a folded run of rejected clips; grey like .gap, never a decision colour (The One Mark Rule) */
+#clip-list .fold { display: block; width: 100%; text-align: left; padding: 4px 8px; border: 0; border-radius: 6px;
+  background: none; font: inherit; font-size: 12px; color: var(--muted-foreground); cursor: pointer; }
+#clip-list .fold:hover { background: var(--muted); }
+#clip-list .fold:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
 .dot { display: inline-block; width: 6px; height: 6px; border-radius: 99px;
   background: var(--muted-foreground); }
 .list-empty { padding: 16px 8px; text-align: center; color: var(--muted-foreground); }
