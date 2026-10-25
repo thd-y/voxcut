@@ -236,6 +236,9 @@ function visibleClips(clips, { tab, filter, query }) {
   });
 }
 
+// D100: the clip a tab remembers, while it is still in that tab's list; null → the entry rule.
+const tabReturn = (list, savedId) => (savedId && list.some((c) => c.clip_id === savedId) ? savedId : null);
+
 function gapBefore(clips, i, min = 30) {
   if (i <= 0) return null;
   const gap = clips[i].start_s - clips[i - 1].end_s;
@@ -338,7 +341,7 @@ let scrolledId = null;
 const shownWarnings = new Set();
 const ui = {
   screen: "session", tab: "review", filter: "all", mineFilter: "mine", query: "", inOrder: false,
-  selectedId: null, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,
+  selectedId: null, tabSel: { review: null, mine: null }, undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,  // tabSel: each tab's own clip (D100)
   lang: "en",  // D69: page memory only, every launch starts in English
   loaded: false, openError: null, audio: "idle", audioError: null, playWhenReady: false,
   noteClipId: null, noteSaving: false, expanded: false,
@@ -669,6 +672,7 @@ async function openSession(id, run) {
     ui.undo = [];
     ui.hideSummary = false;
     ui.selectedId = null;
+    ui.tabSel = { review: null, mine: null };
     ui.filter = "all";
     ui.query = "";
     $("search").value = "";
@@ -1736,10 +1740,13 @@ function undo() {
 }
 
 function setTab(tab) {
+  ui.tabSel[ui.tab] = ui.selectedId;
   ui.tab = tab;
   ui.rechoose = null;
   ui.ideaDelete = null;
   ui.screen = "session";
+  const back = view && tabReturn(shown(), ui.tabSel[tab]);
+  if (back) return select(back);  // silent: switching tabs never plays (D53)
   if (view && !shown().some((c) => c.clip_id === ui.selectedId)) {
     ui.selectedId = null;
     closeNote();
@@ -2026,7 +2033,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, afterDecision };
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, afterDecision, tabReturn };
 } else {
   start();
 }

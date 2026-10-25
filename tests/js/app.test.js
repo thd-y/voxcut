@@ -490,3 +490,10 @@ test("afterDecision", () => {  // D97: called after the optimistic change, the c
   assert.deepEqual(at(cs, "b", "all"), { next: "b", filter: "all", play: false });
   assert.deepEqual(at(cs, "b", "undecided"), { next: "b", filter: "undecided", play: false });
 });
+
+test("tabReturn", () => {  // D100: a tab returns to its own clip while it is still in the list
+  const list = [clip("a"), clip("b")];
+  assert.equal(app.tabReturn(list, "b"), "b");
+  assert.equal(app.tabReturn(list, "z"), null);
+  assert.equal(app.tabReturn(list, null), null);
+});
