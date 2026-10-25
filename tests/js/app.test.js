@@ -468,3 +468,25 @@ test("notSavedTitle", () => {  // D101: the clip by the time its list row shows,
   assert.equal(app.notSavedTitle(bare, "шум", "en"), "Not saved: 12:30 — noise");
   assert.equal(app.notSavedTitle(bare, "", "en"), "Not saved: 12:30 — not reviewed");
 });
+
+test("afterDecision", () => {  // D97: called after the optimistic change, the clip already has its new decision
+  const decided = (id, v) => clip(id, [v], v);
+  const at = (cs, id, filter) => app.afterDecision(cs, cs.find((c) => c.clip_id === id), filter);
+  // «отброшены»: kept leaves the filter → «все», same clip, silent; another reason stays in it
+  let cs = [decided("a", "моё"), clip("b"), decided("c", "шум")];
+  assert.deepEqual(at(cs, "a", "rejected"), { next: "a", filter: "all", play: false });
+  cs = [decided("a", "музыка"), clip("b")];
+  assert.deepEqual(at(cs, "a", "rejected"), { next: "a", filter: "rejected", play: false });
+  // «оставлены»: a reason leaves it, kept again stays
+  assert.deepEqual(at(cs, "a", "kept"), { next: "a", filter: "all", play: false });
+  cs = [decided("a", "моё"), clip("b")];
+  assert.deepEqual(at(cs, "a", "kept"), { next: "a", filter: "kept", play: false });
+  // «все» and «не разобраны»: the next undecided plays (D42/D53)
+  cs = [decided("a", "шум"), clip("b"), clip("c")];
+  assert.deepEqual(at(cs, "a", "all"), { next: "b", filter: "all", play: true });
+  assert.deepEqual(at(cs, "a", "undecided"), { next: "b", filter: "undecided", play: true });
+  // the last undecided decided: stay on it, silent
+  cs = [decided("a", "моё"), decided("b", "шум")];
+  assert.deepEqual(at(cs, "b", "all"), { next: "b", filter: "all", play: false });
+  assert.deepEqual(at(cs, "b", "undecided"), { next: "b", filter: "undecided", play: false });
+});

@@ -208,6 +208,18 @@ function nextUndecided(clips, from) {
   return after >= 0 ? after : clips.findIndex((c) => !isDecided(c));
 }
 
+// D97: after a decision on Review. Inside «отброшены»/«оставлены» the clip stays selected and silent
+// (the filter goes to «все» if the clip has left it); in «все»/«не разобраны» the next undecided plays.
+function afterDecision(clips, clip, filter) {
+  const inFilter = (c) => visibleClips(clips, { tab: "review", filter }).includes(c);
+  if (filter === "rejected" || filter === "kept") {
+    return { next: clip.clip_id, filter: inFilter(clip) ? filter : "all", play: false };
+  }
+  const i = nextUndecided(clips, clips.indexOf(clip));
+  const next = i >= 0 ? clips[i].clip_id : clip.clip_id;
+  return { next, filter: i >= 0 && !inFilter(clips[i]) ? "all" : filter, play: next !== clip.clip_id };
+}
+
 const norm = (text) => text.trim().toLocaleLowerCase("ru").replaceAll("ё", "е");
 
 function visibleClips(clips, { tab, filter, query }) {
@@ -1660,15 +1672,21 @@ function decide(value) {
     if (i >= 0) ui.undo.splice(i, 1);
   });
   let next = clip.clip_id;
+  let play = false;
   if (ui.tab === "review") {
-    const i = nextUndecided(view.clips, view.clips.indexOf(clip));
-    next = i >= 0 ? view.clips[i].clip_id : clip.clip_id;
-    if (i >= 0 && !shown().some((c) => c.clip_id === next)) ui.filter = "all";
+    const after = afterDecision(view.clips, clip, ui.filter);
+    next = after.next;
+    play = after.play;
+    if (after.filter !== ui.filter) {
+      ui.filter = after.filter;
+      scrolledId = null;  // a new list: the row goes to the centre (D59)
+    }
   } else if (value !== KEEP) {
     const after = shown();  // the rejected clip has left the list
     next = after.length ? after[Math.min(pos, after.length - 1)].clip_id : null;
+    play = !!next && next !== clip.clip_id;
   }
-  select(next, { play: !!next && next !== clip.clip_id });  // D53: nothing left → silence
+  select(next, { play });  // D53: a decided clip never replays; nothing left → silence
   $("card").focus({ preventScroll: true });
 }
 
@@ -2001,7 +2019,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle };
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, afterDecision };
 } else {
   start();
 }
