@@ -451,3 +451,9 @@ test("jobTick", () => {  // D96: «running 5 s» counts by the second for the fi
   assert.notEqual(app.jobTick(old, now), app.jobTick(old, now + 60000));
   assert.equal(app.jobTick([], now), app.jobTick([], now + 1000));
 });
+
+test("emptySessionsKey", () => {  // all hidden is not «no sessions yet»
+  assert.equal(app.emptySessionsKey([]), "no_sessions");
+  assert.equal(app.emptySessionsKey([{ hidden: true }]), "all_hidden");
+  assert.equal(app.emptySessionsKey([{ hidden: true }, { hidden: false }]), null);
+});

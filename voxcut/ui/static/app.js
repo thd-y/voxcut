@@ -172,6 +172,11 @@ function splitHidden(sessions) {
   return { shown: sessions.filter((s) => !s.hidden), hidden: sessions.filter((s) => s.hidden) };
 }
 
+// The text of an empty session list: none at all, or every one hidden (D91); null when one shows.
+function emptySessionsKey(sessions) {
+  return sessions.some((s) => !s.hidden) ? null : sessions.length ? "all_hidden" : "no_sessions";
+}
+
 // D94: no hide or delete while a job of the session is queued or running
 const sessionBusy = (jobs, sessionId) => jobs.some((j) => (j.state === "queued" || j.state === "running")
   && j.subject && j.subject.session_id === sessionId);
@@ -534,6 +539,11 @@ async function pollOnce() {
 
 function closeSession() {
   openSeq++;  // an open still in flight must not bring it back
+  const clip = ui.noteClipId && view && view.clips.find((c) => c.clip_id === ui.noteClipId);
+  const own = clip && ownNote(clip);
+  if (clip && $("note").value !== (own ? own.value : "")) {  // hidden while typing: the note still goes
+    journal("note", $("note").value, clip).catch(fail);
+  }
   closeNote();
   stopAudio();
   sid = null;
@@ -663,7 +673,10 @@ function render() {
   $("screen-library").hidden = !lib;
   $("screen-session").hidden = lib;
   if (lib) renderLibrary();
-  else renderSession();
+  else {
+    if (serverState) lastJobs = serverState.jobs;  // back in the Library: only news is announced
+    renderSession();
+  }
 }
 
 function renderStatuses() {
@@ -710,8 +723,9 @@ function showSessionEmpty(title, text, action) {
 
 function renderSession() {
   $("session-empty").hidden = true;
-  if (serverState && !serverState.sessions.some((s) => !s.hidden)) {
-    showSessionEmpty(tr("empty.no_sessions_title"), tr("empty.no_sessions_text"), true);
+  const empty = serverState && emptySessionsKey(serverState.sessions);
+  if (empty) {
+    showSessionEmpty(tr(`empty.${empty}_title`), tr(`empty.${empty}_text`), true);
     return;
   }
   if (!view && ui.openError) {
@@ -1029,11 +1043,13 @@ function renderLibrary() {
     ...(shown.length ? shown.map((s, i) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
-    const hide = button("", () => setHidden(s.session_id, true), "ghost", "icon-sm", "x");
+    const busyRow = sessionBusy(st.jobs, s.session_id);  // not disabled: a click says why (D94)
+    const hide = button("", () => (busyRow ? fail(codedError({ code: "http_session_busy", params: {} }))
+      : setHidden(s.session_id, true)), "ghost", "icon-sm", "x");
     hide.classList.add("idea-del", "session-hide");
     hide.setAttribute("aria-label", `${tr("lib.hide")}: ${sessionLabel(s, ui.lang)}`);  // one name per row
     hide.title = tr("lib.hide");
-    hide.disabled = sessionBusy(st.jobs, s.session_id);
+    hide.setAttribute("aria-disabled", String(busyRow));
     hide.dataset.focus = `${s.session_id}:hide`;
     head.append(el("strong", sessionLabel(s, ui.lang)),
       el("span", s.n_clips !== null
@@ -1082,7 +1098,7 @@ function renderLibrary() {
     }
     if (s.error) row.append(el("div", errText(ui.lang, s.error), "error"));
     return row;
-  }) : [el("p", tr("lib.no_sessions"), "muted")]),
+  }) : [el("p", tr(`lib.${emptySessionsKey(st.sessions)}`), "muted")]),
     ...hiddenRows(hidden, st)]);
   if (fkey && !list.contains(document.activeElement)) {  // its row moved away: the toggle or a cross
     const all = [...list.querySelectorAll("[data-focus]")];
@@ -1753,8 +1769,11 @@ async function saveIdea() {
 }
 
 function escape(target) {
-  if (ui.deleteAsk && ui.screen === "library" && !document.querySelector("dialog[open]")) return askDelete(null);
-  if (ui.cancelAsk && ui.screen === "library" && !document.querySelector("dialog[open]")) return askCancel(null);
+  if ((ui.deleteAsk || ui.cancelAsk) && ui.screen === "library" && !document.querySelector("dialog[open]")) {
+    if (ui.cancelAsk) askCancel(null);  // one Esc closes both questions
+    if (ui.deleteAsk) askDelete(null);
+    return;
+  }
   // The idea question takes Esc only when nothing else is open over it.
   if (ui.ideaDelete && !ui.ideaDeleting && ui.screen === "library"
       && !document.querySelector("dialog[open]:not(#ideas-dialog)")) return askDeleteIdea(null);
@@ -1918,7 +1937,7 @@ function bind() {
 
 if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
-    counts, statusText, summaryText, chainText, splitHidden, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
+    counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
     afterOpenError, retryAfter, startValue, codedError, errDesc };
 } else {
