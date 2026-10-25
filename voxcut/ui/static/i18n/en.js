@@ -67,6 +67,7 @@
   "keys.play": "play / pause",
   "keys.step": "previous / next clip",
   "keys.seek": "seek 5 s",
+  "keys.restart": "clip from the start",
   "keys.undo": "undo the last decision",
   "keys.note": "note (Esc: save and leave)",
   "keys.idea": "idea",

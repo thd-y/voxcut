@@ -317,7 +317,7 @@ function keyAction(ev, { inField, dialogOpen, screen, rechoose = null }) {
   }
   if (code === "Slash") return ev.shiftKey ? "help" : (screen === "mine" ? "search" : null);
   const simple = { Space: work && !ev.repeat && "play", KeyN: work && "note", KeyM: work && "tab",
-    KeyR: screen === "mine" && "rechoose",
+    KeyR: screen === "mine" && "rechoose", Home: work && "restart",
     KeyI: "idea", KeyG: "library", Escape: "escape" };
   return (Object.hasOwn(simple, code) && simple[code]) || null;
 }
@@ -1596,6 +1596,15 @@ function togglePlay() {
   } else p.pause();
 }
 
+// D104: Home — the selected clip from the start, playing.
+function restart() {
+  if (!clipOnScreen()) return;
+  const p = $("player");
+  if (playingId !== ui.selectedId || ui.audio !== "ready") return loadAudio(selected(), true);
+  p.currentTime = 0;
+  p.play().catch(() => {});
+}
+
 function seek(delta) {
   if (!clipOnScreen()) return;
   const p = $("player");
@@ -1925,6 +1934,7 @@ function run(action, target) {
   const onSession = ui.screen === "session" && view && view.clips.length;
   const acts = {
     play: () => onSession && togglePlay(),
+    restart: () => onSession && restart(),
     prev: () => onSession && step(-1),
     next: () => onSession && step(1),
     undo,

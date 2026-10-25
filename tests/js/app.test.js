@@ -172,6 +172,13 @@ test("keyAction", () => {
     [{ code: "KeyG" }, {}, "library"],
     [{ code: "Numpad5" }, {}, "mark:другое"],
     [{ code: "Digit6" }, {}, null],
+    // D104: Home — clip from the start
+    [{ code: "Home" }, {}, "restart"],
+    [{ code: "Home" }, { screen: "mine" }, "restart"],
+    [{ code: "Home" }, { screen: "library" }, null],
+    [{ code: "Home" }, { inField: true }, null],
+    [{ code: "Home" }, { dialogOpen: true }, null],
+    [{ code: "Home", ctrlKey: true }, {}, null],
     // D52: re-choice in «Мои клипы»
     [{ code: "KeyR" }, { screen: "mine" }, "rechoose"],
     [{ code: "KeyR" }, {}, null],
