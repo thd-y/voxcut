@@ -309,6 +309,13 @@ class Jobs:
         with self._lock:
             return self._busy(session_id)
 
+    def when_idle(self, session_id: str, fn):
+        """fn() with no job of this session queued or running, and none added meanwhile (D94)."""
+        with self._lock:
+            if self._busy(session_id):
+                raise JobParamsError("job_session_busy")
+            return fn()
+
     def _busy(self, session_id: str) -> bool:
         return any(r["state"] in ("queued", "running")
                        and (r["job"].get("params") or {}).get("session_id") == session_id

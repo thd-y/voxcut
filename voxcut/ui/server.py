@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlsplit
 from voxcut import journal as jr
 from voxcut import library
 from voxcut.errors import Coded, descriptor
-from voxcut.jobs import JobError, NoJob
+from voxcut.jobs import JobError, JobParamsError, NoJob
 from voxcut.journal import Journal
 from voxcut.library import Layout
 
@@ -254,9 +254,15 @@ class App:
             sid = b["session_id"]
             if not isinstance(sid, str) or library.session_row(self.lay, sid) is None:
                 raise HttpError(400, "http_no_session")
-            if self.jobs is not None and self.jobs.busy(sid):
-                raise HttpError(409, "http_session_busy")
             event = dict(b, value="")
+            if self.jobs is not None:  # the busy check and the write under one lock
+                try:
+                    saved = self.jobs.when_idle(sid, lambda: self.journal.append(event))
+                except JobParamsError:
+                    raise HttpError(409, "http_session_busy") from None
+                except jr.JournalError as exc:
+                    raise HttpError.of(400, exc) from None
+                return {"saved": True, "event": saved}
         else:
             raise HttpError(400, "http_journal_kind")
         try:

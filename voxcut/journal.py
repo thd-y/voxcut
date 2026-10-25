@@ -230,10 +230,12 @@ def last_backup(events: list[dict]) -> str | None:
 
 
 def hidden_sessions(events: list[dict]) -> set[str]:
-    """D92: sessions whose latest hide/show event by ts is session_hidden (merge appends older ones)."""
+    """D92: sessions whose latest hide/show event by ts is session_hidden (merge appends older ones);
+    on equal ts the session stays visible."""
+    key = lambda e: (_when(e), e["kind"] == "session_shown")
     last: dict[str, dict] = {}
     for e in events:
         if e.get("kind") in HIDE_KINDS and (e["session_id"] not in last
-                                            or _when(e) >= _when(last[e["session_id"]])):
+                                            or key(e) >= key(last[e["session_id"]])):
             last[e["session_id"]] = e
     return {sid for sid, e in last.items() if e["kind"] == "session_hidden"}

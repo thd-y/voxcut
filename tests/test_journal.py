@@ -274,3 +274,10 @@ def test_validate_hide_events(tmp_path, extra, ok):
         else:
             with pytest.raises(JournalError):
                 j.append(e)
+
+
+def test_hidden_tie_prefers_shown():
+    """Equal ts: the session stays visible, whatever the line order."""
+    hid, shown = _at("session_hidden", "A", "10:00"), _at("session_shown", "A", "10:00")
+    assert journal.hidden_sessions([hid, shown]) == set()
+    assert journal.hidden_sessions([shown, hid]) == set()

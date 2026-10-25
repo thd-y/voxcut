@@ -7,7 +7,7 @@ import uuid
 import pytest
 
 from voxcut import jobs
-from voxcut.jobs import LIST_MAX, JobError, Jobs, ensure_slice, unit_argv, validate
+from voxcut.jobs import LIST_MAX, JobError, JobParamsError, Jobs, ensure_slice, unit_argv, validate
 from voxcut.library import Layout
 
 SID = "2026-08-11_21-30_4h16m.0badface"
@@ -738,3 +738,14 @@ def test_retry_delete_cut_inside_erase(lay):
     (lay.sessions / f"{SID}.tmp" / "x").mkdir(parents=True)  # no pending file left
     old = as_job(lay, "delete", {"session_id": SID}, "failed")
     assert Jobs(lay, run=FakeRun(), hidden=lambda s: False).retry(old, jid())["state"] == "running"
+
+
+def test_when_idle_runs_under_the_jobs_lock(lay):
+    """Hide (D94) and a new job of the session cannot interleave."""
+    a_session(lay)
+    j = Jobs(lay, run=FakeRun(), hidden=lambda s: False)
+    assert j.when_idle(SID, lambda: j._lock.locked()) is True
+    j.submit(jid(), "process", {"session_id": SID})
+    with pytest.raises(JobParamsError) as e:
+        j.when_idle(SID, lambda: pytest.fail("ran on a busy session"))
+    assert e.value.code == "job_session_busy"
