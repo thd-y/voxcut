@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import os
+import uuid
 from datetime import timedelta
 from pathlib import Path
 
@@ -8,12 +9,15 @@ import pytest
 from test_session import T0, chain_starts, make_folder
 
 from voxcut import audio
+from voxcut import library as library_mod
 from voxcut.audio import RunError, SourceError, sha256_file
 from voxcut.intervals import SessionError
+from voxcut.journal import Journal
 from voxcut.library import (
     Layout,
     _drop_empty_source,
     clip_table,
+    delete_session,
     finish_import,
     import_originals,
     inbox_inventory,
@@ -908,3 +912,138 @@ def test_inventory_unreadable_source_keeps_reason(lay, monkeypatch):
     monkeypatch.setattr(audio, "plan_chains", denied)
     err = inbox_inventory(lay)["sources"][0]["error"]
     assert err["code"] == "inbox_unreadable" and "Permission denied" in err["params"]["detail"]
+
+
+# --- delete a hidden session: the import in reverse (D90, D93, D94) ---
+
+START = "2025-03-01 09:00"
+
+
+def note(lay, sid, s, e, value):
+    Journal(lay.journal).append({"event_id": uuid.uuid4().hex, "kind": "note", "value": value,
+                                 "session_id": sid, "start_s": s, "end_s": e})
+
+
+def imported(lay, start=START):
+    """An imported session with a run, as the UI makes it; returns (sid, sha256 per file)."""
+    shas = _shas(make_folder(lay.inbox, chain_starts(2)))
+    sid = import_originals(lay, "", 1, start, _quiet)["session_id"]
+    make_seg(lay, sid)
+    return sid, shas
+
+
+def assert_deleted(lay, sid, shas):
+    back = lay.inbox / sid
+    assert _shas(p for p in back.iterdir() if p.suffix == ".WAV") == shas
+    assert not (lay.sessions / sid).exists() and not (lay.sessions / f"{sid}.tmp").exists()
+    assert not (lay.inbox / f".{sid}.tmp").exists()
+    assert list_sessions(lay) == []
+
+
+def test_delete_returns_originals_and_notes(lay, no_check):
+    sid, shas = imported(lay)
+    note(lay, sid, 5.0, 7.5, "первая")
+    note(lay, sid, 5.0, 7.5, "вторая")  # the latest per span wins
+    note(lay, sid, 3600.0, 3725.0, "a\nb")
+    note(lay, sid, 60.0, 61.0, "")  # an emptied note is not a note
+    note(lay, "other", 1.0, 2.0, "чужая")
+    res = delete_session(lay, sid, _quiet)
+    assert res == {"session_id": sid, "files": 2, "notes": 2}
+    assert_deleted(lay, sid, shas)
+    assert (lay.inbox / sid / "notes.txt").read_text() == (
+        "00:00:05–00:00:07  вторая\n01:00:00–01:02:05  a\n    b\n")
+    assert (lay.inbox / sid / "start.txt").read_text() == START + "\n"
+
+
+def test_delete_without_notes_or_start(lay, no_check):
+    sid, shas = imported(lay, start=None)
+    delete_session(lay, sid, _quiet)
+    assert_deleted(lay, sid, shas)
+    assert sorted(p.suffix for p in (lay.inbox / sid).iterdir()) == [".WAV", ".WAV"]
+
+
+@pytest.mark.parametrize("case", ["pending", "tmp", "no_record", "missing_file"])
+def test_delete_refuses_incomplete(lay, no_check, case):
+    sid, _ = imported(lay)
+    sdir = lay.sessions / sid
+    if case == "pending":
+        os.rename(sdir / "import.json", sdir / "import.pending.json")
+    elif case == "tmp":
+        (sdir / "originals.tmp").mkdir()
+    elif case == "no_record":
+        (sdir / "import.json").unlink()
+    else:
+        next((sdir / "originals").iterdir()).unlink()
+    before = sorted(p.name for p in (sdir / "originals").iterdir())
+    with pytest.raises(SessionError) as e:
+        delete_session(lay, sid, _quiet)
+    assert e.value.code == "delete_incomplete"
+    assert sorted(p.name for p in (sdir / "originals").iterdir()) == before
+    assert not (lay.inbox / sid).exists() and not (sdir / "delete.pending.json").exists()
+
+
+@pytest.mark.parametrize("sid", ["../x", "2026-01-01_00-00_1h00m.00000000"])
+def test_delete_no_session(lay, sid):
+    with pytest.raises(SessionError) as e:
+        delete_session(lay, sid, _quiet)
+    assert e.value.code == "delete_no_session"
+
+
+def test_delete_refuses_foreign_inbox_dir(lay, no_check):
+    sid, shas = imported(lay)
+    (lay.inbox / sid).mkdir()
+    (lay.inbox / sid / "x.wav").write_bytes(b"chu")
+    with pytest.raises(SessionError) as e:
+        delete_session(lay, sid, _quiet)
+    assert e.value.code == "delete_inbox_exists"
+    assert _shas((lay.sessions / sid / "originals").iterdir()) == shas
+    assert not (lay.sessions / sid / "delete.pending.json").exists()
+
+
+def test_delete_sha_mismatch_rolls_back(lay, no_check, monkeypatch):
+    sid, shas = imported(lay)
+    real = audio.sha256_file
+    monkeypatch.setattr(audio, "sha256_file",
+                        lambda p: "0" * 64 if Path(p).parent.name.startswith(".") else real(p))
+    with pytest.raises(SessionError) as e:
+        delete_session(lay, sid, _quiet)
+    assert e.value.code == "delete_sha_mismatch"
+    assert _shas((lay.sessions / sid / "originals").iterdir()) == shas
+    assert not (lay.inbox / f".{sid}.tmp").exists() and not (lay.inbox / sid).exists()
+    assert [r["session_id"] for r in list_sessions(lay)] == [sid]
+
+
+@pytest.mark.parametrize("point", ["first_file", "into_inbox", "session_renamed"])
+def test_delete_resumes_after_interrupt(lay, no_check, monkeypatch, point):
+    sid, shas = imported(lay)
+    note(lay, sid, 5.0, 7.5, "заметка")
+    real_rename, real_replace = os.rename, os.replace
+    calls = []
+
+    def rename(a, b):
+        calls.append(a)
+        if point == "first_file" and len(calls) == 2:
+            raise SystemExit(143)  # SIGTERM between two files
+        return real_rename(a, b)
+
+    def replace(a, b):
+        real_replace(a, b)
+        if (point == "into_inbox" and Path(b) == lay.inbox / sid) or (
+                point == "session_renamed" and Path(b) == lay.sessions / f"{sid}.tmp"):
+            raise SystemExit(143)
+
+    monkeypatch.setattr(library_mod.os, "rename", rename)
+    monkeypatch.setattr(library_mod.os, "replace", replace)
+    with pytest.raises(SystemExit):
+        delete_session(lay, sid, _quiet)
+    monkeypatch.setattr(library_mod.os, "rename", real_rename)
+    monkeypatch.setattr(library_mod.os, "replace", real_replace)
+    for name in shas:  # every recording is in exactly one place
+        where = [p for p in (lay.sessions / sid / "originals" / name,
+                             lay.sessions / f"{sid}.tmp" / "originals" / name,
+                             lay.inbox / f".{sid}.tmp" / name, lay.inbox / sid / name) if p.exists()]
+        assert len(where) == 1, where
+    res = delete_session(lay, sid, _quiet)
+    assert res == {"session_id": sid, "files": 2, "notes": 1}
+    assert_deleted(lay, sid, shas)
+    assert (lay.inbox / sid / "notes.txt").read_text() == "00:00:05–00:00:07  заметка\n"

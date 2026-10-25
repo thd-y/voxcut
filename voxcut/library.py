@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from voxcut import audio
+from voxcut import journal as jr
 from voxcut.audio import RunError, SourceError, load_json, read_jsonl
 from voxcut.cli import read_config, segment
 from voxcut.errors import Coded, descriptor
@@ -406,6 +407,102 @@ def finish_import(lay: Layout, sid: str, log) -> None:
     pending.unlink()  # our own bookkeeping file; import.json now holds the same facts
     log(f"импортировано {len(before)} файлов: сессия {sid}")
     _drop_empty_source(lay, meta.get("source"), log)  # also after a retry that moved nothing
+
+
+def _hms(x: float) -> str:
+    t = int(x)
+    return f"{t // 3600:02d}:{t % 3600 // 60:02d}:{t % 60:02d}"
+
+
+def _notes_text(lay: Layout, sid: str) -> tuple[str, int]:
+    """D93: the session's notes, the latest per span, non-empty, by time in the recording."""
+    events = jr.load(lay.journal)[0] if lay.journal.is_file() else []
+    last = {}
+    for e in jr.session_spans(events, sid):
+        if e["kind"] == "note":
+            last[(e["start_s"], e["end_s"])] = e["value"]
+    notes = sorted((k, v) for k, v in last.items() if v)
+    return "".join(f"{_hms(s)}–{_hms(e)}  " + v.replace("\n", "\n    ") + "\n"
+                   for (s, e), v in notes), len(notes)
+
+
+def _files_ok(folder: Path, files: dict[str, str]) -> list[str]:
+    """Names of `files` missing in `folder` or with another sha256."""
+    return sorted(n for n, sha in files.items()
+                  if not (folder / n).is_file() or audio.sha256_file(str(folder / n)) != sha)
+
+
+def delete_session(lay: Layout, sid: str, log) -> dict:
+    """D90, D94: the import in reverse. originals/ -> inbox/<sid>/ unchanged (sha256 before and
+    after) with notes.txt and start.txt, then the session dir goes; a re-run finishes a cut one."""
+    if not isinstance(sid, str) or not SESSION_ID_RE.fullmatch(sid):
+        raise SessionError("delete_no_session", session=str(sid))
+    sdir, gone = lay.sessions / sid, lay.sessions / f"{sid}.tmp"
+    dst, tmp = lay.inbox / sid, lay.inbox / f".{sid}.tmp"  # a dot: the inbox never lists it (D50)
+    if not sdir.is_dir() and gone.is_dir():  # cut after the session dir was renamed
+        meta = load_json(gone / "delete.pending.json")
+        _erase(gone, log)
+        return {"session_id": sid, "files": len(meta["files"]), "notes": meta["notes"]}
+    if not sdir.is_dir():
+        raise SessionError("delete_no_session", session=sid)
+    orig, pending = sdir / "originals", sdir / "delete.pending.json"
+    if pending.is_file():
+        meta = load_json(pending)
+        files = meta["files"]
+    else:
+        if (not (sdir / "import.json").is_file() or (sdir / "import.pending.json").exists()
+                or (sdir / "originals.tmp").exists()):
+            raise SessionError("delete_incomplete", session=sid)
+        imp = load_json(sdir / "import.json")
+        files = {f["name"]: f["sha256"] for f in imp["files"]}
+        present = {p.name for p in orig.iterdir()} if orig.is_dir() else set()
+        if present != set(files):
+            raise SessionError("delete_incomplete", session=sid)
+        bad = _files_ok(orig, files)
+        if bad:
+            raise SessionError("delete_sha_mismatch", files=bad)
+        if dst.exists() or tmp.exists():
+            raise SessionError("delete_inbox_exists", dir=str(dst))
+        text, n = _notes_text(lay, sid)
+        meta = {"files": files, "start": imp.get("start"), "notes": n, "notes_text": text}
+        _write_json(pending, meta)
+    if not dst.exists():
+        tmp.mkdir(exist_ok=True)
+        for name in files:
+            if (orig / name).is_file():
+                try:
+                    os.rename(orig / name, tmp / name)  # D39 in reverse: never a copy
+                except OSError as exc:
+                    raise SessionError("delete_move_failed", file=name, detail=str(exc)) from exc
+        if meta["notes_text"]:
+            (tmp / "notes.txt").write_text(meta["notes_text"])
+        if meta["start"] is not None:
+            (tmp / "start.txt").write_text(meta["start"] + "\n")
+        bad = _files_ok(tmp, files)
+        if bad:
+            for name in files:
+                if (tmp / name).is_file():
+                    os.rename(tmp / name, orig / name)
+            for extra in ("notes.txt", "start.txt"):
+                (tmp / extra).unlink(missing_ok=True)
+            tmp.rmdir()
+            pending.unlink()
+            raise SessionError("delete_sha_mismatch", files=bad)
+        os.replace(tmp, dst)
+    elif _files_ok(dst, files):  # not the files this delete moved there
+        raise SessionError("delete_inbox_exists", dir=str(dst))
+    os.replace(sdir, gone)
+    _erase(gone, log)
+    log(f"сессия {sid} удалена: {len(files)} файлов возвращены в inbox/{sid}/")
+    return {"session_id": sid, "files": len(files), "notes": meta["notes"]}
+
+
+def _erase(gone: Path, log) -> None:
+    """Hard rule: a session dir goes only with no recording left in originals/."""
+    left = sorted(p.name for p in (gone / "originals").iterdir()) if (gone / "originals").is_dir() else []
+    if left:
+        raise SessionError("delete_originals_left", files=left)
+    shutil.rmtree(gone)
 
 
 V1_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "v1.toml"  # U8: the only config
