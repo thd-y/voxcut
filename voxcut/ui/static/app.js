@@ -66,6 +66,13 @@ function statusText(clip, lang) {
   return translate(lang, "status.undecided");
 }
 
+// D101: a failed decision write names the clip by its list-row time, and the decision ("" = back to undecided).
+function notSavedTitle(clip, value, lang) {
+  const decision = value === KEEP ? translate(lang, "status.kept")
+    : value ? label(lang, "mark.", value) : translate(lang, "status.undecided");
+  return translate(lang, "toast.not_saved_clip", { time: clockOf(clip.start_local) || fmtPos(clip.start_s), decision });
+}
+
 const isDecided = (clip) => ["kept", "rejected"].includes(status(clip).kind);
 
 function counts(clips) {
@@ -1944,7 +1951,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc };
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle };
 } else {
   start();
 }

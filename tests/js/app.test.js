@@ -457,3 +457,14 @@ test("emptySessionsKey", () => {  // all hidden is not «no sessions yet»
   assert.equal(app.emptySessionsKey([{ hidden: true }]), "all_hidden");
   assert.equal(app.emptySessionsKey([{ hidden: true }, { hidden: false }]), null);
 });
+
+test("notSavedTitle", () => {  // D101: the clip by the time its list row shows, and the decision
+  const at = { start_local: "2026-08-11T21:42:10", start_s: 750 };
+  const bare = { start_local: null, start_s: 750 };
+  assert.equal(app.notSavedTitle(at, "музыка", "ru"), "Не сохранено: 21:42:10 — музыка");
+  assert.equal(app.notSavedTitle(bare, "музыка", "ru"), "Не сохранено: 12:30 — музыка");
+  assert.equal(app.notSavedTitle(bare, app.KEEP, "ru"), "Не сохранено: 12:30 — оставлен");
+  assert.equal(app.notSavedTitle(bare, "", "ru"), "Не сохранено: 12:30 — не разобран");
+  assert.equal(app.notSavedTitle(bare, "шум", "en"), "Not saved: 12:30 — noise");
+  assert.equal(app.notSavedTitle(bare, "", "en"), "Not saved: 12:30 — not reviewed");
+});
