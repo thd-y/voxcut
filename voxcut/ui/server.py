@@ -488,6 +488,8 @@ def make_server(lay: Layout, host: str = HOST, port: int = 0, jobs=None,
     server = Server((host, port), handler)
     server.daemon_threads = True
     app = App(lay, server.server_address[1], jobs, journal)
+    for line in library.sweep_deleted(lay):  # D94: what a cut delete left behind
+        app.log(line)
     if jobs is not None:
         jobs.on_done = app.on_done
         jobs.hidden = lambda sid: sid in jr.hidden_sessions(app.journal.events())

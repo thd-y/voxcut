@@ -682,3 +682,13 @@ def test_delete_done_writes_session_shown(wapi):
     shown = [e for e in wapi.app.journal.events() if e["kind"] == "session_shown"]
     assert len(shown) == 1 and shown[0]["session_id"] == SID
     assert journal_mod.hidden_sessions(wapi.app.journal.events()) == set()
+
+
+def test_server_start_sweeps_cut_deletes(tmp_path):
+    lay = Layout(tmp_path)
+    lay.ensure()
+    gone = lay.sessions / "2025-03-01_09-00_0h00m.00000000.tmp"
+    (gone / "x").mkdir(parents=True)
+    server, _ = make_server(lay)
+    server.server_close()
+    assert not gone.exists()

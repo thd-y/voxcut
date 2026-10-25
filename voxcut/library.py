@@ -551,6 +551,21 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
     return {"session_id": sid, "files": len(files), "notes": meta["notes"]}
 
 
+def sweep_deleted(lay: Layout) -> list[str]:
+    """What a cut delete left: sessions/<sid>.tmp with no sessions/<sid>/ is erased; one still
+    holding a recording stays, and the returned message says so."""
+    said = []
+    for gone in sorted(lay.sessions.glob("*.tmp")) if lay.sessions.is_dir() else []:
+        sid = gone.name[:-len(".tmp")]
+        if not SESSION_ID_RE.fullmatch(sid) or (lay.sessions / sid).exists() or not gone.is_dir():
+            continue
+        try:
+            _erase(gone, lambda _m: None)
+        except (SessionError, OSError) as exc:
+            said.append(f"{gone}: {exc}")
+    return said
+
+
 def _free_name(name: str, taken: set[str]) -> str:
     """`name`, or name-1, name-2…, whichever is not taken."""
     p = Path(name)
