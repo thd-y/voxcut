@@ -254,6 +254,13 @@ class Jobs:
                     rec["state"] = "cancelled"
             return self._view(job_id)
 
+    def busy(self, session_id: str) -> bool:
+        """A queued or running job of this session (D94: no hide or delete under it)."""
+        with self._lock:
+            return any(r["state"] in ("queued", "running")
+                       and (r["job"].get("params") or {}).get("session_id") == session_id
+                       for r in self._jobs.values())
+
     def poll(self) -> None:
         with self._lock:
             self._step()

@@ -240,6 +240,8 @@ CODES: dict[str, tuple[tuple[str, ...], str]] = {
     "http_idea_fields": ((), "поля: event_id, kind, value, session_id?"),
     "http_idea_deleted_fields": ((), "поля: event_id, kind, value"),
     "http_no_idea": ((), "нет такой идеи"),
+    "http_hide_fields": ((), "поля: event_id, kind, session_id"),
+    "http_session_busy": ((), "у сессии идёт или ждёт задача: дождитесь её или отмените"),
     "http_journal_kind": ((), "kind: mark, note, heard, idea или idea_deleted"),
     "http_body_empty": ((), "тело: {}"),
     "inbox_open_failed": (("detail",), "проводник недоступен: {detail}"),

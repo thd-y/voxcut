@@ -158,8 +158,10 @@ class App:
 
     def _state(self, req: Request) -> dict:
         events = self.journal.events()
+        hidden = jr.hidden_sessions(events)
         return {
-            "sessions": library.list_sessions(self.lay),
+            "sessions": [r | {"hidden": r["session_id"] in hidden}
+                         for r in library.list_sessions(self.lay)],
             "inbox": library.inbox_inventory(self.lay),
             "jobs": self.jobs.list() if self.jobs is not None else [],
             "last_backup": jr.last_backup(events),
@@ -246,6 +248,15 @@ class App:
                        for e in self.journal.events()):
                 raise HttpError(400, "http_no_idea")
             event = dict(b)
+        elif kind in jr.HIDE_KINDS:  # D91, D92
+            if set(b) != {"event_id", "kind", "session_id"}:
+                raise HttpError(400, "http_hide_fields")
+            sid = b["session_id"]
+            if not isinstance(sid, str) or library.session_row(self.lay, sid) is None:
+                raise HttpError(400, "http_no_session")
+            if self.jobs is not None and self.jobs.busy(sid):
+                raise HttpError(409, "http_session_busy")
+            event = dict(b, value="")
         else:
             raise HttpError(400, "http_journal_kind")
         try:

@@ -348,6 +348,8 @@
   "err.http_idea_fields": "поля: event_id, kind, value, session_id?",
   "err.http_idea_deleted_fields": "поля: event_id, kind, value",
   "err.http_no_idea": "нет такой идеи",
+  "err.http_hide_fields": "поля: event_id, kind, session_id",
+  "err.http_session_busy": "у сессии идёт или ждёт задача: дождитесь её или отмените",
   "err.http_journal_kind": "kind: mark, note, heard, idea или idea_deleted",
   "err.http_body_empty": "тело: {}",
   "err.inbox_open_failed": "проводник недоступен: {detail}",

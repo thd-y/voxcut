@@ -627,3 +627,37 @@ def test_jobs_retry_route(wapi):
     wapi.jobs.poll()
     status, _, body = post(wapi, f"/api/jobs/{new}/retry", {"job_id": uuid.uuid4().hex})
     assert status == 400 and body["error"]["code"] == "job_retry_not_open"
+
+
+def hide(c, kind="session_hidden", sid=SID, **extra):
+    return post(c, "/api/journal", {"event_id": uuid.uuid4().hex, "kind": kind,
+                                    "session_id": sid} | extra)
+
+
+def hidden_of(c, sid=SID):
+    return next(s["hidden"] for s in json.loads(get(c, "/api/state")[2])["sessions"]
+                if s["session_id"] == sid)
+
+
+def test_journal_hide_show_roundtrip(wapi):
+    assert hidden_of(wapi) is False
+    e = {"event_id": uuid.uuid4().hex, "kind": "session_hidden", "session_id": SID}
+    assert post(wapi, "/api/journal", e)[0] == 200
+    assert hidden_of(wapi) is True
+    assert post(wapi, "/api/journal", e)[0] == 200  # the same event_id: idempotent
+    assert len(wapi.lay.journal.read_text().splitlines()) == 1
+    assert hide(wapi, "session_shown")[0] == 200
+    assert hidden_of(wapi) is False
+    for sid in ("2026-01-01_00-00_1h00m.00000000", "../x", 5):
+        status, _, body = hide(wapi, sid=sid)
+        assert status == 400 and body["error"]["code"] == "http_no_session"
+    status, _, body = hide(wapi, value="")
+    assert status == 400 and body["error"]["code"] == "http_hide_fields"
+
+
+def test_hide_refused_while_job_runs(wapi):
+    assert post(wapi, "/api/jobs", {"job_id": uuid.uuid4().hex, "kind": "process",
+                                    "params": {"session_id": SID}})[0] == 200
+    status, _, body = hide(wapi)
+    assert status == 409 and body["error"]["code"] == "http_session_busy"
+    assert not wapi.lay.journal.exists() or "session_hidden" not in wapi.lay.journal.read_text()

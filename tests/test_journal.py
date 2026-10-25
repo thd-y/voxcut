@@ -247,3 +247,30 @@ def test_idea_deleted_survives_reload(tmp_path):
     j.append(ev(kind="idea_deleted", value=idea["event_id"], sid=None))
     again = Journal(p)
     assert journal.ideas(again.events()) == [] and again.warnings == []
+
+
+def _at(kind, sid, ts):
+    return {"event_id": uuid.uuid4().hex, "kind": kind, "value": "", "session_id": sid,
+            "ts": f"2026-10-25T{ts}:00.000+03:00"}
+
+
+def test_hidden_sessions_latest_ts_wins():
+    # D92: the latest by ts decides; merge (restore) appends older events after newer ones
+    events = [_at("session_hidden", "A", "10:00"), _at("session_shown", "A", "09:00"),
+              _at("session_hidden", "B", "09:00"), _at("session_shown", "B", "10:00"),
+              _at("mark", "C", "11:00")]
+    assert journal.hidden_sessions(events) == {"A"}
+
+
+@pytest.mark.parametrize(("extra", "ok"), [
+    ({}, True), ({"session_id": None}, False), ({"start_s": 1.0, "end_s": 2.0}, False)])
+def test_validate_hide_events(tmp_path, extra, ok):
+    j = Journal(tmp_path / "j.jsonl")
+    for kind in ("session_hidden", "session_shown"):
+        e = {"event_id": uuid.uuid4().hex, "kind": kind, "value": "", "session_id": "s1"} | extra
+        e = {k: v for k, v in e.items() if v is not None}
+        if ok:
+            assert j.append(e)["kind"] == kind
+        else:
+            with pytest.raises(JournalError):
+                j.append(e)

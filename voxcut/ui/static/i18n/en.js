@@ -342,6 +342,8 @@
   "err.http_idea_fields": "fields: event_id, kind, value, session_id?",
   "err.http_idea_deleted_fields": "fields: event_id, kind, value",
   "err.http_no_idea": "no such idea",
+  "err.http_hide_fields": "fields: event_id, kind, session_id",
+  "err.http_session_busy": "the session has a running or queued job: wait for it or cancel it",
   "err.http_journal_kind": "kind: mark, note, heard, idea or idea_deleted",
   "err.http_body_empty": "body: {}",
   "err.inbox_open_failed": "File Explorer unavailable: {detail}",

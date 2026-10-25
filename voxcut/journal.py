@@ -12,7 +12,8 @@ from pathlib import Path
 from voxcut.errors import Coded
 from voxcut.intervals import intersect, total, union
 
-KINDS = ("mark", "note", "idea", "heard", "backup", "idea_deleted")
+KINDS = ("mark", "note", "idea", "heard", "backup", "idea_deleted", "session_hidden", "session_shown")
+HIDE_KINDS = ("session_hidden", "session_shown")  # D92: the latest by ts decides
 MARK_MAX = 32
 NOTE_MAX = 10_000
 SPAN_KINDS = ("mark", "note", "heard")  # bound to a moment of the recording
@@ -90,6 +91,8 @@ def _validate(event: dict, with_ts: bool = False) -> dict:
             raise JournalError("journal_bad_span")
     elif span != [None, None] or (e["kind"] in ("backup", "idea_deleted") and sid is not None):
         raise JournalError("journal_no_span")
+    if e["kind"] in HIDE_KINDS and sid is None:
+        raise JournalError("journal_bad_session_id")
     if e["kind"] == "idea_deleted" and not EVENT_ID_RE.fullmatch(e["value"]):
         raise JournalError("journal_bad_idea_ref")  # D56
     return e
@@ -224,3 +227,13 @@ def ideas(events: list[dict]) -> list[dict]:
 def last_backup(events: list[dict]) -> str | None:
     backups = [e for e in events if e.get("kind") == "backup"]
     return max(backups, key=_when)["ts"] if backups else None
+
+
+def hidden_sessions(events: list[dict]) -> set[str]:
+    """D92: sessions whose latest hide/show event by ts is session_hidden (merge appends older ones)."""
+    last: dict[str, dict] = {}
+    for e in events:
+        if e.get("kind") in HIDE_KINDS and (e["session_id"] not in last
+                                            or _when(e) >= _when(last[e["session_id"]])):
+            last[e["session_id"]] = e
+    return {sid for sid, e in last.items() if e["kind"] == "session_hidden"}
