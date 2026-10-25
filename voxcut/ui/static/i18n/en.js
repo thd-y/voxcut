@@ -201,6 +201,7 @@
   "toast.idea_not_deleted": "Idea not deleted",
   "toast.job_submitted": "Job queued",
   "toast.not_saved_clip": "Not saved: {time} — {decision}",
+  "toast.clip_gone": "The clip is no longer in this run",
   "toast.go_to_clip": "go to clip",
   "toast.close": "Close",
   "toast.nothing_to_undo": "Nothing to undo",
