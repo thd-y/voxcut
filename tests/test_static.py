@@ -208,3 +208,12 @@ def test_library_columns():
     assert ids == ["sessions", "jobs", "inbox", "backup-info", "ideas"]
     side = lib.index('class="lib-side"')
     assert lib.index('id="jobs"') < side < lib.index('id="inbox"')
+
+
+def test_decision_pressed_rule_scoped():
+    """D98: the dark fill of a pressed decision is scoped to #decisions; other pressed buttons keep --secondary."""
+    css = (STATIC_DIR / "app.css").read_text()
+    rules = re.findall(r"([^{}]+)\{([^}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL))
+    primary = [sel.strip() for sel, body in rules if "aria-pressed=true" in sel and "--primary" in body]
+    assert primary and all(s.startswith("#decisions") for s in primary)
+    assert any(sel.strip().startswith(".btn[aria-pressed=true]") and "--secondary" in body for sel, body in rules)

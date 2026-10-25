@@ -1931,7 +1931,7 @@ function bind() {
     const b = button(null, () => {
       if (ui.tab === "mine") pickRechoose(value);
       else decide(value);
-    }, value === KEEP ? undefined : "outline", "default", DECISION_ICONS[value]);
+    }, "outline", "default", DECISION_ICONS[value]);  // D98: all five alike until chosen
     b.dataset.value = value;
     const text = el("span", tr(`decision.${value}`));
     text.dataset.i18n = `decision.${value}`;  // applyStatic() relabels it on a language switch

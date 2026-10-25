@@ -85,6 +85,8 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 .btn[data-state=kept], .badge[data-state=kept] { background: var(--kept); color: var(--kept-foreground);
   border-color: transparent; }
 .btn[aria-pressed=true]:not([data-state=kept]):not(#theme) { background: var(--secondary); }  /* #theme: pressed = dark on, not a filled look */
+#decisions .btn[aria-pressed=true]:not([data-state=kept]) { background: var(--primary);  /* D98: a chosen reason, decisions only */
+  color: var(--primary-foreground); border-color: transparent; }
 #clip-alert { margin: 0 24px; width: auto; }
 #card-body { overflow-y: auto; padding: 0 24px 4px; display: flex; flex-direction: column; gap: 10px; }
 #note-box textarea { width: 100%; }
