@@ -991,8 +991,8 @@ def test_delete_no_session(lay, sid):
 
 def test_delete_refuses_foreign_inbox_dir(lay, no_check):
     sid, shas = imported(lay)
-    (lay.inbox / sid).mkdir()
-    (lay.inbox / sid / "x.wav").write_bytes(b"chu")
+    (lay.inbox / f".{sid}.tmp").mkdir()  # not ours: no delete.pending.json
+    (lay.inbox / f".{sid}.tmp" / "x.wav").write_bytes(b"chu")
     with pytest.raises(SessionError) as e:
         delete_session(lay, sid, _quiet)
     assert e.value.code == "delete_inbox_exists"
@@ -1104,3 +1104,50 @@ def test_delete_replaces_stale_empty_gone_dir(lay, no_check):
     (lay.sessions / f"{sid}.tmp" / "x.c0.raw").mkdir(parents=True)  # junk of an earlier cut erase
     delete_session(lay, sid, _quiet)
     assert_deleted(lay, sid, shas)
+
+
+def test_second_delete_keeps_earlier_notes(lay, no_check):
+    """Final review: a folder left with only the owner's notes does not block the next delete."""
+    sid, shas = imported(lay)
+    note(lay, sid, 5.0, 7.5, "первая")
+    delete_session(lay, sid, _quiet)
+    import_originals(lay, sid, 1, START, _quiet)
+    make_seg(lay, sid)
+    (lay.inbox / sid / "mine.md").write_text("моё")
+    delete_session(lay, sid, _quiet)
+    assert_deleted(lay, sid, shas)
+    names = sorted(p.name for p in (lay.inbox / sid).iterdir() if p.suffix != ".WAV")
+    assert names == ["mine.md", "notes-1.txt", "notes.txt", "start.txt"]
+    assert (lay.inbox / sid / "notes-1.txt").read_text() == "00:00:05–00:00:07  первая\n"
+
+
+def test_delete_refuses_inbox_dir_with_wav(lay, no_check):
+    sid, _ = imported(lay)
+    (lay.inbox / sid).mkdir()
+    (lay.inbox / sid / "x.wav").write_bytes(b"")
+    with pytest.raises(SessionError) as e:
+        delete_session(lay, sid, _quiet)
+    assert e.value.code == "delete_inbox_exists"
+
+
+def test_delete_cut_inside_erase_finishes(lay, no_check):
+    sid, _ = imported(lay)
+    delete_session(lay, sid, _quiet)
+    gone = lay.sessions / f"{sid}.tmp"  # a cut rmtree: pending already gone, junk left
+    (gone / "x.c0.raw").mkdir(parents=True)
+    assert delete_session(lay, sid, _quiet) == {"session_id": sid, "files": 0, "notes": 0}
+    assert not gone.exists()
+
+
+def test_second_delete_rollback_returns_carried_notes(lay, no_check, monkeypatch):
+    sid, shas = imported(lay)
+    note(lay, sid, 5.0, 7.5, "первая")
+    delete_session(lay, sid, _quiet)
+    import_originals(lay, sid, 1, START, _quiet)
+    real = audio.sha256_file
+    monkeypatch.setattr(audio, "sha256_file",
+                        lambda p: "0" * 64 if Path(p).parent.name.startswith(".") else real(p))
+    with pytest.raises(SessionError):
+        delete_session(lay, sid, _quiet)
+    assert sorted(p.name for p in (lay.inbox / sid).iterdir()) == ["notes.txt"]
+    assert _shas((lay.sessions / sid / "originals").iterdir()) == shas

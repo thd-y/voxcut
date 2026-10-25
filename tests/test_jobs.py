@@ -722,3 +722,19 @@ def test_order_survives_offset_change(lay):
         job = json.loads((lay.jobs / job_id / "job.json").read_text())  # a DST change in between
         (lay.jobs / job_id / "job.json").write_text(json.dumps(job | {"submitted": ts}))
     assert [v["job_id"] for v in Jobs(lay, run=FakeRun()).list()] == [a, b]
+
+
+def test_failed_delete_moot_once_session_restored(lay):
+    """Final review: the owner kept the session (Restore): its failed delete is no longer an alarm."""
+    a_session(lay)
+    old = as_job(lay, "delete", {"session_id": SID}, "failed")
+    shown = Jobs(lay, run=FakeRun(), hidden=lambda s: False).list()
+    assert {v["job_id"]: v for v in shown}[old]["failure"] == "moot"
+    still = Jobs(lay, run=FakeRun(), hidden=lambda s: True).list()
+    assert {v["job_id"]: v for v in still}[old]["failure"] == "open"
+
+
+def test_retry_delete_cut_inside_erase(lay):
+    (lay.sessions / f"{SID}.tmp" / "x").mkdir(parents=True)  # no pending file left
+    old = as_job(lay, "delete", {"session_id": SID}, "failed")
+    assert Jobs(lay, run=FakeRun(), hidden=lambda s: False).retry(old, jid())["state"] == "running"

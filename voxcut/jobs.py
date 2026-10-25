@@ -92,8 +92,9 @@ def validate(kind: str, params: dict, lay: library.Layout, hidden=None) -> dict:
         if not isinstance(p["session_id"], str):
             raise JobParamsError("job_bad_session_id")
         sid = p["session_id"]
-        if library.SESSION_ID_RE.fullmatch(sid) and any(  # a cut delete: its retry finishes it
-                (lay.sessions / n / "delete.pending.json").is_file() for n in (sid, f"{sid}.tmp")):
+        if library.SESSION_ID_RE.fullmatch(sid) and (  # a cut delete: its retry finishes it
+                (lay.sessions / sid / "delete.pending.json").is_file()
+                or (lay.sessions / f"{sid}.tmp").is_dir()):
             return p
         if library.session_row(lay, sid) is None:
             raise JobParamsError("job_no_session")
@@ -371,8 +372,11 @@ class Jobs:
                 moot = p.get("name") not in backups
             elif kind == "delete":  # nothing of the session left to finish
                 sid = p.get("session_id")
-                moot = not isinstance(sid, str) or not library.SESSION_ID_RE.fullmatch(sid) or not any(
-                    (self.lay.sessions / n).exists() for n in (sid, f"{sid}.tmp"))
+                ok = isinstance(sid, str) and library.SESSION_ID_RE.fullmatch(sid)
+                cut = ok and ((self.lay.sessions / sid / "delete.pending.json").is_file()
+                              or (self.lay.sessions / f"{sid}.tmp").exists())
+                kept = ok and self.hidden is not None and not self.hidden(sid)  # «Вернуть»: kept
+                moot = not cut and (not ok or kept or not (self.lay.sessions / sid).exists())
             elif kind == "process":  # D96: the session is gone or can no longer be processed
                 row = library.session_row(self.lay, p["session_id"]) \
                     if isinstance(p.get("session_id"), str) else None

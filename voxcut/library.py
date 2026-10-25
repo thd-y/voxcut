@@ -465,7 +465,8 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
     sdir, gone = lay.sessions / sid, lay.sessions / f"{sid}.tmp"
     dst, tmp = lay.inbox / sid, lay.inbox / f".{sid}.tmp"  # a dot: the inbox never lists it (D50)
     if not sdir.is_dir() and gone.is_dir():  # cut after the session dir was renamed
-        meta = load_json(gone / "delete.pending.json")
+        pend = gone / "delete.pending.json"  # rmtree may already have taken it
+        meta = load_json(pend) if pend.is_file() else {"files": {}, "notes": 0}
         _erase(gone, log)
         return {"session_id": sid, "files": len(meta["files"]), "notes": meta["notes"]}
     if not sdir.is_dir():
@@ -486,13 +487,23 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
         bad = _files_ok(orig, files)
         if bad:
             raise SessionError("delete_sha_mismatch", files=bad)
-        if dst.exists() or tmp.exists():
+        if tmp.exists() or (dst.exists() and not dst.is_dir()) or _has_wav(dst):  # notes only: kept
             raise SessionError("delete_inbox_exists", dir=str(dst))
         text, n = _notes_text(lay, sid)
-        meta = {"files": files, "start": imp.get("start"), "notes": n, "notes_text": text}
+        carried: dict[str, str] = {}  # what an earlier delete left (notes): kept, never overwritten
+        for f in sorted(dst.iterdir()) if dst.is_dir() else []:
+            carried[f.name] = _free_name(f.name, {*files, "notes.txt", "start.txt", *carried.values()})
+        meta = {"files": files, "start": imp.get("start"), "notes": n, "notes_text": text,
+                "carried": carried}
         _write_json(pending, meta)
-    if not dst.exists():
+    if not dst.is_dir() or _files_ok(dst, files):
         tmp.mkdir(exist_ok=True)
+        carried = meta.get("carried", {})
+        if dst.is_dir():
+            for old, new in carried.items():
+                if (dst / old).exists():
+                    os.rename(dst / old, tmp / new)
+            dst.rmdir()  # refuses if something new appeared there meanwhile
         for name in files:
             if (orig / name).is_file():
                 try:
@@ -510,18 +521,32 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
                     os.rename(tmp / name, orig / name)
             for extra in ("notes.txt", "start.txt"):
                 (tmp / extra).unlink(missing_ok=True)
-            tmp.rmdir()
+            for old, new in carried.items():
+                if (tmp / new).exists():
+                    os.rename(tmp / new, tmp / old)
+            if any(tmp.iterdir()):  # the carried-over files go back where they were
+                os.replace(tmp, dst)
+            else:
+                tmp.rmdir()
             pending.unlink()
             raise SessionError("delete_sha_mismatch", files=bad)
         os.replace(tmp, dst)
-    elif _files_ok(dst, files):  # not the files this delete moved there
-        raise SessionError("delete_inbox_exists", dir=str(dst))
     if gone.exists():  # junk of an earlier cut erase; _erase refuses it if a recording is there
         _erase(gone, log)
     os.replace(sdir, gone)
     _erase(gone, log)
     log(f"сессия {sid} удалена: {len(files)} файлов возвращены в inbox/{sid}/")
     return {"session_id": sid, "files": len(files), "notes": meta["notes"]}
+
+
+def _free_name(name: str, taken: set[str]) -> str:
+    """`name`, or name-1, name-2…, whichever is not taken."""
+    p = Path(name)
+    i, out = 0, name
+    while out in taken:
+        i += 1
+        out = f"{p.stem}-{i}{p.suffix}"
+    return out
 
 
 def _erase(gone: Path, log) -> None:
