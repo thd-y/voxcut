@@ -977,16 +977,18 @@ function foldRow({ ids, open }) {
   const b = el("button", tr(open ? "list.unfolded" : "list.folded", { n: ids.length }), "fold");
   b.type = "button";
   b.setAttribute("aria-expanded", String(open));
+  b.dataset.first = ids[0];
   b.addEventListener("click", () => {
-    if (!open) {
-      for (const id of ids) ui.unfolded.add(id);
-      return render();
+    const refocus = b === document.activeElement;
+    if (open && ids.includes(ui.selectedId)) {
+      for (const id of ids) ui.unfolded.delete(id);
+      const next = afterFoldClose(shown(), ids);
+      return next ? select(next, { play: false }) : render();
     }
-    for (const id of ids) ui.unfolded.delete(id);
-    if (!ids.includes(ui.selectedId)) return render();
-    const next = afterFoldClose(shown(), ids);
-    if (next) select(next, { play: false });
-    else render();
+    for (const id of ids) open ? ui.unfolded.delete(id) : ui.unfolded.add(id);
+    render();
+    // the list is rebuilt: a keyboard user stays on the same fold row
+    if (refocus) $("clip-list").querySelector(`.fold[data-first="${ids[0]}"]`)?.focus();
   });
   return b;
 }
@@ -2064,6 +2066,8 @@ function onKey(e) {
     && (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && t.type !== "checkbox"));
   const dialogOpen = !!document.querySelector("dialog[open]");
   const screen = ui.screen === "library" ? "library" : ui.tab;
+  // D107 rule 12: Space on a focused fold row presses it, as Enter does
+  if (e.code === "Space" && t instanceof HTMLElement && t.matches("#clip-list .fold")) return;
   const action = keyAction(e, { inField, dialogOpen, screen, rechoose: ui.rechoose });
   if (!action) return;
   e.preventDefault();  // Space and digits must not press a focused button
