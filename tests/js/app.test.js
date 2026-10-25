@@ -417,3 +417,17 @@ test("jobSubject of a delete", () => {  // D94: the session as for process; gone
   assert.equal(app.jobSubject(del, SESSIONS, "en"), "11 Aug 2026, 21:30 · 4 h 16 min");
   assert.equal(app.jobSubject(del, [], "en"), SID);
 });
+
+test("autoOpenTarget skips hidden sessions", () => {  // D91
+  const s = (id, state, hidden) => ({ session_id: id, state, hidden });
+  assert.equal(app.autoOpenTarget([s("a", "clips"), s("b", "clips", true)], null), "a");
+  assert.equal(app.autoOpenTarget([s("a", "imported"), s("b", "clips", true)], null), "a");
+  assert.equal(app.autoOpenTarget([s("a", "clips", true)], null), null);
+});
+
+test("startValue", () => {  // D94: the start a delete left; what the owner typed (even "") wins
+  assert.equal(app.startValue(new Map(), "k", "2025-03-01 09:00"), "2025-03-01 09:00");
+  assert.equal(app.startValue(new Map([["k", ""]]), "k", "2025-03-01 09:00"), "");
+  assert.equal(app.startValue(new Map([["k", "x"]]), "k", null), "x");
+  assert.equal(app.startValue(new Map(), "k", null), "");
+});

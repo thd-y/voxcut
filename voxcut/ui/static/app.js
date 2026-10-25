@@ -412,12 +412,16 @@ function launchRect(avail) {
 
 // The session opened on its own: the newest processed one, else the first; once per session id,
 // so a session that fails to load is not re-requested on every 2 s poll.
-function autoOpenTarget(sessions, tried) {
+function autoOpenTarget(all, tried) {
+  const sessions = all.filter((s) => !s.hidden);  // D91
   if (!sessions.length) return null;
   const ready = sessions.filter((s) => s.state === "clips");
   const id = (ready[ready.length - 1] || sessions[0]).session_id;
   return id === tried ? null : id;
 }
+
+// D94: the start a delete left in start.txt fills the field; what the owner typed, even "", wins
+const startValue = (typed, key, hint) => (typed.has(key) ? typed.get(key) : hint || "");
 
 // A failed session open: the open session stays; without one, a server error explains itself
 // on an empty screen, while a lost link leaves the skeleton and the «нет связи» alert.
@@ -503,11 +507,28 @@ async function pollOnce() {
   } else if (auto) {
     autoTried = auto;
     await openSession(auto).catch(fail);
+  } else if (sid !== null && !sessions.some((s) => s.session_id === sid && !s.hidden)) {
+    closeSession();  // D91: hidden (or deleted) in this or another window
   } else if (sid !== null && view && !runId) {
     const row = sessions.find((s) => s.session_id === sid);
     if (row && row.n_clips !== null && row.n_clips !== view.clips.length) await reloadView();
   }
   render();
+}
+
+function closeSession() {
+  openSeq++;  // an open still in flight must not bring it back
+  closeNote();
+  stopAudio();
+  sid = null;
+  view = null;
+  runId = null;
+  autoTried = null;
+  ui.selectedId = null;
+  ui.rechoose = null;
+  ui.undo = [];
+  ui.loaded = true;
+  ui.openError = null;
 }
 
 function fail(e) {
@@ -672,7 +693,7 @@ function showSessionEmpty(title, text, action) {
 
 function renderSession() {
   $("session-empty").hidden = true;
-  if (serverState && !serverState.sessions.length) {
+  if (serverState && !serverState.sessions.some((s) => !s.hidden)) {
     showSessionEmpty(tr("empty.no_sessions_title"), tr("empty.no_sessions_text"), true);
     return;
   }
@@ -1064,7 +1085,7 @@ function renderLibrary() {
         const input = el("input", null, "input");
         input.type = "text";
         input.dataset.key = `${src.source}\n${ch.files.join("\n")}`;  // chain numbers shift after an import
-        input.value = typed.get(input.dataset.key) || "";
+        input.value = startValue(typed, input.dataset.key, ch.start_hint);
         input.placeholder = tr("inbox.start_placeholder");
         input.setAttribute("aria-label", tr("inbox.start_aria"));
         const row = el("div", null, "row");
@@ -1867,7 +1888,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, codedError, errDesc };
+    afterOpenError, retryAfter, startValue, codedError, errDesc };
 } else {
   start();
 }
