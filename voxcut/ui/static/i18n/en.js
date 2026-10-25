@@ -115,6 +115,7 @@
   "fatal.title": "Reopen the window: VoxCut.cmd or make ui",
   "fatal.text": "The launch code is invalid or has expired.",
   "top.progress": "{done} of {all} reviewed",
+  "top.done": "✓ done",
   "top.job": "{kind}: {state}",
   "top.job_failed": "{kind} failed",
   "empty.no_sessions_title": "No sessions yet",

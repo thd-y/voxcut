@@ -518,3 +518,11 @@ test("playFailText", () => {  // D105: an interrupted play() is normal; any othe
   assert.equal(app.playFailText(undefined, "ru"), "Ошибка");
   assert.equal(app.playFailText(undefined, "en"), "Error");
 });
+
+test("progressText", () => {  // D106: a reviewed session says so briefly
+  assert.equal(app.progressText({ all: 297, undecided: 157 }, "ru"), "разобрано 140 из 297");
+  assert.equal(app.progressText({ all: 297, undecided: 0 }, "ru"), "✓ готово");
+  assert.equal(app.progressText({ all: 297, undecided: 0 }, "en"), "✓ done");
+  assert.equal(app.progressText({ all: 0, undecided: 0 }, "ru"), "");
+  assert.equal(app.progressText(null, "ru"), "");
+});

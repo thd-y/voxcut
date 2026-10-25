@@ -115,6 +115,7 @@
   "fatal.title": "Откройте окно заново: VoxCut.cmd или make ui",
   "fatal.text": "Код запуска недействителен или устарел.",
   "top.progress": "разобрано {done} из {all}",
+  "top.done": "✓ готово",
   "top.job": "{kind}: {state}",
   "top.job_failed": "ошибка: {kind}",
   "empty.no_sessions_title": "Сессий пока нет",

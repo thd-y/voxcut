@@ -79,6 +79,12 @@ function playFailText(err, lang) {
   return (err && (err.message || err.name)) || translate(lang, "toast.error");
 }
 
+// The header counter (D106: «✓ готово» once nothing is left undecided).
+function progressText(c, lang) {
+  if (!c || !c.all) return "";
+  return c.undecided === 0 ? translate(lang, "top.done") : translate(lang, "top.progress", { done: c.all - c.undecided, all: c.all });
+}
+
 const isDecided = (clip) => ["kept", "rejected"].includes(status(clip).kind);
 
 function counts(clips) {
@@ -766,7 +772,7 @@ function renderHeader() {
   }
   $("work").setAttribute("aria-labelledby", `tab-${ui.tab}`);
   const c = view && ui.loaded ? counts(view.clips) : null;
-  $("progress-label").textContent = c && c.all ? tr("top.progress", { done: c.all - c.undecided, all: c.all }) : "";
+  $("progress-label").textContent = progressText(c, ui.lang);
   const badge = $("job-badge");
   const jobs = serverState ? serverState.jobs : [];
   const active = jobs.find((j) => j.state === "queued" || j.state === "running");
@@ -2087,7 +2093,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, playFailText, afterDecision, tabReturn, showGaps };
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, playFailText, progressText, afterDecision, tabReturn, showGaps };
 } else {
   start();
 }
