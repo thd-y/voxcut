@@ -293,7 +293,7 @@ const job = (kind, state, extra = {}) => ({ job_id: `${kind}-${state}`, kind, st
 
 test("jobSubject", () => {  // D79: the session through sessionLabel, else the raw id
   assert.equal(app.jobSubject(job("process", "done"), SESSIONS, "ru"), "11 авг. 2026, 21:30 · 4 ч 16 мин");
-  assert.equal(app.jobSubject(job("process", "done"), [], "ru"), SID);
+  assert.equal(app.jobSubject(job("process", "done"), [], "ru"), "11 авг. 2026, 21:30 · 4 ч 16 мин");  // review: the label from the id
   assert.equal(app.jobSubject(job("import", "done", { subject: { source: "" } }), [], "ru"), "inbox/ (корень)");
   assert.equal(app.jobSubject(job("restore", "done"), [], "en"), "voxcut-backup_x_full.tar");
   assert.equal(app.jobSubject(job("odd", "done"), [], "en"), "");
@@ -305,7 +305,7 @@ test("jobLine", () => {  // D79: «{kind} {subject} — {state}»; the stage als
     `обработка ${label} — упала на „поиске речи“`);
   assert.equal(app.jobLine(job("process", "failed", { stage: "probs" }), SESSIONS, "en"),
     "processing 11 Aug 2026, 21:30 · 4 h 16 min — failed at “speech detection”");
-  assert.equal(app.jobLine(job("process", "failed"), [], "ru"), `обработка ${SID} — ошибка`);
+  assert.equal(app.jobLine(job("process", "failed"), [], "ru"), "обработка 11 авг. 2026, 21:30 · 4 ч 16 мин — ошибка");
   assert.equal(app.jobLine(job("import", "done"), [], "ru"), "импорт 24_oct — готово");
   assert.equal(app.jobLine(job("backup", "done"), [], "ru"), "бэкап light — готово");
   assert.equal(app.jobLine(job("process", "running", { stage: "segment" }), SESSIONS, "ru"),
@@ -415,7 +415,8 @@ test("splitHidden", () => {  // D91: hidden sessions go under «Hidden: N», ord
 test("jobSubject of a delete", () => {  // D94: the session as for process; gone → the raw id
   const del = { job_id: "d", kind: "delete", state: "done", subject: { session_id: SID } };
   assert.equal(app.jobSubject(del, SESSIONS, "en"), "11 Aug 2026, 21:30 · 4 h 16 min");
-  assert.equal(app.jobSubject(del, [], "en"), SID);
+  assert.equal(app.jobSubject(del, [], "en"), "11 Aug 2026, 21:30 · 4 h 16 min");  // the trace row of a delete
+  assert.equal(app.jobSubject({ ...del, subject: { session_id: "odd" } }, [], "en"), "odd");
 });
 
 test("autoOpenTarget skips hidden sessions", () => {  // D91

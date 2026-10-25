@@ -92,12 +92,13 @@ function chainText(ch, lang) {
     n: ch.files.length, start: ch.start_local, minutes: (ch.duration_s / 60).toFixed(1) });
 }
 
-// D79: what the job is about; a session through its label, else the raw id
+// D79, D95: what the job is about; a session through its label, a gone one (a delete's trace) by its id
 function jobSubject(j, sessions, lang) {
   const s = j.subject || {};
   if (j.kind === "process" || j.kind === "delete") {
-    const row = sessions.find((r) => r.session_id === s.session_id);
-    return row ? sessionLabel(row, lang) : s.session_id || "";
+    const row = sessions.find((r) => r.session_id === s.session_id)
+      || (s.session_id && { name: s.session_id.split(".")[0] });  // the name is the id without its hash
+    return row ? sessionLabel(row, lang) : "";
   }
   if (j.kind === "import") return s.source === "" ? translate(lang, "inbox.root") : s.source || "";
   return (j.kind === "backup" ? s.mode : j.kind === "restore" ? s.name : "") || "";
@@ -544,6 +545,7 @@ function closeSession() {
   ui.undo = [];
   ui.loaded = true;
   ui.openError = null;
+  retryOpen = null;  // a lost-link retry must not reopen it
 }
 
 function fail(e) {
@@ -1020,17 +1022,19 @@ function renderLibrary() {
   const marks = shown.map((s) => sessionJobMark(st.jobs, s.session_id));
   const markSig = marks.map((m) => m && [m.kind, m.job.job_id, m.job.state, m.job.stage]);  // not log_tail: no rebuild per poll
   const busy = st.sessions.map((s) => sessionBusy(st.jobs, s.session_id));
-  setKids($("sessions"), JSON.stringify([st.sessions, runs, markSig, busy, ui.hiddenOpen, ui.deleteAsk]), () => [
+  const list = $("sessions");
+  const had = document.activeElement;  // a rebuild by poll keeps focus, as in the job log
+  const fkey = had && list.contains(had) ? had.dataset.focus : null;
+  setKids(list, JSON.stringify([st.sessions, runs, markSig, busy, ui.hiddenOpen, ui.deleteAsk]), () => [
     ...(shown.length ? shown.map((s, i) => {
     const row = el("div", null, "lib-row");
     const head = el("div", null, "row");
     const hide = button("", () => setHidden(s.session_id, true), "ghost", "icon-sm", "x");
     hide.classList.add("idea-del", "session-hide");
-    hide.setAttribute("aria-label", tr("lib.hide"));
+    hide.setAttribute("aria-label", `${tr("lib.hide")}: ${sessionLabel(s, ui.lang)}`);  // one name per row
     hide.title = tr("lib.hide");
     hide.disabled = sessionBusy(st.jobs, s.session_id);
     hide.dataset.focus = `${s.session_id}:hide`;
-    head.append(hide);
     head.append(el("strong", sessionLabel(s, ui.lang)),
       el("span", s.n_clips !== null
         ? tr("lib.session_clips", { state: label(ui.lang, "session.state.", s.state), n: s.n_clips })
@@ -1047,6 +1051,7 @@ function renderLibrary() {
       b.addEventListener("click", () => openJobLog(mark.job.job_id));
       head.append(b);
     }
+    head.append(hide);  // last in the DOM as on screen: Tab meets the label first
     row.append(head);
     const acts = el("div", null, "row");
     if (s.n_clips) {
@@ -1079,6 +1084,12 @@ function renderLibrary() {
     return row;
   }) : [el("p", tr("lib.no_sessions"), "muted")]),
     ...hiddenRows(hidden, st)]);
+  if (fkey && !list.contains(document.activeElement)) {  // its row moved away: the toggle or a cross
+    const all = [...list.querySelectorAll("[data-focus]")];
+    const again = all.find((e) => e.dataset.focus === fkey) || all.find((e) => e.dataset.focus === "hidden-toggle")
+      || all.find((e) => !e.disabled);
+    if (again) again.focus({ preventScroll: true });
+  }
 
   // Inputs being typed into are kept: re-render inbox only when its content or the language changed,
   // and carry typed starts over by (source, chain files) (L13).
@@ -1288,7 +1299,7 @@ async function retryJob(j, b) {  // D82: the server takes kind and params from t
     toast(tr("toast.job_submitted"), label(ui.lang, "job.kind.", j.kind));
     await poll();
   } catch (e) {
-    b.disabled = false;  // D96: the log is not rebuilt until the minute changes
+    b.disabled = false;  // D96: a failed request does not change the jobs, so no rebuild re-enables it
     fail(e);
   }
 }
@@ -1333,6 +1344,7 @@ function hiddenRows(hidden, st) {
   const foot = el("div", null, "row hidden-foot muted small");
   const toggle = button(tr(ui.hiddenOpen ? "lib.hidden_hide" : "lib.hidden_show"), () => {
     ui.hiddenOpen = !ui.hiddenOpen;
+    ui.deleteAsk = null;  // Esc must not go to a question nobody sees
     renderLibrary();
   }, "link");
   toggle.setAttribute("aria-expanded", String(ui.hiddenOpen));
@@ -1352,7 +1364,7 @@ function hiddenRows(hidden, st) {
     if (ui.deleteAsk === s.session_id) {
       const ask = el("span", null, "idea-ask");
       ask.append(el("span", tr("lib.delete_question")),
-        mark(button(tr("common.yes"), () => deleteSession(s.session_id), "destructive"), "yes"),
+        mark(button(tr("common.yes"), (e) => deleteSession(s.session_id, e.currentTarget), "destructive"), "yes"),
         mark(button(tr("common.no"), () => askDelete(null), "outline"), "no"));
       head.append(ask);
     } else {
@@ -1384,7 +1396,8 @@ function askDelete(id) {
   if (back) back.focus({ preventScroll: true });
 }
 
-function deleteSession(id) {
+function deleteSession(id, b) {
+  b.disabled = true;  // a double click must not send a second delete
   ui.deleteAsk = null;
   return submit("delete", { session_id: id });
 }
