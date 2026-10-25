@@ -29,6 +29,10 @@ class JobError(Coded, RuntimeError):
     pass
 
 
+class NoJob(KeyError):
+    """No such job_id: the routes answer 404 to this one only, not to any KeyError inside."""
+
+
 class JobParamsError(Coded, ValueError):
     """Every refusal of validate/submit: a 400 with its code, not internal_error."""
 
@@ -128,6 +132,10 @@ def _write(path: Path, obj) -> None:
     os.replace(tmp, path)
 
 
+def _mtime_iso(t: float) -> str:
+    return datetime.fromtimestamp(t).astimezone().isoformat(timespec="seconds")
+
+
 def _read(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text())
@@ -141,10 +149,16 @@ class Jobs:
         self._lock = threading.Lock()
         self._jobs: dict[str, dict] = {}  # job_id -> {"job": job.json, "state", ...}
         self._queue: list[str] = []  # in memory only: lost on restart (see plan)
-        for d in sorted(lay.jobs.iterdir(), key=lambda d: d.stat().st_mtime):
+        found = []
+        for d in lay.jobs.iterdir():
             job = _read(d / "job.json")
-            if job is not None and JOB_ID_RE.fullmatch(d.name):
-                self._jobs[d.name] = {"job": job, "state": "running"}
+            if isinstance(job, dict) and JOB_ID_RE.fullmatch(d.name):
+                if not isinstance(job.get("params"), dict):  # D96: a hand-broken job.json
+                    job["params"] = {}
+                found.append((str(job.get("submitted") or ""), d.stat().st_mtime, d.name, job))
+        # D96: "later" (D84) is the submission order; mtime only for jobs from before submitted
+        for *_, name, job in sorted(found, key=lambda f: (f[0] or _mtime_iso(f[1]), f[1])):
+            self._jobs[name] = {"job": job, "state": "running"}
         with self._lock:
             self._refresh()
 
@@ -249,7 +263,9 @@ class Jobs:
         with self._lock:
             if new_id in self._jobs:
                 return self._view(new_id)
-            rec = self._jobs[job_id]  # KeyError: no such job
+            if job_id not in self._jobs:
+                raise NoJob(job_id)
+            rec = self._jobs[job_id]
             if rec["state"] != "failed" or self._failures().get(job_id) != "open":
                 raise JobParamsError("job_retry_not_open")
             kind, params = rec["job"]["kind"], rec["job"]["params"]
@@ -262,7 +278,7 @@ class Jobs:
         with self._lock:
             rec = self._jobs.get(job_id)
             if rec is None:
-                raise KeyError(job_id)
+                raise NoJob(job_id)
             if rec["job"]["kind"] == "delete" and rec["state"] in ("queued", "running"):
                 raise JobParamsError("job_cancel_delete")  # D94: short; a re-run finishes a cut one
             if rec["state"] == "queued":
@@ -343,6 +359,10 @@ class Jobs:
             elif kind == "restore":
                 backups = library._backup_names(self.lay) if backups is None else backups
                 moot = p.get("name") not in backups
+            elif kind == "process":  # D96: the session is gone or can no longer be processed
+                row = library.session_row(self.lay, p["session_id"]) \
+                    if isinstance(p.get("session_id"), str) else None
+                moot = row is None or not row["can_process"]
             else:
                 moot = False
             out[job_id] = "moot" if moot else "open"
@@ -366,6 +386,9 @@ class Jobs:
         return {"job_id": job_id, "kind": job["kind"], "state": rec["state"],
                 "subject": {k: params[k] for k in SUBJECT.get(job["kind"], ()) if k in params},
                 "submitted": job.get("submitted"), "failure": failures.get(job_id),
+                "retrying": rec["state"] == "failed" and any(  # D96: its own retry is under way
+                    r["state"] in ("queued", "running") and r["job"]["kind"] == job["kind"]
+                    and r["job"]["params"] == job["params"] for r in self._jobs.values()),
                 "stage": st.get("stage"), "error": error,
                 "started": st.get("started"), "finished": st.get("finished"),
                 "result": st.get("result"), "log_tail": tail}

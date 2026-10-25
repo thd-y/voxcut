@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlsplit
 from voxcut import journal as jr
 from voxcut import library
 from voxcut.errors import Coded, descriptor
-from voxcut.jobs import JobError
+from voxcut.jobs import JobError, NoJob
 from voxcut.journal import Journal
 from voxcut.library import Layout
 
@@ -292,7 +292,7 @@ class App:
             raise HttpError(503, "http_jobs_unavailable")
         try:
             return {"job": self.jobs.cancel(req.params["job_id"])}
-        except KeyError:
+        except NoJob:
             raise HttpError(404, "http_no_job") from None
         except ValueError as exc:
             raise HttpError.of(400, exc) from None
@@ -304,7 +304,7 @@ class App:
             raise HttpError(400, "http_job_fields")
         try:
             return {"job": self.jobs.retry(req.params["job_id"], req.body["job_id"])}
-        except KeyError:
+        except NoJob:
             raise HttpError(404, "http_no_job") from None
         except (ValueError, TypeError) as exc:
             raise HttpError.of(400, exc) from None

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -423,6 +424,7 @@ A, B = "voxcut-backup_a_full.tar", "voxcut-backup_b_full.tar"
 ])
 def test_failure_state(lay, seq, expected):
     """D84, D87: resolved > moot > open, computed from the job log and inbox/."""
+    a_session(lay)  # D96: a process failure of a missing session is moot
     for src in ("s1", "s2"):
         (lay.inbox / src).mkdir()
         (lay.inbox / src / "a.wav").write_bytes(b"")
@@ -513,7 +515,7 @@ def test_retry_runs_validate(lay):
     old = as_job(lay, "process", {"session_id": SID}, "failed")
     with pytest.raises(jobs.JobParamsError) as e:
         Jobs(lay, run=FakeRun()).retry(old, jid())
-    assert e.value.code == "job_cannot_process"
+    assert e.value.code == "job_retry_not_open"  # D96: such a failure is moot, nothing to retry
 
 
 @pytest.mark.parametrize("files, code", [
@@ -636,3 +638,56 @@ def test_cancel_delete_refused(lay):
         j.cancel(d)
     assert e.value.code == "job_cancel_delete"
     assert j.list()[0]["state"] == "running"
+
+
+# --- job-log minors (D96) ---
+
+def test_order_by_submitted_after_restart(lay):
+    a = as_job(lay, "backup", {"mode": "light"}, "done")
+    b = as_job(lay, "backup", {"mode": "full"}, "done")
+    for job_id, ts in ((a, "2026-10-25T10:00:00+03:00"), (b, "2026-10-25T10:00:01+03:00")):
+        job = json.loads((lay.jobs / job_id / "job.json").read_text())
+        (lay.jobs / job_id / "job.json").write_text(json.dumps(job | {"submitted": ts}))
+    os.utime(lay.jobs / a, (2e9, 2e9))  # a hand touch or a copy of .run/ reorders mtimes
+    assert [v["job_id"] for v in Jobs(lay, run=FakeRun()).list()] == [a, b]
+
+
+def test_bad_params_job_does_not_break_list(lay):
+    a = as_job(lay, "import", [1], "failed")
+    view = {v["job_id"]: v for v in Jobs(lay, run=FakeRun()).list()}[a]
+    assert view["subject"] == {} and view["state"] == "failed"
+
+
+def test_retry_inner_keyerror_is_not_no_job(lay, monkeypatch):
+    old = as_job(lay, "backup", {"mode": "full"}, "failed")
+    j = Jobs(lay, run=FakeRun())
+    monkeypatch.setattr(j, "_failures", lambda: {}["x"])
+    with pytest.raises(KeyError) as e:
+        j.retry(old, jid())
+    assert not isinstance(e.value, jobs.NoJob)
+    with pytest.raises(jobs.NoJob):
+        j.retry(jid(), jid())
+    with pytest.raises(jobs.NoJob):
+        j.cancel(jid())
+
+
+@pytest.mark.parametrize("case", ["missing", "light"])
+def test_failure_process_moot(lay, case):
+    if case == "light":
+        (lay.sessions / SID).mkdir()
+        (lay.sessions / SID / "import.json").write_text("{}")  # no originals, no WAV
+    a = as_job(lay, "process", {"session_id": SID}, "failed")
+    assert Jobs(lay, run=FakeRun()).list()[0]["failure"] == "moot"
+    assert a
+
+
+def test_view_retrying(lay):
+    old = as_job(lay, "backup", {"mode": "full"}, "failed")
+    j = Jobs(lay, run=FakeRun())
+    assert {v["job_id"]: v for v in j.list()}[old]["retrying"] is False
+    new = jid()
+    j.retry(old, new)
+    assert {v["job_id"]: v for v in j.list()}[old]["retrying"] is True
+    finish(lay, new, "failed")
+    j.poll()
+    assert {v["job_id"]: v for v in j.list()}[old]["retrying"] is False
