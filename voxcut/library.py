@@ -211,7 +211,12 @@ def inbox_inventory(lay: Layout) -> dict:
         hint = _start_hint(lay, source)
         entry = {"source": source, "chains": [], "error": None}
         try:
-            for n, plan in enumerate(audio.plan_chains(src), 1):
+            plans = audio.plan_chains(src)
+            if len(plans) != 1:  # D94: a delete returns one session, so one chain
+                hint = None
+            elif hint is not None:  # the id the import with this start makes
+                plans = [audio.plan_session(src, 1, start=hint)]
+            for n, plan in enumerate(plans, 1):
                 entry["chains"].append({
                     "chain": n,
                     "files": [p.name for p in plan.files],
@@ -482,6 +487,13 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
         imp = load_json(sdir / "import.json")
         files = {f["name"]: f["sha256"] for f in imp["files"]}
         present = {p.name for p in orig.iterdir()} if orig.is_dir() else set()
+        if not present:  # D94 p. 5: a light backup's stub holds no recording, only the dir goes
+            if gone.exists():
+                _erase(gone, log)
+            os.replace(sdir, gone)
+            _erase(gone, log)
+            log(f"сессия {sid} удалена: записей в ней не было (light)")
+            return {"session_id": sid, "files": 0, "notes": 0}
         if present != set(files):
             raise SessionError("delete_incomplete", session=sid)
         bad = _files_ok(orig, files)

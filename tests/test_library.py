@@ -1151,3 +1151,42 @@ def test_second_delete_rollback_returns_carried_notes(lay, no_check, monkeypatch
         delete_session(lay, sid, _quiet)
     assert sorted(p.name for p in (lay.inbox / sid).iterdir()) == ["notes.txt"]
     assert _shas((lay.sessions / sid / "originals").iterdir()) == shas
+
+
+def test_delete_light_stub_erases_dir(lay, no_check):
+    """A light backup restored after a delete brings the session back without its recordings."""
+    sid, shas = imported(lay)
+    delete_session(lay, sid, _quiet)
+    before = _shas((lay.inbox / sid).iterdir())
+    import_json = lay.sessions / sid / "import.json"
+    import_json.parent.mkdir(parents=True)
+    import_json.write_text(json.dumps({"session_id": sid, "start": START, "files": [
+        {"name": n, "sha256": h} for n, h in shas.items()]}))
+    assert delete_session(lay, sid, _quiet) == {"session_id": sid, "files": 0, "notes": 0}
+    assert not (lay.sessions / sid).exists() and not (lay.sessions / f"{sid}.tmp").exists()
+    assert _shas((lay.inbox / sid).iterdir()) == before
+
+
+def test_delete_partial_originals_still_incomplete(lay, no_check):
+    sid, _ = imported(lay)
+    first = min((lay.sessions / sid / "originals").iterdir())
+    os.rename(first, lay.inbox / first.name)
+    with pytest.raises(SessionError) as e:
+        delete_session(lay, sid, _quiet)
+    assert e.value.code == "delete_incomplete"
+    assert (lay.sessions / sid / "originals").is_dir()
+
+
+def test_inbox_hint_gives_import_session_id(lay, no_check):
+    sid, _ = imported(lay, start="2026-08-11 21:30")
+    delete_session(lay, sid, _quiet)
+    chain = next(s for s in inbox_inventory(lay)["sources"] if s["source"] == sid)["chains"][0]
+    assert chain["session_id"] == sid and chain["imported"] is False
+
+
+def test_inbox_hint_ignored_for_two_chains(lay):
+    folder = lay.inbox / "s"
+    make_folder(folder, chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
+    (folder / "start.txt").write_text(START + "\n")
+    chains = inbox_inventory(lay)["sources"][0]["chains"]
+    assert [c["start_hint"] for c in chains] == [None, None]
