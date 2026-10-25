@@ -421,7 +421,7 @@ function stickyToast(title, text, action, key) {
   const foot = el("footer");
   if (action) {
     // closes only once the action worked: a failed open keeps the record of what was not saved
-    const b = button(action.label, () => action.run().then(close, fail), "outline");
+    const b = button(action.label, () => action.run().then((done) => done && close(), fail), "outline");
     b.dataset.toastAction = "";
     foot.append(b);
   }
@@ -902,7 +902,7 @@ const firstLine = (clip) => {
 
 function renderList() {
   const list = shown();
-  const sig = JSON.stringify([ui.lang, ui.selectedId, [...ui.pending], list.map((c) =>
+  const sig = JSON.stringify([ui.lang, ui.selectedId, [...ui.pending], showGaps(ui.tab, ui.filter), list.map((c) =>
     [c.clip_id, c.own_mark, c.marks, c.heard, firstLine(c)])]);
   if (sig === listSig) return;  // polls must not rebuild the list (scroll, hover)
   listSig = sig;
@@ -1665,23 +1665,35 @@ function setMark(clip, value) {
 }
 
 // D101 «к клипу»: the clip's session on Review, the clip selected and silent, filter reset if it hides it.
+// Returns false when a newer open overtook it: the toast stays, its record is still needed.
 async function goToClip(sessionId, run, clipId) {
-  if (sessionId !== sid || run !== runId || !ui.loaded) {
+  const other = sessionId !== sid || run !== runId || !ui.loaded;
+  if (other) {
     await openSession(sessionId, run);
-    if (sid !== sessionId || !view) return;  // a newer open replaced this one: it decides the screen
+    if (sid !== sessionId || !view) return false;  // a newer open replaced this one: it decides the screen
   }
-  if (!view) return;
+  if (!view) return false;
   ui.screen = "session";
   if (!view.clips.some((c) => c.clip_id === clipId)) {
     render();
     toast(tr("toast.clip_gone"));
-    return;
+    return true;
   }
-  if (!shown().some((c) => c.clip_id === clipId)) ui.tab = "review";
-  if (!shown().some((c) => c.clip_id === clipId)) ui.filter = "all";
-  ui.hideSummary = true;  // the owner asked for the clip, not the summary of a fully reviewed session
+  if (other || !shown().some((c) => c.clip_id === clipId)) {  // D101: on Review, even if the session opened on Mine
+    ui.tabSel[ui.tab] = ui.selectedId;  // D100: the tab left keeps its clip
+    ui.tab = "review";
+    scrolledId = null;
+  }
+  if (!shown().some((c) => c.clip_id === clipId)) {
+    ui.filter = "all";
+    scrolledId = null;
+  }
+  if (summaryShown()) ui.hideSummary = true;  // only when the summary would cover the clip right now
+  $("player").pause();  // «на паузе» even when the clip is the one already playing
+  ui.playWhenReady = false;
   select(clipId, { play: false });
   $("card").focus({ preventScroll: true });
+  return true;
 }
 
 function decide(value) {
@@ -1749,12 +1761,18 @@ function undo() {
   }
   const clip = view.clips[t.index];
   setMark(clip, t.entry.prev).catch(() => ui.undo.push(t.entry));
-  if (ui.tab === "review" && !shown().includes(clip)) ui.filter = "all";
+  $("player").pause();  // the clip comes back on pause, even the one already playing
+  ui.playWhenReady = false;
+  if (ui.tab === "review" && !shown().includes(clip)) {
+    ui.filter = "all";
+    scrolledId = null;  // a new list: the row goes to the centre (D59)
+  }
   if (shown().includes(clip)) select(clip.clip_id, { play: false });
   else render();
 }
 
 function setTab(tab) {
+  if (tab !== ui.tab) scrolledId = null;  // the other tab's list: centre the row even if the clip is the same
   ui.tabSel[ui.tab] = ui.selectedId;
   ui.tab = tab;
   ui.rechoose = null;

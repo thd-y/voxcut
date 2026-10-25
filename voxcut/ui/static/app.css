@@ -39,6 +39,7 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
   border-top: 1px solid var(--border); }
 #work > * { min-width: 0; }  /* a long note must not widen the grid (D102(1)) */
 #session-empty { padding: 48px 16px; }
+#toaster { max-height: 100dvh; overflow-y: auto; }  /* a long stack of sticky toasts stays reachable (D101) */
 #session-empty-text, .toast p { white-space: pre-line; }  /* an error and the advice after it: two lines */
 
 #list-pane { min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px;
