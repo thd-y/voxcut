@@ -541,8 +541,12 @@ function closeSession() {
   openSeq++;  // an open still in flight must not bring it back
   const clip = ui.noteClipId && view && view.clips.find((c) => c.clip_id === ui.noteClipId);
   const own = clip && ownNote(clip);
-  if (clip && $("note").value !== (own ? own.value : "")) {  // hidden while typing: the note still goes
-    journal("note", $("note").value, clip).catch(fail);
+  const text = $("note").value;
+  if (clip && !ui.noteSaving && text !== (own ? own.value : "")) {  // hidden while typing: the note still goes
+    const id = clip.clip_id;
+    journal("note", text, clip).then(() => {
+      if (ui.drafts.get(id) === text) ui.drafts.delete(id);  // saved: no stale draft on reopening
+    }, (e) => toast(tr("toast.note_not_saved"), tr("toast.note_kept", { error: errDesc(e) }), true));
   }
   closeNote();
   stopAudio();
@@ -1770,9 +1774,10 @@ async function saveIdea() {
 
 function escape(target) {
   if ((ui.deleteAsk || ui.cancelAsk) && ui.screen === "library" && !document.querySelector("dialog[open]")) {
-    if (ui.cancelAsk) askCancel(null);  // one Esc closes both questions
-    if (ui.deleteAsk) askDelete(null);
-    return;
+    const inCancel = ui.cancelAsk && $("jobs").contains(document.activeElement);
+    const order = [ui.deleteAsk && (() => askDelete(null)), ui.cancelAsk && (() => askCancel(null))];
+    for (const close of inCancel ? order : order.reverse()) if (close) close();  // one Esc closes both,
+    return;  // the question the owner was in goes last and keeps the focus
   }
   // The idea question takes Esc only when nothing else is open over it.
   if (ui.ideaDelete && !ui.ideaDeleting && ui.screen === "library"
