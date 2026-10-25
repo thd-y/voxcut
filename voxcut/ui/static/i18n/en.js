@@ -200,6 +200,7 @@
   "note.saving": "saving…",
   "note.saved": "saved",
   "note.not_saved": "not saved: {error}",
+  "note.not_saved_bare": "not saved",
   "toast.error": "Error",
   "toast.journal": "Journal",
   "toast.idea_not_deleted": "Idea not deleted",
@@ -214,6 +215,7 @@
   "toast.undo_skipped": "Undo skipped.",
   "toast.note_not_saved": "Note not saved",
   "toast.note_kept": "{error}\nThe text is kept in this clip's note field.",
+  "toast.note_kept_bare": "The text is kept in this clip's note field.",
   "toast.idea_saved": "Idea saved",
   "toast.explorer_failed": "File Explorer did not open",
   "list.folded": {

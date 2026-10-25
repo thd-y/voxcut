@@ -200,6 +200,7 @@
   "note.saving": "сохраняю…",
   "note.saved": "сохранено",
   "note.not_saved": "не сохранено: {error}",
+  "note.not_saved_bare": "не сохранено",
   "toast.error": "Ошибка",
   "toast.journal": "Журнал",
   "toast.idea_not_deleted": "Идея не удалена",
@@ -214,6 +215,7 @@
   "toast.undo_skipped": "Отмена пропущена.",
   "toast.note_not_saved": "Заметка не сохранена",
   "toast.note_kept": "{error}\nТекст сохранён в поле заметки этого клипа.",
+  "toast.note_kept_bare": "Текст сохранён в поле заметки этого клипа.",
   "toast.idea_saved": "Идея записана",
   "toast.explorer_failed": "Проводник не открылся",
   "list.folded": {

@@ -593,3 +593,12 @@ test("notSavedText", () => {  // D108(2): the title already says «Не сохр
   assert.equal(app.notSavedText(off, "ru"), "нет связи с VoxCut");
   assert.equal(app.notSavedText(off, "en"), "no connection to VoxCut");
 });
+
+test("note failure texts", () => {  // layer 3 review: «не сохранено: не сохранено» and a toast that repeats its title
+  const ns = app.codedError({ code: "not_saved", params: {} }), off = app.codedError({ code: "offline", params: {} });
+  assert.deepEqual(app.noteFailStatus(ns), { key: "note.not_saved_bare", params: {} });
+  assert.deepEqual(app.noteFailStatus(off), { key: "note.not_saved", params: { error: { code: "offline", params: {} } } });
+  assert.equal(app.noteKeptText(ns, "ru"), "Текст сохранён в поле заметки этого клипа.");
+  assert.equal(app.noteKeptText(off, "ru"), "нет связи с VoxCut\nТекст сохранён в поле заметки этого клипа.");
+  assert.equal(app.noteKeptText(ns, "en"), "The text is kept in this clip's note field.");
+});

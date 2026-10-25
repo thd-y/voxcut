@@ -91,6 +91,17 @@ function notSavedText(err, lang) {
   return desc.code === "not_saved" ? "" : errText(lang, desc);
 }
 
+// A note or idea that did not save: a bare «не сохранено» would repeat the title (as D108(2)).
+function noteFailStatus(err) {
+  const error = errDesc(err);
+  return error.code === "not_saved" ? { key: "note.not_saved_bare", params: {} } : { key: "note.not_saved", params: { error } };
+}
+
+function noteKeptText(err, lang) {
+  const error = errDesc(err);
+  return error.code === "not_saved" ? translate(lang, "toast.note_kept_bare") : translate(lang, "toast.note_kept", { error });
+}
+
 const isDecided = (clip) => ["kept", "rejected"].includes(status(clip).kind);
 
 function counts(clips) {
@@ -271,12 +282,9 @@ function gapBefore(clips, i, min = 30) {
 const foldable = (c) => { const s = status(c); return s.kind === "rejected" && !s.others; };
 
 function foldRun(clips, clipId, gapMin) {
-  let i = clips.findIndex((c) => c.clip_id === clipId);
-  if (i < 0 || !foldable(clips[i])) return [];
-  let j = i;
-  while (i > 0 && foldable(clips[i - 1]) && gapBefore(clips, i, gapMin) === null) i--;
-  while (j + 1 < clips.length && foldable(clips[j + 1]) && gapBefore(clips, j + 1, gapMin) === null) j++;
-  return clips.slice(i, j + 1).map((c) => c.clip_id);
+  const row = listRows(clips, { selectedId: null, unfolded: new Set(), gapMin })
+    .find((r) => r.kind === "fold" && r.ids.includes(clipId));
+  return row ? row.ids : [];
 }
 
 // Rows: { kind: "clip", clip, gap } or { kind: "fold", ids, open, gap }; gap = the pause above the row.
@@ -678,7 +686,7 @@ function closeSession() {
     const id = clip.clip_id;
     journal("note", text, clip).then(() => {
       if (ui.drafts.get(id) === text) ui.drafts.delete(id);  // saved: no stale draft on reopening
-    }, (e) => toast(tr("toast.note_not_saved"), tr("toast.note_kept", { error: errDesc(e) }), true));
+    }, (e) => toast(tr("toast.note_not_saved"), noteKeptText(e, ui.lang), true));
   }
   closeNote();
   stopAudio();
@@ -983,7 +991,10 @@ function foldRow({ ids, open }) {
     if (open && ids.includes(ui.selectedId)) {
       for (const id of ids) ui.unfolded.delete(id);
       const next = afterFoldClose(shown(), ids);
-      return next ? select(next, { play: false }) : render();
+      if (next) select(next, { play: false });
+      else render();
+      if (refocus) $("card").focus({ preventScroll: true });  // the button is gone with the old list
+      return;
     }
     for (const id of ids) open ? ui.unfolded.delete(id) : ui.unfolded.add(id);
     render();
@@ -1972,10 +1983,10 @@ async function saveNote() {
   } catch (e) {
     if (ui.noteClipId !== id) ui.drafts.set(id, text);  // left the clip: N on it brings the text back
     else {  // the text stays in the field; Esc retries
-      ui.noteStatus = { key: "note.not_saved", params: { error: errDesc(e) } };
+      ui.noteStatus = noteFailStatus(e);
       renderStatuses();
     }
-    toast(tr("toast.note_not_saved"), tr("toast.note_kept", { error: errDesc(e) }), true);
+    toast(tr("toast.note_not_saved"), noteKeptText(e, ui.lang), true);
   } finally {
     ui.noteSaving = false;
   }
@@ -2003,7 +2014,7 @@ async function saveIdea() {
     toast(tr("toast.idea_saved"));
     await poll();
   } catch (e) {
-    ui.ideaStatus = { key: "note.not_saved", params: { error: errDesc(e) } };
+    ui.ideaStatus = noteFailStatus(e);
     renderStatuses();
   }
 }
@@ -2183,7 +2194,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, notSavedText, playFailText, progressText, afterDecision, tabReturn, showGaps,
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, notSavedText, noteFailStatus, noteKeptText, playFailText, progressText, afterDecision, tabReturn, showGaps,
     foldable, foldRun, listRows, afterFoldClose };
 } else {
   start();
