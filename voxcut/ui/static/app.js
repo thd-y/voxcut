@@ -373,7 +373,7 @@ function keyAction(ev, { inField, dialogOpen, screen, rechoose = null }) {
   }
   if (code === "Slash") return ev.shiftKey ? "help" : (screen === "mine" ? "search" : null);
   const simple = { Space: work && !ev.repeat && "play", KeyN: work && "note", KeyM: work && "tab",
-    KeyR: screen === "mine" && "rechoose", Home: work && "restart",
+    KeyR: screen === "mine" && "rechoose", Home: work && !ev.repeat && "restart",
     KeyI: "idea", KeyG: "library", Escape: "escape" };
   return (Object.hasOwn(simple, code) && simple[code]) || null;
 }

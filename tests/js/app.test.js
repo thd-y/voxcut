@@ -179,6 +179,7 @@ test("keyAction", () => {
     [{ code: "Home" }, { inField: true }, null],
     [{ code: "Home" }, { dialogOpen: true }, null],
     [{ code: "Home", ctrlKey: true }, {}, null],
+    [{ code: "Home", repeat: true }, {}, null],  // a held Home must not stutter at 0
     // D52: re-choice in «Мои клипы»
     [{ code: "KeyR" }, { screen: "mine" }, "rechoose"],
     [{ code: "KeyR" }, {}, null],
