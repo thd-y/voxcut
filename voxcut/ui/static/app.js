@@ -1040,7 +1040,9 @@ function renderCard() {
     return box;
   }));
   $("clip-alert").hidden = !(ui.audio === "error" && playingId === clip.clip_id);
-  $("clip-alert-text").textContent = ui.audioError ? errText(ui.lang, ui.audioError) : "";
+  const why = ui.audioError ? [el("p", errText(ui.lang, ui.audioError))] : [];
+  if (ui.audioError && ui.audioError.code === "http_no_clip") why.push(el("p", tr("card.audio_advice")));  // D102(4)
+  $("clip-alert-text").replaceChildren(...why);
   renderPlayer();
 }
 
@@ -1553,7 +1555,10 @@ async function loadAudio(clip, autoplay) {
     const r = await fetch(`/api/clip/${clip.clip_id}`, {
       headers: { Authorization: `Bearer ${KEY}` }, signal: ctl.signal,
     });
-    if (!r.ok) throw codedError({ code: "http_status", params: { status: r.status } });
+    if (!r.ok) {  // the server's descriptor (http_no_clip) when it sent one, as api() does
+      const desc = (await r.json().catch(() => ({}))).error;
+      throw codedError(desc || { code: "http_status", params: { status: r.status } });
+    }
     const blob = await r.blob();
     if (ctl !== audioCtl) return;  // a newer clip was selected meanwhile
     audioUrl = URL.createObjectURL(blob);
