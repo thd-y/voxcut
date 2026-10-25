@@ -1047,3 +1047,33 @@ def test_delete_resumes_after_interrupt(lay, no_check, monkeypatch, point):
     assert res == {"session_id": sid, "files": 2, "notes": 1}
     assert_deleted(lay, sid, shas)
     assert (lay.inbox / sid / "notes.txt").read_text() == "00:00:05–00:00:07  заметка\n"
+
+
+# --- the corrected start comes back with the recordings (D94 p. 4) ---
+
+@pytest.mark.parametrize(("case", "hint"), [
+    ("ok", START), ("junk", None), ("big", None), ("symlink", None), ("root", None)])
+def test_inventory_start_hint(lay, case, hint, tmp_path):
+    folder = lay.inbox if case == "root" else lay.inbox / "s"
+    make_folder(folder, chain_starts(2))
+    f = folder / "start.txt"
+    if case == "symlink":
+        (tmp_path / "real.txt").write_text(START)
+        f.symlink_to(tmp_path / "real.txt")
+    else:
+        f.write_text({"junk": "вчера", "big": START + " " * 200}.get(case, START) + "\n")
+    chains = inbox_inventory(lay)["sources"][0]["chains"]
+    assert [c["start_hint"] for c in chains] == [hint]
+
+
+def test_reimport_after_delete_same_session_id(lay, no_check):
+    sid, shas = imported(lay)
+    note(lay, sid, 5.0, 7.5, "заметка")
+    delete_session(lay, sid, _quiet)
+    chain = next(s for s in inbox_inventory(lay)["sources"] if s["source"] == sid)["chains"][0]
+    assert chain["start_hint"] == START
+    again = import_originals(lay, sid, 1, chain["start_hint"], _quiet)
+    assert again == {"session_id": sid, "existing": False}
+    assert not (lay.inbox / sid / "start.txt").exists()
+    assert (lay.inbox / sid / "notes.txt").is_file()  # the owner's text: never touched
+    assert _shas((lay.sessions / sid / "originals").iterdir()) == shas

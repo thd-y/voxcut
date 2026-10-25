@@ -17,7 +17,7 @@ from voxcut import journal as jr
 from voxcut.audio import RunError, SourceError, load_json, read_jsonl
 from voxcut.cli import read_config, segment
 from voxcut.errors import Coded, descriptor
-from voxcut.intervals import SessionError
+from voxcut.intervals import SessionError, parse_start
 
 SESSION_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_\d+h\d{2}m\.[0-9a-f]{8}")
 
@@ -185,10 +185,27 @@ def _source_dir(lay: Layout, source: str) -> Path:
     return lay.inbox / source
 
 
+START_HINT = "start.txt"  # D94: the corrected start a delete left next to the recordings
+
+
+def _start_hint(lay: Layout, source: str) -> str | None:
+    """The text of inbox/<source>/start.txt if it is a small plain file holding a valid start."""
+    f = lay.inbox / source / START_HINT
+    try:
+        if not source or f.is_symlink() or not f.is_file() or f.stat().st_size > 100:
+            return None
+        text = f.read_text().strip()
+        parse_start(text)
+    except (OSError, ValueError):  # SessionError is a ValueError; a bad file is no hint
+        return None
+    return text
+
+
 def inbox_inventory(lay: Layout) -> dict:
     sources = []
     for source in _source_names(lay):
         src = str(lay.inbox / source)
+        hint = _start_hint(lay, source)
         entry = {"source": source, "chains": [], "error": None}
         try:
             for n, plan in enumerate(audio.plan_chains(src), 1):
@@ -199,6 +216,7 @@ def inbox_inventory(lay: Layout) -> dict:
                     "duration_s": plan.n_total / plan.sr,
                     "session_id": plan.session_id,
                     "imported": (lay.sessions / plan.session_id / "import.json").is_file(),
+                    "start_hint": hint,
                 })
         except (SessionError, SourceError, OSError, RuntimeError) as exc:
             entry["chains"], entry["error"] = [], descriptor(exc) if isinstance(exc, Coded) else {
@@ -406,6 +424,10 @@ def finish_import(lay: Layout, sid: str, log) -> None:
         "imported_at": datetime.now().astimezone().isoformat(timespec="seconds")})
     pending.unlink()  # our own bookkeeping file; import.json now holds the same facts
     log(f"импортировано {len(before)} файлов: сессия {sid}")
+    hint = lay.inbox / str(meta.get("source")) / START_HINT
+    if meta.get("source") and Path(str(meta["source"])).name == meta["source"] \
+            and not hint.is_symlink() and hint.is_file():
+        hint.unlink()  # D94: used up; notes.txt is the owner's text and stays
     _drop_empty_source(lay, meta.get("source"), log)  # also after a retry that moved nothing
 
 
