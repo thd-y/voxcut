@@ -7,7 +7,11 @@ const { translate, errText, pickLang, label } = typeof module === "object" ? req
 
 const LOCALE = { en: "en-GB", ru: "ru" };  // D71: English dates day first, 24 h
 
-function parseSessionName(name, lang) {
+// D95: "full" in lists and the job log, "short" (digits) in the header
+const NAME_DATE = { full: { day: "numeric", month: "short", year: "numeric" },
+  short: { day: "2-digit", month: "2-digit", year: "2-digit" } };
+
+function parseSessionName(name, lang, form = "full") {
   const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})_(?:(\d+)h)?(?:(\d+)m)?$/.exec(name);
   if (!m || (!m[6] && !m[7]) || +m[2] < 1 || +m[2] > 12 || +m[4] > 23 || +m[5] > 59) return null;
   const [h, min] = [+m[6], +m[7]];
@@ -15,7 +19,9 @@ function parseSessionName(name, lang) {
     : m[6] ? translate(lang, "dur.h", { h }) : translate(lang, "dur.m", { m: min });
   const day = new Date(+m[1], +m[2] - 1, +m[3]);
   if (day.getDate() !== +m[3]) return null;  // 02-31 would roll over into March
-  const date = new Intl.DateTimeFormat(LOCALE[lang], { day: "numeric", month: "short" }).format(day);  // D68
+  const parts = new Intl.DateTimeFormat(LOCALE[lang], NAME_DATE[form]).formatToParts(day);  // D68
+  const end = parts.findLastIndex((x) => x.type !== "literal");  // D95: ru appends a year suffix
+  const date = parts.slice(0, end + 1).map((x) => x.value).join("");
   return { date, time: `${m[4]}:${m[5]}`, length };
 }
 
@@ -507,8 +513,8 @@ function sessionRow(id) {
   return serverState && serverState.sessions.find((s) => s.session_id === id);
 }
 
-function sessionLabel(row, lang) {
-  const p = parseSessionName(row.name, lang);
+function sessionLabel(row, lang, form = "full") {
+  const p = parseSessionName(row.name, lang, form);
   return p ? translate(lang, "top.session", p) : row.name;
 }
 
@@ -620,7 +626,7 @@ function renderStatuses() {
 
 function renderHeader() {
   const row = sid && sessionRow(sid);
-  $("session-label").textContent = row ? sessionLabel(row, ui.lang) : "";
+  $("session-label").textContent = row ? sessionLabel(row, ui.lang, "short") : "";
   for (const b of $("tabs").querySelectorAll("[role=tab]")) {
     b.setAttribute("aria-selected", String(ui.screen === "session" && b.dataset.tab === ui.tab));
   }

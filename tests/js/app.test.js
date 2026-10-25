@@ -6,22 +6,28 @@ const app = require("../../voxcut/ui/static/app.js");
 
 test("parseSessionName", () => {  // D68: the date through Intl, units from the catalog (L7)
   assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "ru"),
-    { date: "11 авг.", time: "21:30", length: "4 ч 16 мин" });
+    { date: "11 авг. 2026", time: "21:30", length: "4 ч 16 мин" });  // D95: no «г.»
   assert.deepEqual(app.parseSessionName("2026-08-11_21-30_4h16m", "en"),
-    { date: "11 Aug", time: "21:30", length: "4 h 16 min" });  // D71: en-GB
+    { date: "11 Aug 2026", time: "21:30", length: "4 h 16 min" });  // D71: en-GB
   assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").length, "45 мин");
   assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "en").length, "45 min");
-  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").date, "2 янв.");
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru").date, "2 янв. 2026");
+  assert.equal(app.parseSessionName("2026-01-02_08-05_45m", "ru", "short").date, "02.01.26");
   assert.equal(app.parseSessionName("2026-12-31_00-00_5h", "ru").length, "5 ч");
   assert.equal(app.parseSessionName("2026-12-31_00-00_5h", "en").length, "5 h");
   for (const lang of ["ru", "en"]) {
     assert.equal(app.parseSessionName("folder01", lang), null);
+    assert.equal(app.parseSessionName("2026-02-31_00-00_5h", lang, "short"), null);
     assert.equal(app.parseSessionName("2026-13-01_00-00_5h", lang), null);
     assert.equal(app.parseSessionName("2026-00-01_00-00_5h", lang), null);
     assert.equal(app.parseSessionName("2026-02-31_00-00_5h", lang), null);  // no roll-over into March
     assert.equal(app.parseSessionName("2026-08-11_25-99_5h", lang), null);  // no «25:99»
   }
-  assert.equal(app.sessionLabel({ name: "2026-08-11_21-30_4h16m" }, "ru"), "11 авг., 21:30 · 4 ч 16 мин");
+  const row = { name: "2026-08-11_21-30_4h16m" };  // D95: full in lists, digits in the header
+  assert.equal(app.sessionLabel(row, "ru"), "11 авг. 2026, 21:30 · 4 ч 16 мин");
+  assert.equal(app.sessionLabel(row, "en"), "11 Aug 2026, 21:30 · 4 h 16 min");
+  assert.equal(app.sessionLabel(row, "ru", "short"), "11.08.26, 21:30 · 4 ч 16 мин");
+  assert.equal(app.sessionLabel(row, "en", "short"), "11/08/26, 21:30 · 4 h 16 min");
   assert.equal(app.sessionLabel({ name: "folder01" }, "en"), "folder01");
 });
 
@@ -286,7 +292,7 @@ const job = (kind, state, extra = {}) => ({ job_id: `${kind}-${state}`, kind, st
     restore: { name: "voxcut-backup_x_full.tar" } }[kind] || {}, failure: null, ...extra });
 
 test("jobSubject", () => {  // D79: the session through sessionLabel, else the raw id
-  assert.equal(app.jobSubject(job("process", "done"), SESSIONS, "ru"), "11 авг., 21:30 · 4 ч 16 мин");
+  assert.equal(app.jobSubject(job("process", "done"), SESSIONS, "ru"), "11 авг. 2026, 21:30 · 4 ч 16 мин");
   assert.equal(app.jobSubject(job("process", "done"), [], "ru"), SID);
   assert.equal(app.jobSubject(job("import", "done", { subject: { source: "" } }), [], "ru"), "inbox/ (корень)");
   assert.equal(app.jobSubject(job("restore", "done"), [], "en"), "voxcut-backup_x_full.tar");
@@ -294,11 +300,11 @@ test("jobSubject", () => {  // D79: the session through sessionLabel, else the r
 });
 
 test("jobLine", () => {  // D79: «{kind} {subject} — {state}»; the stage also on a failed one
-  const label = "11 авг., 21:30 · 4 ч 16 мин";
+  const label = "11 авг. 2026, 21:30 · 4 ч 16 мин";
   assert.equal(app.jobLine(job("process", "failed", { stage: "probs" }), SESSIONS, "ru"),
     `обработка ${label} — упала на „поиске речи“`);
   assert.equal(app.jobLine(job("process", "failed", { stage: "probs" }), SESSIONS, "en"),
-    "processing 11 Aug, 21:30 · 4 h 16 min — failed at “speech detection”");
+    "processing 11 Aug 2026, 21:30 · 4 h 16 min — failed at “speech detection”");
   assert.equal(app.jobLine(job("process", "failed"), [], "ru"), `обработка ${SID} — ошибка`);
   assert.equal(app.jobLine(job("import", "done"), [], "ru"), "импорт 24_oct — готово");
   assert.equal(app.jobLine(job("backup", "done"), [], "ru"), "бэкап light — готово");
