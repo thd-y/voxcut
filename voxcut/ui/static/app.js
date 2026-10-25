@@ -239,6 +239,9 @@ function visibleClips(clips, { tab, filter, query }) {
 // D100: the clip a tab remembers, while it is still in that tab's list; null → the entry rule.
 const tabReturn = (list, savedId) => (savedId && list.some((c) => c.clip_id === savedId) ? savedId : null);
 
+// D102(2): a pause separates neighbours in the recording; a filtered list has neighbours by filter only.
+const showGaps = (tab, filter) => tab === "review" && filter === "all";
+
 function gapBefore(clips, i, min = 30) {
   if (i <= 0) return null;
   const gap = clips[i].start_s - clips[i - 1].end_s;
@@ -871,7 +874,7 @@ function renderFilters() {
 function statusBadge(clip) {
   const s = status(clip);
   const b = el("span", null, "badge");
-  let text = "—";
+  let text = "";  // undecided: no badge (D99), only the saving spinner while a write is in flight
   if (s.kind === "kept") {
     b.dataset.state = "kept";
     text = tr("status.kept");
@@ -915,7 +918,7 @@ function renderList() {
   }
   const rows = [];
   list.forEach((c, i) => {
-    const gap = gapBefore(list, i, GAP_MIN_S);
+    const gap = showGaps(ui.tab, ui.filter) ? gapBefore(list, i, GAP_MIN_S) : null;
     if (gap !== null) rows.push(el("p", gapLabel(gap, ui.lang), "gap"));
     const item = el("article", null, `item${c.clip_id === ui.selectedId ? " selected" : ""}`);
     if (c.clip_id === ui.selectedId) item.setAttribute("aria-current", "true");
@@ -933,7 +936,9 @@ function renderList() {
       aside.append(dot);
     }
     // in my clips every row is kept: only extra states earn a badge there
-    if (ui.tab !== "mine" || status(c).others || ui.pending.has(c.clip_id)) aside.append(statusBadge(c));
+    const pending = ui.pending.has(c.clip_id);
+    const s = status(c);
+    if ((s.kind !== "undecided" || pending) && (ui.tab !== "mine" || s.others || pending)) aside.append(statusBadge(c));
     item.append(sec, aside);
     item.addEventListener("click", () => select(c.clip_id, { play: true }));  // D53
     rows.push(item);
@@ -2033,7 +2038,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, afterDecision, tabReturn };
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, afterDecision, tabReturn, showGaps };
 } else {
   start();
 }

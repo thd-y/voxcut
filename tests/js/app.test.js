@@ -497,3 +497,9 @@ test("tabReturn", () => {  // D100: a tab returns to its own clip while it is st
   assert.equal(app.tabReturn(list, "z"), null);
   assert.equal(app.tabReturn(list, null), null);
 });
+
+test("showGaps", () => {  // D102(2): pauses only between neighbours in the recording
+  assert.equal(app.showGaps("review", "all"), true);
+  for (const f of ["undecided", "kept", "rejected"]) assert.equal(app.showGaps("review", f), false);
+  for (const f of ["mine", "noted", "all"]) assert.equal(app.showGaps("mine", f), false);
+});
