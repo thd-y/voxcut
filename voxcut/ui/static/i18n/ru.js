@@ -204,6 +204,7 @@
   "toast.idea_not_deleted": "Идея не удалена",
   "toast.job_submitted": "Задача поставлена",
   "toast.not_saved_clip": "Не сохранено: {time} — {decision}",
+  "toast.play_failed": "Клип не заиграл",
   "toast.clip_gone": "Клипа больше нет в этом прогоне",
   "toast.go_to_clip": "к клипу",
   "toast.close": "Закрыть",

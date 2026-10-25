@@ -73,6 +73,12 @@ function notSavedTitle(clip, value, lang) {
   return translate(lang, "toast.not_saved_clip", { time: clockOf(clip.start_local) || fmtPos(clip.start_s), decision });
 }
 
+// D105: the second line of «Клип не заиграл»; null for an interrupted play() (the next clip took over).
+function playFailText(err, lang) {
+  if (err && err.name === "AbortError") return null;
+  return (err && (err.message || err.name)) || translate(lang, "toast.error");
+}
+
 const isDecided = (clip) => ["kept", "rejected"].includes(status(clip).kind);
 
 function counts(clips) {
@@ -1544,7 +1550,7 @@ async function loadAudio(clip, autoplay) {
   if (!clip) return;
   const p = $("player");
   if (playingId === clip.clip_id && ui.audio !== "error") {
-    if (autoplay && ui.audio === "ready") await p.play().catch(() => {});
+    if (autoplay && ui.audio === "ready") await p.play().catch(playFailed);
     if (autoplay && ui.audio === "loading") ui.playWhenReady = true;  // Space while the clip loads
     return;
   }
@@ -1569,13 +1575,18 @@ async function loadAudio(clip, autoplay) {
     audioUrl = URL.createObjectURL(blob);
     p.src = audioUrl;
     ui.audio = "ready";
-    if (ui.playWhenReady) await p.play().catch(() => {});
+    if (ui.playWhenReady) await p.play().catch(playFailed);
   } catch (e) {
     if (e.name === "AbortError" || ctl !== audioCtl) return;
     ui.audio = "error";
     ui.audioError = e.descriptor || { code: "offline", params: {} };  // fetch or blob failed
   }
   if (playingId === ui.selectedId) render();
+}
+
+function playFailed(e) {
+  const text = playFailText(e, ui.lang);
+  if (text !== null) toast(tr("toast.play_failed"), text, true);
 }
 
 function togglePlay() {
@@ -1592,7 +1603,7 @@ function togglePlay() {
   }
   if (p.paused) {
     if (p.ended || p.currentTime >= p.duration) p.currentTime = 0;
-    p.play().catch(() => {});
+    p.play().catch(playFailed);
   } else p.pause();
 }
 
@@ -1602,7 +1613,7 @@ function restart() {
   const p = $("player");
   if (playingId !== ui.selectedId || ui.audio !== "ready") return loadAudio(selected(), true);
   p.currentTime = 0;
-  p.play().catch(() => {});
+  p.play().catch(playFailed);
 }
 
 function seek(delta) {
@@ -2076,7 +2087,7 @@ if (typeof module === "object") {
   module.exports = { parseSessionName, sessionLabel, clockOf, fmtDur, fmtPos, KEEP, REASONS, status, isDecided,
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
-    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, afterDecision, tabReturn, showGaps };
+    afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, playFailText, afterDecision, tabReturn, showGaps };
 } else {
   start();
 }

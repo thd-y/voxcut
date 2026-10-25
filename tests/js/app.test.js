@@ -510,3 +510,11 @@ test("showGaps", () => {  // D102(2): pauses only between neighbours in the reco
   for (const f of ["undecided", "kept", "rejected"]) assert.equal(app.showGaps("review", f), false);
   for (const f of ["mine", "noted", "all"]) assert.equal(app.showGaps("mine", f), false);
 });
+
+test("playFailText", () => {  // D105: an interrupted play() is normal; any other failure is named
+  assert.equal(app.playFailText({ name: "AbortError", message: "interrupted" }, "ru"), null);
+  assert.equal(app.playFailText({ name: "NotAllowedError", message: "m" }, "ru"), "m");
+  assert.equal(app.playFailText({ name: "NotSupportedError", message: "" }, "ru"), "NotSupportedError");
+  assert.equal(app.playFailText(undefined, "ru"), "Ошибка");
+  assert.equal(app.playFailText(undefined, "en"), "Error");
+});
