@@ -1091,8 +1091,11 @@ function drawTimeline() {
   }
   g.globalAlpha = 1;
   if (cur !== null) {
+    const cw = 3 * devicePixelRatio;  // D102(5): wider, with a --background edge so it reads on dense clips
+    g.fillStyle = cssVar("--background", "white");
+    g.fillRect(cur - devicePixelRatio, 0, cw + 2 * devicePixelRatio, h);
     g.fillStyle = cssVar("--destructive", "red");
-    g.fillRect(cur, 0, Math.max(2, devicePixelRatio * 2), h);
+    g.fillRect(cur, 0, cw, h);
   }
 }
 

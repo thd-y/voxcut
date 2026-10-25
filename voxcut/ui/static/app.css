@@ -22,7 +22,10 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 
 #top { display: flex; align-items: center; gap: 12px; padding: 8px 16px; flex-wrap: wrap;
   border-bottom: 1px solid var(--border); }
-#top .brand { font-size: 15px; }
+#top .brand { font-size: 16px; }
+/* D102(5): status and tools wrap together, to the right, when the row is full; work stays on row 1 */
+#top-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+#progress-label { color: var(--foreground); font-variant-numeric: tabular-nums; }  /* D102(6): not quieter than the error badge */
 #job-badge { cursor: pointer; }
 #lang { font-weight: 400; color: var(--muted-foreground); }  /* D76: a quiet label, not a bright one */
 #lang:hover { color: var(--foreground); }
@@ -32,7 +35,7 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 #screen-session { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #timeline { display: block; height: 24px; margin: 10px 16px; width: calc(100% - 32px);
   border-radius: var(--radius); background: var(--muted); cursor: pointer; }
-#work { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 340px) 1fr;
+#work { flex: 1; min-height: 0; display: grid; grid-template-columns: clamp(280px, 28vw, 340px) 1fr;
   border-top: 1px solid var(--border); }
 #work > * { min-width: 0; }  /* a long note must not widen the grid (D102(1)) */
 #session-empty { padding: 48px 16px; }
@@ -44,7 +47,7 @@ body { margin: 0; display: flex; flex-direction: column; background: var(--backg
 .chips .badge { cursor: pointer; }
 .badge.conflict { color: var(--destructive); border-color: var(--destructive); }
 #mine-tools { display: flex; flex-direction: column; gap: 6px; }
-.switch-label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.switch-label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 #clip-list { flex: 1; min-height: 0; overflow-y: auto; gap: 2px; }
 #clip-list .item { cursor: pointer; padding-block: 6px; }
 #clip-list .item.selected { background: var(--accent); }
@@ -61,7 +64,7 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
   background: var(--muted-foreground); }
 .list-empty { padding: 16px 8px; text-align: center; color: var(--muted-foreground); }
 
-#card { margin: 16px; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+#card { margin: 16px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size;
   align-self: start; max-height: calc(100% - 32px); }
 #card:focus { outline: none; }
 #card:focus-visible { outline: none; }  /* tabindex=-1: a key target, not a Tab stop */
@@ -75,11 +78,12 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 #pos { min-width: 88px; text-align: right; }
 .decisions { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 24px; }
 .decisions .kbd { margin-left: 6px; }
+@container (max-width: 740px) { .decisions .icon { display: none; } }  /* D102(5): five decisions in one row; label and key stay */
 .rechoose { padding: 0 24px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .rechoose .kbd { margin-left: 6px; }
 #rechoose-btn { font-size: 12px; height: auto; padding: 2px 0; gap: 4px; }  /* owner: smaller */
 #rechoose-btn .icon { width: 12px; height: 12px; }
-#rechoose-btn .kbd { font-size: 10px; height: 16px; min-width: 16px; padding: 0 4px; }
+#rechoose-btn .kbd { font-size: 11px; height: 16px; min-width: 16px; padding: 0 4px; }
 #rechoose-confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 #rechoose-confirm[hidden] { display: none; }
 .btn[data-state=kept], .badge[data-state=kept] { background: var(--kept); color: var(--kept-foreground);
@@ -148,7 +152,7 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
 .ideas time { font-size: 11px; color: var(--muted-foreground); }
 .ideas p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .idea-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
-.idea-ask { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.idea-ask { display: flex; align-items: center; gap: 6px; font-size: 14px; }
 .idea-del { opacity: .4; transition: opacity .1s; }
 .idea-del:hover, .idea-del:focus-visible { opacity: 1; }
 .session-hide[aria-disabled="true"] { opacity: .2; cursor: not-allowed; }
