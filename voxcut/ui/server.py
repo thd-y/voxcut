@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -488,7 +489,11 @@ def make_server(lay: Layout, host: str = HOST, port: int = 0, jobs=None,
     server = Server((host, port), handler)
     server.daemon_threads = True
     app = App(lay, server.server_address[1], jobs, journal)
-    for line in library.sweep_deleted(lay):  # D94: what a cut delete left behind
+    erased, said = library.sweep_deleted(lay, jobs.busy if jobs is not None else lambda sid: False)
+    for sid in erased:  # D94 p. 1: the delete finished here, so it lifts the hide as on_done does
+        app.journal.append({"event_id": uuid.uuid4().hex, "kind": "session_shown", "session_id": sid,
+                            "value": ""})
+    for line in said:
         app.log(line)
     if jobs is not None:
         jobs.on_done = app.on_done

@@ -1197,7 +1197,7 @@ def test_sweep_erases_leftover_gone_dir(lay, no_check):
     sid, _ = imported(lay)
     delete_session(lay, sid, _quiet)
     (lay.sessions / f"{sid}.tmp" / "x.c0.raw").mkdir(parents=True)  # a cut erase, its job lost
-    assert sweep_deleted(lay) == []
+    assert sweep_deleted(lay) == ([sid], [])
     assert not (lay.sessions / f"{sid}.tmp").exists()
 
 
@@ -1205,13 +1205,35 @@ def test_sweep_keeps_dir_with_originals(lay):
     gone = lay.sessions / "2025-03-01_09-00_0h00m.00000000.tmp"
     (gone / "originals").mkdir(parents=True)
     (gone / "originals" / "a.WAV").write_bytes(b"RIFF")
-    said = sweep_deleted(lay)
-    assert (gone / "originals" / "a.WAV").is_file() and len(said) == 1 and "a.WAV" in said[0]
+    erased, said = sweep_deleted(lay)
+    assert (gone / "originals" / "a.WAV").is_file() and erased == [] and "a.WAV" in said[0]
 
 
 def test_sweep_ignores_live_session_and_other_names(lay, no_check):
     sid, _ = imported(lay)
     (lay.sessions / f"{sid}.tmp").mkdir()  # the session dir is still there: a delete may be running
     (lay.sessions / "notes.tmp").mkdir()
-    assert sweep_deleted(lay) == []
+    assert sweep_deleted(lay) == ([], [])
     assert (lay.sessions / f"{sid}.tmp").is_dir() and (lay.sessions / "notes.tmp").is_dir()
+
+
+def test_sweep_skips_a_session_with_a_live_job(lay):
+    gone = lay.sessions / "2025-03-01_09-00_0h00m.00000000.tmp"
+    (gone / "x").mkdir(parents=True)
+    assert sweep_deleted(lay, busy=lambda sid: True) == ([], [])
+    assert gone.is_dir()
+
+
+def test_inbox_hint_replan_failure_keeps_the_folder(lay, monkeypatch):
+    folder = lay.inbox / "s"
+    make_folder(folder, chain_starts(2))
+    (folder / "start.txt").write_text(START + "\n")
+    real = library_mod.audio.plan_session
+
+    def plan(*a, start=None, **k):
+        if start is not None:
+            raise OSError("gone")  # the files changed between the two header passes
+        return real(*a, **k)
+    monkeypatch.setattr(library_mod.audio, "plan_session", plan)
+    src = inbox_inventory(lay)["sources"][0]
+    assert src["error"] is None and [c["start_hint"] for c in src["chains"]] == [None]

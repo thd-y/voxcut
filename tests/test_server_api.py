@@ -10,6 +10,7 @@ from test_jobs import FakeRun
 from test_server_security import SECURITY, Client
 
 from voxcut import journal as journal_mod
+from voxcut import journal as jr
 from voxcut import library as library_mod
 from voxcut.jobs import Jobs
 from voxcut.journal import Journal
@@ -687,8 +688,12 @@ def test_delete_done_writes_session_shown(wapi):
 def test_server_start_sweeps_cut_deletes(tmp_path):
     lay = Layout(tmp_path)
     lay.ensure()
-    gone = lay.sessions / "2025-03-01_09-00_0h00m.00000000.tmp"
+    sid = "2025-03-01_09-00_0h00m.00000000"
+    Journal(lay.journal).append({"event_id": uuid.uuid4().hex, "kind": "session_hidden", "session_id": sid,
+                                 "value": ""})
+    gone = lay.sessions / f"{sid}.tmp"
     (gone / "x").mkdir(parents=True)
-    server, _ = make_server(lay)
+    server, app = make_server(lay)
     server.server_close()
     assert not gone.exists()
+    assert sid not in jr.hidden_sessions(app.journal.events())  # D94 p. 1: a re-import shows up

@@ -215,7 +215,10 @@ def inbox_inventory(lay: Layout) -> dict:
             if len(plans) != 1:  # D94: a delete returns one session, so one chain
                 hint = None
             elif hint is not None:  # the id the import with this start makes
-                plans = [audio.plan_session(src, 1, start=hint)]
+                try:
+                    plans = [audio.plan_session(src, 1, start=hint)]
+                except (SessionError, SourceError, OSError, RuntimeError):  # files changed meanwhile
+                    hint = None
             for n, plan in enumerate(plans, 1):
                 entry["chains"].append({
                     "chain": n,
@@ -551,19 +554,21 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
     return {"session_id": sid, "files": len(files), "notes": meta["notes"]}
 
 
-def sweep_deleted(lay: Layout) -> list[str]:
-    """What a cut delete left: sessions/<sid>.tmp with no sessions/<sid>/ is erased; one still
-    holding a recording stays, and the returned message says so."""
-    said = []
+def sweep_deleted(lay: Layout, busy=lambda sid: False) -> tuple[list[str], list[str]]:
+    """What a cut delete left: sessions/<sid>.tmp with no sessions/<sid>/ and no live job is erased;
+    one still holding a recording stays. Returns (erased sids, messages about the kept ones)."""
+    erased, said = [], []
     for gone in sorted(lay.sessions.glob("*.tmp")) if lay.sessions.is_dir() else []:
         sid = gone.name[:-len(".tmp")]
-        if not SESSION_ID_RE.fullmatch(sid) or (lay.sessions / sid).exists() or not gone.is_dir():
+        if (not SESSION_ID_RE.fullmatch(sid) or (lay.sessions / sid).exists() or not gone.is_dir()
+                or busy(sid)):  # a delete unit from before the restart may still be erasing it
             continue
         try:
             _erase(gone, lambda _m: None)
+            erased.append(sid)
         except (SessionError, OSError) as exc:
             said.append(f"{gone}: {exc}")
-    return said
+    return erased, said
 
 
 def _free_name(name: str, taken: set[str]) -> str:
