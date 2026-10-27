@@ -8,8 +8,8 @@ import pytest
 ROOT = Path(__file__).parent.parent
 DOCS = sorted([*ROOT.glob("*.md"), *(ROOT / "docs").rglob("*.md")])
 LINK = re.compile(r"\]\(([^)\s]+)\)")
-# shortcut: written by later plan tasks (gif: Task 11, how-it-was-built: Task 12); empty it then
-PENDING = {"docs/demo.gif", "docs/how-it-was-built.md", "docs/how-it-was-built.ru.md"}
+# shortcut: written by a later plan task (how-it-was-built: Task 12); empty it then
+PENDING = {"docs/how-it-was-built.md", "docs/how-it-was-built.ru.md"}
 
 
 def rel(p: Path) -> str:
