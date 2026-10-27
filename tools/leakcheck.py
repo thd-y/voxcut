@@ -23,6 +23,9 @@ ROLE_WORD = re.compile(r"\b" + "own" + r"er\b", re.IGNORECASE)
 AUDIO = re.compile(r"\.(wav|flac|mp3|m4a|ogg|opus|rf64|npy)$", re.IGNORECASE)  # as in .gitignore
 FORBIDDEN = ("docs/superpowers/",)
 CYRILLIC_OK = ("tests/", "voxcut/ui/static/i18n/", "tools/leak-allow.txt")
+# The CI badge needs the account in its URL: allowed there only, and only in the READMEs.
+BADGE_OK = re.compile(r"https://github\.com/[^/\s]+/voxcut/actions/workflows/check\.yml")
+BADGE_FILES = ("README.md", "README.ru.md")
 
 
 def git(*args: str, data: bytes | None = None) -> str:
@@ -54,6 +57,8 @@ def scan_text(text: str, path: str, values: list[str], patterns: list[re.Pattern
     hits = []
     for n, line in enumerate(unicodedata.normalize("NFC", text).splitlines(), 1):
         hits += [(path, n, f"pattern#{i}") for i, p in enumerate(patterns, 1) if p.search(line)]
+        if path in BADGE_FILES:
+            line = BADGE_OK.sub("", line)
         hits += [(path, n, f"value#{i}") for i, (v, j) in enumerate(low, 1)
                  if v in line.lower() or j in line.lower()]
     return hits

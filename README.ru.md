@@ -1,5 +1,7 @@
 [English](README.md) | Русский
 
+[![check](https://github.com/thd-y/voxcut/actions/workflows/check.yml/badge.svg)](https://github.com/thd-y/voxcut/actions/workflows/check.yml)
+
 # VoxCut
 
 Находит речь одного человека, включая шёпот, в многочасовых записях с микрофона под музыку и нарезает её на клипы для последующего распознавания.

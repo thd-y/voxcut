@@ -211,3 +211,18 @@ def test_home_path_neutral(text):
 def test_value_in_escaped_or_decomposed_form(text):
     """Review I3."""
     assert leakcheck.scan_text(text, "f", ["Йожин Тест"], [])
+
+
+BADGE = "https://github.com/someone/voxcut/actions/workflows/check.yml"
+
+
+@pytest.mark.parametrize("path, line, hit", [
+    ("README.md", f"[![check]({BADGE}/badge.svg)]({BADGE})", False),
+    ("README.ru.md", f"[![check]({BADGE}/badge.svg)]({BADGE})", False),
+    ("README.md", f"[![check]({BADGE}/badge.svg)]({BADGE}) by someone", True),
+    ("README.md", "https://github.com/someone/voxcut", True),
+    ("README.md", "https://github.com/someone/other/actions/workflows/check.yml", True),
+    ("docs/decisions.md", BADGE, True),
+])
+def test_value_allowed_only_in_the_readme_ci_badge(path, line, hit):
+    assert bool(leakcheck.scan_text(line, path, ["someone"], [])) == hit

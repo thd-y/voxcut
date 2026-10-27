@@ -1,5 +1,7 @@
 English | [Русский](README.ru.md)
 
+[![check](https://github.com/thd-y/voxcut/actions/workflows/check.yml/badge.svg)](https://github.com/thd-y/voxcut/actions/workflows/check.yml)
+
 # VoxCut
 
 Finds one person's speech, whispers included, in hours of microphone recordings with music playing, and cuts it into clips for a later transcription step.
