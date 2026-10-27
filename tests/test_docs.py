@@ -46,3 +46,23 @@ def test_license_and_notices():
     notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
     for name in ("Silero", "Basecoat", "Lucide", "Mulish"):
         assert name in notices
+
+
+def decision_numbers(text: str) -> list[str]:
+    """Numbers an entry defines: `**D12 — `, `**C3 — `, or a range line `**D118–D127, D132–D133: `."""
+    out = re.findall(r"^\*\*([DC]\d+) — ", text, re.MULTILINE)
+    for line in re.findall(r"^\*\*(D\d+–D\d+(?:, D\d+–D\d+)*): ", text, re.MULTILINE):
+        for a, b in re.findall(r"D(\d+)–D(\d+)", line):
+            out += [f"D{n}" for n in range(int(a), int(b) + 1)]
+    return out
+
+
+def test_decision_numbers_parse_singles_and_ranges():
+    text = "**D1 — A.** x\n**C2 — B.** y\n**D3–D5, D7–D8: z.** w\nsee D9\n"
+    assert decision_numbers(text) == ["D1", "C2", "D3", "D4", "D5", "D7", "D8"]
+
+
+def test_decision_log_covers_every_number_once():
+    got = decision_numbers((ROOT / "docs" / "decisions.md").read_text())
+    want = [f"D{n}" for n in range(1, 134)] + [f"C{n}" for n in range(1, 8)]
+    assert sorted(got) == sorted(want)
