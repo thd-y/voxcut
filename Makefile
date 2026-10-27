@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 TORCH_CPU := https://download.pytorch.org/whl/cpu
 
-.PHONY: setup check lint test test-ci test-slow ui ui-envcheck
+.PHONY: setup check lint test test-ci test-slow ui ui-envcheck hooks
 
 setup:
 	python3 -m venv .venv
@@ -34,3 +34,7 @@ ui:
 # S9: проверки окружения при работающем make ui (вне make check).
 ui-envcheck:
 	$(PY) -m voxcut.ui.envcheck
+
+# D128: leak check on commit, commit message and push.
+hooks:
+	git config core.hooksPath .githooks

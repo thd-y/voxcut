@@ -17,3 +17,5 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
       - run: make setup
       - run: make lint test-ci
+      # D128: enabled in the public repo only; here the tree still holds the process docs
+      # - run: python3 -m tools.leakcheck tree

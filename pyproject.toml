@@ -29,6 +29,7 @@ packages = ["voxcut", "voxcut.ui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # tools/ (leak check) is not part of the package
 markers = [
     "slow: needs ffmpeg/torch; not part of make check",
     "host: runs real systemd --user units; not in CI (D63)",

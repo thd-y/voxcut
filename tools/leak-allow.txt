@@ -1,0 +1,9 @@
+# Cyrillic allowed on these lines (D128): path<TAB>exact fragment.
+# Journal values: changing them breaks old journals.
+voxcut/ui/static/app.js	const KEEP = "моё";
+voxcut/ui/static/app.js	const REASONS = ["вокал", "музыка", "шум", "другое"];
+voxcut/ui/static/app.js	s.value : "другое"]++;
+voxcut/ui/static/app.js	.toLocaleLowerCase("ru").replaceAll("ё", "е");
+voxcut/ui/static/app.js	const DECISION_ICONS = { "моё": "check"
+# The anchor config is pinned with its tests (D22).
+configs/v1.toml	note = "D32 + D37 (запас 3 с)"

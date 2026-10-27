@@ -1,0 +1,11 @@
+#!/bin/sh
+# D128: every commit about to leave, including old ones a new branch brings along
+zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
+while read -r lref lsha rref rsha; do
+  [ "$lsha" = "$zero" ] && continue  # a delete sends no commits
+  if [ "$rsha" = "$zero" ]; then
+    python3 -m tools.leakcheck range "$lsha" --not --remotes || exit 1
+  else
+    python3 -m tools.leakcheck range "$rsha..$lsha" || exit 1
+  fi
+done

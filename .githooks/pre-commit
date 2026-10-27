@@ -1,0 +1,3 @@
+#!/bin/sh
+# D128: staged files must not carry private values, process docs or Russian prose
+exec python3 -m tools.leakcheck staged
