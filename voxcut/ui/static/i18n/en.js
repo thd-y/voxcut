@@ -331,6 +331,8 @@
   "err.restore_mismatch": "{name}: sha256 or contents do not match backup.json: {files}; nothing unpacked",
   "err.restore_no_archive": "no archive in the inbox: {name}",
   "err.restore_conflicts": "data/ already has other versions of the files, nothing changed:\n{lines}",
+  "err.restore_no_space": "{name}: unpacking needs {need} MB, {free} MB free; nothing unpacked",
+  "err.restore_bad_target": "{path}: the target leads outside data/ through a link; nothing restored",
   "err.journal_unknown_fields": "unknown event fields",
   "err.journal_bad_ts": "ts: an ISO date with a time zone is required",
   "err.journal_bad_event_id": "event_id: 32 hex digits required",

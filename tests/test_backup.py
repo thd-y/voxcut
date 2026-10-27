@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import shutil
 import tarfile
 from datetime import datetime
 
@@ -281,3 +282,33 @@ def test_unrestorable_backup_not_published(lay):
         make_backup(lay, "full", NOW)
     assert e.value.code == "restore_bad_member"
     assert list(lay.backups.iterdir()) == []
+
+
+def test_restore_refuses_when_unpacked_size_exceeds_free_space(lay, lay2, monkeypatch):
+    make_data(lay)
+    name = make_backup(lay, "full", NOW)
+    to_inbox(lay2, lay, name)
+    with tarfile.open(lay2.inbox / name) as t:
+        need = sum(m.size for m in t.getmembers())
+    real = shutil.disk_usage
+    monkeypatch.setattr(shutil, "disk_usage",
+                        lambda p: real(p)._replace(free=need - 1))
+    with pytest.raises(RunError) as e:
+        restore_backup(lay2, name, lay2.run / "journal.in")
+    assert e.value.code == "restore_no_space"
+    assert not (lay2.run / "restore.tmp").exists()
+    assert not (lay2.sessions / SID).exists()
+
+
+def test_restore_refuses_symlinked_dir_in_data(lay, lay2, tmp_path):
+    make_data(lay)
+    name = make_backup(lay, "full", NOW)
+    to_inbox(lay2, lay, name)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (lay2.sessions / SID).symlink_to(outside)
+    with pytest.raises(RunError) as e:
+        restore_backup(lay2, name, lay2.run / "journal.in")
+    assert e.value.code == "restore_bad_target"
+    assert list(outside.iterdir()) == []  # not a single dir created through the link
+    assert not (lay2.run / "restore.tmp").exists()

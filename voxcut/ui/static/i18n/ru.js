@@ -345,6 +345,8 @@
   "err.restore_mismatch": "{name}: sha256 или состав не совпадает с backup.json: {files}; ничего не распаковано",
   "err.restore_no_archive": "нет архива во входящих: {name}",
   "err.restore_conflicts": "в data/ уже есть другие версии файлов, ничего не изменено:\n{lines}",
+  "err.restore_no_space": "{name}: для распаковки нужно {need} МБ, свободно {free} МБ; ничего не распаковано",
+  "err.restore_bad_target": "{path}: путь ведёт за пределы data/ через ссылку; ничего не восстановлено",
   "err.journal_unknown_fields": "неизвестные поля события",
   "err.journal_bad_ts": "ts: нужна дата ISO с часовым поясом",
   "err.journal_bad_event_id": "event_id: нужны 32 hex",

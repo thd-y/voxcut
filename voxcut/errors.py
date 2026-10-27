@@ -198,6 +198,10 @@ CODES: dict[str, tuple[tuple[str, ...], str]] = {
     "restore_conflicts": (("lines",),
         ("data/ already has other versions of the files, nothing changed:\n"
          "{lines}")),
+    "restore_no_space": (("name", "need", "free"),
+        "{name}: unpacking needs {need} MB, {free} MB free; nothing unpacked"),
+    "restore_bad_target": (("path",),
+        "{path}: the target leads outside data/ through a link; nothing restored"),
     # journal.py
     "journal_unknown_fields": ((), "unknown event fields"),
     "journal_bad_ts": ((), "ts: an ISO date with a time zone is required"),

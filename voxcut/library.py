@@ -725,6 +725,17 @@ def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
         raise RunError("restore_no_archive", name=repr(name))
     with tarfile.open(lay.inbox / name) as tar:
         files = _verified_files(tar, name)
+        need, free = sum(m.size for m in tar.getmembers()), shutil.disk_usage(lay.run).free
+        if need > free:  # S-4
+            raise RunError("restore_no_space", name=name, need=-(-need // 2**20),
+                           free=free // 2**20)
+        data = (lay.root / "data").resolve()
+        for rel in files:  # S-5: no dir is created or written through a link out of data/
+            parent = (lay.root / rel).parent
+            while not parent.exists():
+                parent = parent.parent
+            if not parent.resolve().is_relative_to(data):
+                raise RunError("restore_bad_target", path=rel)
         tmp = lay.run / "restore.tmp"
         if tmp.exists():
             shutil.rmtree(tmp)  # our own temp dir from an interrupted restore
