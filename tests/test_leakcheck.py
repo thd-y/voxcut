@@ -1,5 +1,7 @@
+import json
 import re
 import subprocess
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -134,7 +136,7 @@ def test_values_from_env_and_missing_file(repo, monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("VOXCUT_LEAK_VALUES", str(values))
     assert leakcheck.main(["staged"]) == 1
     monkeypatch.setenv("VOXCUT_LEAK_VALUES", str(tmp_path / "none.txt"))
-    assert leakcheck.main(["staged"]) == 0  # only the general patterns
+    assert leakcheck.main(["tree"]) == 0  # tree (CI) runs on the general patterns alone
     assert "none.txt" in capsys.readouterr().err
 
 
@@ -153,3 +155,59 @@ def test_repo_tree_is_clean_of_style_leaks_outside_process_docs():
     hits = [h for f in files for h in leakcheck.scan_file(f, (Path(root) / f).read_bytes(), [],
                                                           leakcheck.load_patterns(), style=True)]
     assert hits == []
+
+
+def test_history_checks_every_path_of_a_blob(repo):
+    """Review C1: one blob, many paths; a renamed or empty file is checked under each path."""
+    r, values = repo
+    commit(r, f"{VALUE}.txt", "same\n")
+    commit(r, "empty.wav", "")
+    git(r, "mv", f"{VALUE}.txt", "plain.txt")
+    git(r, "rm", "-q", "empty.wav")
+    stage(r, "empty.py", "")
+    git(r, "commit", "-qm", "rename")
+    assert run(values, "history") == 1
+    hits = leakcheck.scan("history", [], [VALUE], [])
+    assert {(p, rule) for p, _, rule in hits} >= {(f"{VALUE}.txt", "value#1"),
+                                                  ("empty.wav", "path:audio")}
+
+
+def test_range_checks_a_new_path_for_an_old_blob(repo):
+    r, values = repo
+    base = commit(r, "docs/x.md", "plan\n")
+    (r / "docs/superpowers").mkdir()
+    git(r, "mv", "docs/x.md", "docs/superpowers/x.md")
+    git(r, "commit", "-qm", "move")
+    assert run(values, "range", f"{base}..HEAD") == 1
+
+
+@pytest.mark.parametrize("mode", ["staged", "range"])
+def test_hooks_refuse_without_values_file(repo, tmp_path, mode):
+    """Review I1: a hook without the private values would pass real leaks."""
+    r, _ = repo
+    stage(r, "b.py", "x = 1\n")
+    args = [mode] + (["HEAD~0..HEAD"] if mode == "range" else [])
+    assert leakcheck.main([*args, "--values", str(tmp_path / "none.txt")]) == 2
+
+
+@pytest.mark.parametrize("text", [
+    "cd /home" + "/alice", '"/home' + '/alice"', "\\\\wsl.localhost\\Ubuntu\\home" + "\\alice\\x",
+    '"C:\\\\Users' + '\\\\Alice"', "c:\\users" + "\\alice", "/mnt/c/users" + "/alice", "C:/Users" + "/Alice",
+])
+def test_home_path_forms(text):
+    """Review I2: the home of a named user in every common spelling."""
+    assert leakcheck.scan_text(text, "f", [], leakcheck.load_patterns())
+
+
+@pytest.mark.parametrize("text", ["/home/user/x", "/home/user", "/mnt/c/Program Files/x"])
+def test_home_path_neutral(text):
+    assert not leakcheck.scan_text(text, "f", [], leakcheck.load_patterns())
+
+
+@pytest.mark.parametrize("text", [
+    json.dumps({"n": "Йожин Тест"}),  # \u escapes, the json.dumps default
+    unicodedata.normalize("NFD", "Йожин Тест"),
+])
+def test_value_in_escaped_or_decomposed_form(text):
+    """Review I3."""
+    assert leakcheck.scan_text(text, "f", ["Йожин Тест"], [])

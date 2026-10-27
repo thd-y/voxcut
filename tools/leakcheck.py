@@ -5,13 +5,15 @@ never the value itself.
     python -m tools.leakcheck staged|msg <file>|range <revs...>|tree|history [--values FILE]
 
 Values (one per line) come from --values, else $VOXCUT_LEAK_VALUES, else ../leak-values.txt
-next to the repository (the private work repo, D127). Style rules (Cyrillic, the word for the
+next to the repository (the private work repo, D127); without them only tree runs (CI). Style rules (Cyrillic, the word for the
 person running the product) run in staged, msg and tree only: old history legally has both.
 """
+import json
 import os
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -47,11 +49,13 @@ def load_allow(path: Path = HERE / "leak-allow.txt") -> list[tuple[str, str]]:
 
 def scan_text(text: str, path: str, values: list[str], patterns: list[re.Pattern]) -> list:
     """Hits as (path, line_no, rule): rule is pattern#<n> or value#<n>, 1-based."""
-    low = [v.lower() for v in values]
+    # a value also as json.dumps writes it (\\u escapes); text compared in NFC
+    low = [(v.lower(), json.dumps(v)[1:-1].lower()) for v in values]
     hits = []
-    for n, line in enumerate(text.splitlines(), 1):
+    for n, line in enumerate(unicodedata.normalize("NFC", text).splitlines(), 1):
         hits += [(path, n, f"pattern#{i}") for i, p in enumerate(patterns, 1) if p.search(line)]
-        hits += [(path, n, f"value#{i}") for i, v in enumerate(low, 1) if v in line.lower()]
+        hits += [(path, n, f"value#{i}") for i, (v, j) in enumerate(low, 1)
+                 if v in line.lower() or j in line.lower()]
     return hits
 
 
@@ -72,13 +76,18 @@ def style_hits(text: str, path: str, prose: bool) -> list:
     return hits
 
 
-def scan_file(path: str, data: bytes, values: list[str], patterns: list[re.Pattern],
-              style: bool = False) -> list:
+def path_hits(path: str, values: list[str], patterns: list[re.Pattern]) -> list:
     hits = [(path, 0, rule) for _, _, rule in scan_text(path, path, values, patterns)]
     if path.startswith(FORBIDDEN):
         hits.append((path, 0, "path:docs/superpowers"))
     if AUDIO.search(path):
         hits.append((path, 0, "path:audio"))
+    return hits
+
+
+def scan_file(path: str, data: bytes, values: list[str], patterns: list[re.Pattern],
+              style: bool = False) -> list:
+    hits = path_hits(path, values, patterns)
     text = data.decode("utf-8", "replace")  # binary files too: a value is a byte run
     hits += scan_text(text, path, values, patterns)
     if style and b"\0" not in data:
@@ -87,16 +96,19 @@ def scan_file(path: str, data: bytes, values: list[str], patterns: list[re.Patte
 
 
 def _blobs(revs: list[str]):
-    """(path, bytes) for every blob reachable from revs, each object once."""
-    named = {}
-    for line in git("rev-list", "--objects", *revs).splitlines():
-        sha, _, path = line.partition(" ")
-        if path:
-            named.setdefault(sha, path)
-    if not named:
+    """(paths, bytes) for every blob the commits in revs put at a path: each content once, with
+    every path it was put at (a renamed or copied file, an empty one shared by many paths)."""
+    paths: dict[str, set[str]] = {}
+    toks = git("log", "--format=", "--raw", "--no-abbrev", "--no-renames", "--root", "-m", "-z",
+               *revs).split("\0")
+    for meta, path in zip(toks[::2], toks[1::2]):
+        _, mode, _, sha, status = meta.lstrip("\n").split()
+        if status != "D" and mode != "160000":  # deleted entries and submodules carry no blob
+            paths.setdefault(sha, set()).add(path)
+    if not paths:
         return
     # shortcut: the whole batch is read into memory; fine for this repo's size, stream if it grows
-    out = git_bytes("cat-file", "--batch", data="\n".join(named).encode() + b"\n")
+    out = git_bytes("cat-file", "--batch", data="\n".join(paths).encode() + b"\n")
     pos = 0
     while pos < len(out):
         end = out.index(b"\n", pos)
@@ -104,7 +116,7 @@ def _blobs(revs: list[str]):
         body = out[end + 1:end + 1 + int(size)]
         pos = end + 1 + int(size) + 1
         if kind == "blob":
-            yield named[sha], body
+            yield sorted(paths[sha]), body
 
 
 def _commits(revs: list[str]):
@@ -132,8 +144,9 @@ def scan(mode: str, rest: list[str], values: list[str], patterns: list[re.Patter
                 hits += scan_file(p, (root / p).read_bytes(), values, patterns, style=True)
     elif mode in ("history", "range"):
         revs = ["--all"] if mode == "history" else rest
-        for p, data in _blobs(revs):
-            hits += scan_file(p, data, values, patterns)
+        for ps, data in _blobs(revs):
+            hits += scan_file(ps[0], data, values, patterns)
+            hits += [h for p in ps[1:] for h in path_hits(p, values, patterns)]
         for label, text in _commits(revs):
             hits += scan_text(text, label, values, patterns)
     else:
@@ -152,12 +165,15 @@ def main(argv: list[str] | None = None) -> int:
         env = os.environ.get("VOXCUT_LEAK_VALUES")
         vpath = Path(env) if env else (
             Path(git("rev-parse", "--show-toplevel").strip()).parent / "leak-values.txt")
+    mode, *rest = argv
     values = []
     if vpath.is_file():
         values = [s.strip() for s in _lines(vpath)]
-    else:
+    elif mode == "tree":  # CI has no private values: the general patterns alone
         print(f"leakcheck: no values file {vpath}; general patterns only", file=sys.stderr)
-    mode, *rest = argv
+    else:  # a hook without the values would pass every real leak
+        print(f"leakcheck: no values file {vpath}; set VOXCUT_LEAK_VALUES", file=sys.stderr)
+        return 2
     hits = scan(mode, rest, values, load_patterns())
     for path, line, rule in hits:
         print(f"{path}:{line}: {rule}", file=sys.stderr)

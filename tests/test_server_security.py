@@ -144,8 +144,8 @@ def test_two_windows_two_keys(served):
 
 def test_keys_bounded(served):
     c, _ = served
-    keys = [c.key() for _ in range(20)]
-    assert len(c.app._keys) == KEYS_MAX == 8
+    keys = [c.key() for _ in range(KEYS_MAX + 6)]
+    assert len(c.app._keys) == KEYS_MAX == 64  # a day of relaunches keeps an old window alive
     assert c.req("GET", "/api/ping", key=keys[-1])[0] == 200
     assert c.req("GET", "/api/ping", key=keys[0])[0] == 401
 

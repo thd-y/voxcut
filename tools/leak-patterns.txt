@@ -1,5 +1,7 @@
 # General leak patterns (D128), one regex per line, checked in every mode.
 # The private values live outside this repository (leak-values.txt).
-/home/(?!user/)[A-Za-z0-9._-]+/
-/mnt/c/Users/(?!Public/)[A-Za-z0-9._ -]+
-C:\\Users\\(?!Public\\)[A-Za-z0-9._ -]+
+# A named user's home, in Linux, WSL UNC, Windows and escaped spellings; /home/user is neutral.
+(?i)/home/(?!user\b)[a-z0-9._-]+
+(?i)\\+home\\+(?!user\b)[a-z0-9._-]+
+(?i)/mnt/[a-z]/users/(?!public\b)[a-z0-9._ -]+
+(?i)\b[a-z]:(\\+|/)users(\\+|/)(?!public\b)[a-z0-9._ -]+

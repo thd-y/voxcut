@@ -732,7 +732,7 @@ def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
         data = (lay.root / "data").resolve()
         for rel in files:  # S-5: no dir is created or written through a link out of data/
             parent = (lay.root / rel).parent
-            while not parent.exists():
+            while not os.path.lexists(parent):  # a broken link is not missing
                 parent = parent.parent
             if not parent.resolve().is_relative_to(data):
                 raise RunError("restore_bad_target", path=rel)

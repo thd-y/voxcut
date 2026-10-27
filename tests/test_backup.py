@@ -312,3 +312,15 @@ def test_restore_refuses_symlinked_dir_in_data(lay, lay2, tmp_path):
     assert e.value.code == "restore_bad_target"
     assert list(outside.iterdir()) == []  # not a single dir created through the link
     assert not (lay2.run / "restore.tmp").exists()
+
+
+def test_restore_refuses_dangling_symlink_in_data(lay, lay2, tmp_path):
+    """Layer review I4: a broken link is not "missing": refused before any move."""
+    make_data(lay)
+    name = make_backup(lay, "full", NOW)
+    to_inbox(lay2, lay, name)
+    (lay2.sessions / SID).symlink_to(tmp_path / "gone")
+    with pytest.raises(RunError) as e:
+        restore_backup(lay2, name, lay2.run / "journal.in")
+    assert e.value.code == "restore_bad_target"
+    assert not (tmp_path / "gone").exists() and not (lay2.data / "pilot").exists()
