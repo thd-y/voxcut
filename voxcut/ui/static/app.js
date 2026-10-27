@@ -484,6 +484,7 @@ function toast(title, text, error) {
   content.append(sec);
   t.append(content);
   $("toaster").append(t);
+  $("toaster").scrollTop = -$("toaster").scrollHeight;  // D113: newest is on top (column-reverse); keep it in view
   setTimeout(() => {
     t.setAttribute("aria-hidden", "true");
     setTimeout(() => t.remove(), 400);
@@ -524,6 +525,7 @@ function stickyToast(title, text, action, key) {
   content.append(sec, foot);
   t.append(content);
   $("toaster").append(t);
+  $("toaster").scrollTop = -$("toaster").scrollHeight;
   return t;
 }
 

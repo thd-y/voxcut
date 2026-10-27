@@ -184,6 +184,8 @@ html.dark #clip-list .item.selected .snippet {  /* muted on dark --accent is 4.0
   #list-pane { border-right: 0; border-bottom: 1px solid var(--border); }
   #card { overflow-y: auto; }  /* short pane: the body squeezed to a sliver hid its focus; scroll the card */
   #card-body { overflow: visible; }
+  /* D113: the card with its decisions is below, so toasts stack from the top, at most 40% of the window */
+  #toaster { top: 0; bottom: auto; max-height: 40dvh; }
 }
 .icon { width: 16px; height: 16px; flex-shrink: 0; }
 h2 > .icon { display: inline-block; margin-right: 6px; vertical-align: -2px; }
