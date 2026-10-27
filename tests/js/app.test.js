@@ -602,3 +602,27 @@ test("note failure texts", () => {  // layer 3 review: «не сохранено
   assert.equal(app.noteKeptText(off, "ru"), "нет связи с VoxCut\nТекст сохранён в поле заметки этого клипа.");
   assert.equal(app.noteKeptText(ns, "en"), "The text is kept in this clip's note field.");
 });
+
+test("processAsk", () => {  // D110: one question for all imports seen running in this page
+  const imp = (job_id, state, sid) => ({ job_id, kind: "import", state, subject: { source: "x" },
+    result: state === "done" ? { session_id: sid, existing: false } : null });
+  const ses = (session_id, extra = {}) => ({ session_id, state: "imported", can_process: true, hidden: false, ...extra });
+  const watched = new Set(["a", "b", "c"]);
+  // an import still going: wait
+  assert.equal(app.processAsk([imp("a", "done", "S1"), imp("b", "running")], [ses("S1")], watched), null);
+  assert.equal(app.processAsk([imp("a", "done", "S1"), imp("z", "queued")], [ses("S1")], watched), null);
+  // none watched finished: nothing
+  assert.equal(app.processAsk([imp("z", "done", "S1")], [ses("S1")], watched), null);
+  // all three done; S2 processed by hand meanwhile (queued process), S3 already clips: only S1
+  const jobs = [imp("a", "done", "S1"), imp("b", "done", "S2"), imp("c", "done", "S3"), imp("d", "failed"),
+    { job_id: "p", kind: "process", state: "queued", subject: { session_id: "S2" } }];
+  assert.deepEqual(app.processAsk(jobs, [ses("S1"), ses("S2"), ses("S3", { state: "clips" })], watched),
+    { jobs: ["a", "b", "c"], sessions: [ses("S1")] });
+  // hidden, gone, cannot process: asked about nothing, the jobs are still consumed
+  assert.deepEqual(app.processAsk([imp("a", "done", "S1"), imp("b", "done", "S9")],
+    [ses("S1", { can_process: false })], watched), { jobs: ["a", "b"], sessions: [] });
+  assert.deepEqual(app.processAsk([imp("a", "done", "S1")], [ses("S1", { hidden: true })], watched).sessions, []);
+  // two imports into one session (the second "existing"): asked once
+  assert.deepEqual(app.processAsk([imp("a", "done", "S1"), imp("b", "done", "S1")], [ses("S1")], watched).sessions,
+    [ses("S1")]);
+});

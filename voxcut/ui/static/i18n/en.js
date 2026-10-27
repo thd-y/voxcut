@@ -159,6 +159,13 @@
   "summary.reason": "{mark} {n}",
   "lib.open": "Open",
   "lib.opened": "Current",
+  "process_ask.title": "Import finished",
+  "process_ask.one": "Process {session} now?",
+  "process_ask.many": {
+    one: "Process {n} session now?",
+    other: "Process {n} sessions now?",
+  },
+  "process_ask.later": "Later",
   "lib.process": "Process",
   "lib.listen_only": "listen only (light)",
   "lib.run": "Run:",

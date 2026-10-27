@@ -217,6 +217,18 @@ function emptySessionsKey(sessions) {
 const sessionBusy = (jobs, sessionId) => jobs.some((j) => (j.state === "queued" || j.state === "running")
   && j.subject && j.subject.session_id === sessionId);
 
+// D110: once every import seen queued or running in this page is over, the sessions they made that still
+// show «Обработать» and have no job going; null while one is going or none of them has finished.
+function processAsk(jobs, sessions, watched) {
+  const imports = jobs.filter((j) => j.kind === "import" && watched.has(j.job_id));
+  if (jobs.some((j) => j.kind === "import" && (j.state === "queued" || j.state === "running"))) return null;
+  const done = imports.filter((j) => j.state !== "queued" && j.state !== "running");
+  if (!done.length) return null;
+  const ids = new Set(done.filter((j) => j.state === "done" && j.result).map((j) => j.result.session_id));
+  return { jobs: done.map((j) => j.job_id), sessions: sessions.filter((s) => ids.has(s.session_id) && !s.hidden
+    && s.can_process && s.state !== "clips" && !sessionBusy(jobs, s.session_id)) };
+}
+
 function sessionJobMark(jobs, sessionId) {
   const mine = jobs.filter((j) => j.kind === "process" && j.subject && j.subject.session_id === sessionId);
   const active = mine.find((j) => j.state === "queued" || j.state === "running");
@@ -420,6 +432,7 @@ let writes = 0;            // journal writes started; a reload sent before the l
 let listSig = "";
 let scrolledId = null;
 const shownWarnings = new Set();
+const importsWatched = new Set();  // D110: import jobs seen queued or running in this page
 const ui = {
   screen: "session", tab: "review", filter: "all", mineFilter: "mine", query: "", inOrder: false,
   selectedId: null, tabSel: { review: null, mine: null }, unfolded: new Set(), undo: [], pending: new Set(), drafts: new Map(), hideSummary: false, theme: null, fatal: false,  // tabSel: each tab's own clip (D100)
@@ -659,6 +672,9 @@ async function pollOnce() {
       toast(tr("toast.journal"), errText(ui.lang, w), true);
     }
   }
+  for (const j of serverState.jobs) {
+    if (j.kind === "import" && (j.state === "queued" || j.state === "running")) importsWatched.add(j.job_id);
+  }
   const sessions = serverState.sessions;
   const auto = sid === null ? autoOpenTarget(sessions, autoTried) : null;
   if (sid === null && retryOpen) {
@@ -675,6 +691,7 @@ async function pollOnce() {
     if (row && row.n_clips !== null && row.n_clips !== view.clips.length) await reloadView();
   }
   render();
+  askProcess();
 }
 
 function closeSession() {
@@ -1624,6 +1641,26 @@ async function deleteIdea(id) {
   }
 }
 
+// D110: one question for the sessions just imported; it waits for the Library and for no other dialog.
+function askProcess() {
+  const ask = ui.screen === "library" && !document.querySelector("dialog[open]")
+    ? processAsk(serverState.jobs, serverState.sessions, importsWatched) : null;
+  if (!ask) return;
+  for (const id of ask.jobs) importsWatched.delete(id);
+  if (!ask.sessions.length) return;
+  const one = ask.sessions.length === 1;
+  $("process-text").textContent = one
+    ? tr("process_ask.one", { session: sessionLabel(ask.sessions[0], ui.lang) })
+    : tr("process_ask.many", { n: ask.sessions.length });
+  $("process-list").hidden = one;
+  $("process-list").replaceChildren(...(one ? [] : ask.sessions.map((s) => el("li", sessionLabel(s, ui.lang)))));
+  $("process-yes").onclick = async () => {
+    $("process-dialog").close();
+    for (const s of ask.sessions) await submit("process", { session_id: s.session_id });
+  };
+  $("process-dialog").showModal();
+}
+
 async function submit(kind, params) {
   try {
     await api("POST", "/api/jobs", { job_id: newId(), kind, params });
@@ -2151,6 +2188,7 @@ function bind() {
   });
   $("idea-save").addEventListener("click", saveIdea);
   $("idea-cancel").addEventListener("click", () => $("idea-dialog").close());
+  $("process-later").addEventListener("click", () => $("process-dialog").close());
   for (const d of document.querySelectorAll("dialog")) {
     d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
   }
@@ -2195,7 +2233,7 @@ if (typeof module === "object") {
     counts, statusText, summaryText, chainText, splitHidden, emptySessionsKey, jobAnnouncements, jobTick, jobSubject, jobLine, jobClock, jobDuration, journalRows, groupKey, groupLine,
     failedBadge, sessionJobMark, logLines, nextUndecided, visibleClips, gapBefore, gapLabel, backupTime, ideaTime, undoEntry, undoTarget, DECISIONS, keyAction, launchRect, autoOpenTarget,
     afterOpenError, retryAfter, startValue, codedError, errDesc, notSavedTitle, notSavedText, noteFailStatus, noteKeptText, playFailText, progressText, afterDecision, tabReturn, showGaps,
-    foldable, foldRun, listRows, afterFoldClose };
+    foldable, foldRun, listRows, afterFoldClose, processAsk };
 } else {
   start();
 }
