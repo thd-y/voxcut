@@ -484,7 +484,7 @@ def make_server(lay: Layout, host: str = HOST, port: int = 0, jobs=None,
                 journal: Journal | None = None) -> tuple[ThreadingHTTPServer, App]:
     """S1: loopback only; a busy port raises OSError before any launch code exists."""
     if host != HOST:
-        raise ValueError(f"сервер слушает только {HOST}")
+        raise ValueError(f"the server listens only on {HOST}")
     handler = type("BoundHandler", (Handler,), {})
     server = Server((host, port), handler)
     server.daemon_threads = True

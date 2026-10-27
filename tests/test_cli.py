@@ -1,4 +1,5 @@
 import json
+import re
 import shlex
 import shutil
 
@@ -172,12 +173,23 @@ def test_sweep_table(tmp_path, capsys):
         (n, s) for n in ("t5", "t3", FW_NAME) for s in (a.name, b.name, "ALL")]
     t5 = {r[1]: r for r in rows if r[0] == "t5"}
     assert t5[b.name][2] == "n/a" and t5["ALL"][2] == t5[a.name][2] == "0.667"
-    assert "параметры FW, постобработка VoxCut" in lines[-1]
+    assert lines[-1] == f"{FW_NAME}: FW parameters, VoxCut post-processing"
 
 
 def test_main_prints_refusal_without_traceback(tmp_path, capsys):
     assert main(["segment", str(tmp_path / "nope"), "--config", str(tmp_path / "c.toml")]) == 2
-    assert capsys.readouterr().err.startswith("voxcut: ")
+    err = capsys.readouterr().err
+    assert err.startswith("voxcut: ") and not re.search("[а-яёА-ЯЁ]", err)
+
+
+def test_evaluate_stdout_is_plain(tmp_path, capsys):  # D117: results in stdout without a prefix
+    seg = segment(make_probs_dir(tmp_path, SPEECH), cfg())
+    (tmp_path / "l.txt").write_text(LABELS)
+    assert main(["evaluate", str(seg), str(tmp_path / "l.txt")]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "reference: me events 3, me speech 3.0 s, scored 10.0 s"
+    assert lines[1] == "\t".join(COLUMNS) and lines[-1] == "fully missed: 8.00–9.00 s"
+    assert not any(re.match(r"\d\d\.\d\d\.\d\d", ln) for ln in lines)
 
 
 # --- probs reuse and env drift (D19) ---
@@ -213,7 +225,7 @@ def test_detect_and_evaluate_end_to_end(tmp_path, capsys):
     assert run["source"]["n_samples"] == 44100 * 4 and run["source"]["codec"] == "pcm_s24le"
     (tmp_path / "l.txt").write_text("0\t4\tscored\n")
     assert main(["evaluate", str(seg), str(tmp_path / "l.txt")]) == 0
-    assert "эталон: событий me 0" in capsys.readouterr().out
+    assert "reference: me events 0" in capsys.readouterr().out
     shutil.rmtree(tmp_path / "out")
 
 

@@ -3,6 +3,7 @@ import json
 import re
 import threading
 from html.parser import HTMLParser
+from pathlib import Path
 
 import pytest
 from test_server_security import SECURITY, Client
@@ -217,3 +218,15 @@ def test_decision_pressed_rule_scoped():
     primary = [sel.strip() for sel, body in rules if "aria-pressed=true" in sel and "--primary" in body]
     assert primary and all(s.startswith("#decisions") for s in primary)
     assert any(sel.strip().startswith(".btn[aria-pressed=true]") and "--secondary" in body for sel, body in rules)
+
+
+def test_no_cyrillic_in_backend_strings():  # D114: comments may stay Russian, output may not
+    import tokenize
+
+    found = []
+    for path in sorted((Path(__file__).parent.parent / "voxcut").rglob("*.py")):
+        with open(path, encoding="utf-8") as f:
+            found += [f"{path.name}:{t.start[0]}" for t in tokenize.generate_tokens(f.readline)
+                      if t.type in (tokenize.STRING, tokenize.FSTRING_MIDDLE)
+                      and re.search("[а-яёА-ЯЁ]", t.string)]
+    assert found == []

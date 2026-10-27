@@ -49,7 +49,7 @@ from voxcut.intervals import (
 )
 
 FW_NAME = "fw_params_voxcut_postproc"
-FW_NOTE = "параметры FW, постобработка VoxCut"
+FW_NOTE = "FW parameters, VoxCut post-processing"
 # D4: faster-whisper 1.2.1 VadOptions() run through the VoxCut pipeline on the same probs
 FW_CONFIG = SegmentConfig(threshold=0.5, neg_threshold=0.35, min_speech_ms=0,
                           min_silence_ms=2000, pad_ms=400, merge_gap_ms=0)
@@ -198,7 +198,7 @@ COLUMNS = ("config", "session", "recall_sec", "recall_events", "fully_missed", "
 
 
 def metrics_row(config: str, session: str, m: Metrics) -> list[str]:
-    cov = fmt(m.coverage) + (" ≈весь файл" if m.whole_file else "")
+    cov = fmt(m.coverage) + (" ≈whole file" if m.whole_file else "")
     return [config, session, fmt(m.recall_sec), fmt(m.recall_events), str(len(m.fully_missed)),
             fmt(m.fa_asr_min_h, 2), fmt(m.fa_bound_min_h, 2), fmt(m.neutral_min_h, 2),
             fmt(m.clip_min_h, 2), fmt(m.clip_min_h_session, 2), fmt(m.clip_per_me, 2),
@@ -213,9 +213,9 @@ def print_table(rows: list[list[str]]) -> None:
 
 def print_misses(m: Metrics) -> None:
     for s, e in m.fully_missed:
-        print(f"пропущено целиком: {s:.2f}–{e:.2f} с")
+        print(f"fully missed: {s:.2f}–{e:.2f} s")
     for s, e, cov in m.truncated:
-        print(f"обрезано: {s:.2f}–{e:.2f} с, покрыто {cov:.0%}")
+        print(f"truncated: {s:.2f}–{e:.2f} s, covered {cov:.0%}")
 
 
 def cmd_probs(a) -> None:
@@ -239,8 +239,8 @@ def cmd_detect(a) -> None:
 
 def cmd_evaluate(a) -> None:
     m, ref = evaluate(a.seg_dir, a.labels)
-    print(f"эталон: событий me {ref['me_events']}, речь me {ref['me_sec']:.1f} с, "
-          f"scored {ref['scored_sec']:.1f} с")
+    print(f"reference: me events {ref['me_events']}, me speech {ref['me_sec']:.1f} s, "
+          f"scored {ref['scored_sec']:.1f} s")
     run = load_json(Path(a.seg_dir) / "run.json")
     print_table([metrics_row(run["meta"].get("name", ""), Path(a.labels).name, m)])
     print_misses(m)
@@ -272,12 +272,12 @@ def cmd_session(a) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="voxcut")
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("probs", help="проверить источник и посчитать вероятности Silero")
+    s = sub.add_parser("probs", help="check the source and compute Silero probabilities")
     s.add_argument("source")
     s.add_argument("--out", required=True)
-    s.add_argument("--channel", help='"mono", "mix" или индекс канала (D21)')
+    s.add_argument("--channel", help='"mono", "mix" or a channel index (D21)')
     s.set_defaults(func=cmd_probs)
-    s = sub.add_parser("segment", help="интервалы из probs-каталога по конфигу")
+    s = sub.add_parser("segment", help="intervals from a probs dir by a config")
     s.add_argument("probs_dir")
     s.add_argument("--config", required=True)
     s.set_defaults(func=cmd_segment)
@@ -286,23 +286,23 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--config", required=True)
     s.add_argument("--out", required=True)
     s.set_defaults(func=cmd_detect)
-    s = sub.add_parser("export", help="нарезать клипы из источника в seg-каталог/clips")
+    s = sub.add_parser("export", help="cut clips from the source into <seg dir>/clips")
     s.add_argument("seg_dir")
     s.set_defaults(func=cmd_export)
-    s = sub.add_parser("evaluate", help="метрики seg-каталога по разметке")
+    s = sub.add_parser("evaluate", help="metrics of a seg dir against labels")
     s.add_argument("seg_dir")
     s.add_argument("labels")
     s.set_defaults(func=cmd_evaluate)
-    s = sub.add_parser("sweep", help="конфиги × сессии → сводная таблица (D24)")
+    s = sub.add_parser("sweep", help="configs × sessions → a summary table (D24)")
     s.add_argument("configs", nargs="+")
     s.add_argument("--session", nargs=2, action="append", required=True,
                    metavar=("PROBS_DIR", "LABELS"))
     s.set_defaults(func=cmd_sweep)
-    s = sub.add_parser("session", help="склеить часовые файлы диктофона в один WAV (D25)")
+    s = sub.add_parser("session", help="join the recorder's hourly files into one WAV (D25)")
     s.add_argument("dir")
     s.add_argument("--out", required=True)
-    s.add_argument("--chain", type=int, help="номер цепочки, если в папке их несколько")
-    s.add_argument("--start", help='настоящее начало первого файла, "YYYY-MM-DD HH:MM[:SS]"')
+    s.add_argument("--chain", type=int, help="the chain number if the folder has several")
+    s.add_argument("--start", help='the real start of the first file, "YYYY-MM-DD HH:MM[:SS]"')
     s.set_defaults(func=cmd_session)
     return p
 

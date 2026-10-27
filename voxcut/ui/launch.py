@@ -30,7 +30,7 @@ def edge_path() -> str:
     for p in EDGE_CANDIDATES:
         if os.path.isfile(p):
             return p
-    raise SystemExit("Не найден Microsoft Edge: " + ", ".join(EDGE_CANDIDATES))
+    raise SystemExit("Microsoft Edge not found: " + ", ".join(EDGE_CANDIDATES))
 
 
 def edge_argv(edge: str, port: int, code: str) -> list[str]:
@@ -61,10 +61,10 @@ def _ask_running(sock_path: Path, popen) -> int:
             break
         except (OSError, ValueError):
             if time.monotonic() > deadline:
-                raise SystemExit("VoxCut уже запускается или завис: нет ответа от .run/ui.sock")
+                raise SystemExit("VoxCut is starting or hung: no answer from .run/ui.sock")
             time.sleep(0.2)  # the first launch is still starting its server
     _open_window(popen, reply["port"], reply["code"])
-    print(f"VoxCut уже работает (127.0.0.1:{reply['port']}): открыто ещё одно окно")
+    print(f"VoxCut is already running (127.0.0.1:{reply['port']}): opened one more window")
     return 0
 
 
@@ -122,8 +122,8 @@ def main(argv: list[str] | None = None, popen=subprocess.Popen, on_ready=None,
         _write_private(meta_path, json.dumps({"pid": os.getpid(), "port": app.port}))
         stop_poll = app.start_poller(2.0)
         _open_window(popen, app.port, app.new_launch_code())
-        print(f"VoxCut: 127.0.0.1:{app.port}. Окно открыто. Сервер работает, пока открыта "
-              f"эта консоль (Ctrl+C — остановить); задачи продолжаются без него.", flush=True)
+        print(f"VoxCut: 127.0.0.1:{app.port}. The window is open. The server runs while this "
+              f"console is open (Ctrl+C stops it); jobs go on without it.", flush=True)
         if console is not None and console.isatty():
             threading.Thread(target=_watch_console, args=(console, server), daemon=True).start()
         if on_ready:
