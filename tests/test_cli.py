@@ -152,7 +152,7 @@ def test_evaluate(tmp_path):
 
 def test_evaluate_refuses_labels_past_source_end(tmp_path):
     (tmp_path / "l.txt").write_text("0\t20\tscored\n")
-    with pytest.raises(Exception, match="длительности источника"):
+    with pytest.raises(Exception, match="is past the source duration"):
         evaluate(segment(make_probs_dir(tmp_path, SPEECH), cfg()), tmp_path / "l.txt")
 
 

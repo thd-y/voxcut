@@ -129,14 +129,14 @@ def test_labels_ok_normalizes_skips_and_merges():
 
 
 @pytest.mark.parametrize("text, needle", [
-    (lab((0, 10, "scored"), (1, 2, "noise")), "неизвестная метка 'noise'"),
-    (lab((0, 10, "scored")) + "1 2 me\n", "3 поля"),
-    (lab((0, 10, "scored"), (2, 2, "me")), "start 2.0 ≥ end 2.0"),
-    (lab((0, 10, "scored"), ("x", 2, "me")), "не числа"),
-    (lab((0, 10, "scored"), ("nan", 2, "me")), "не числа"),
-    (lab(("-inf", 10, "scored")), "не числа"),
-    (lab((0, 10, "scored"), (9, 11, "me")), "выходит за scored"),
-    (lab((0, 10, "scored"), (5, 6, "me"), (20, 30, "scored")), "длительности источника"),
+    (lab((0, 10, "scored"), (1, 2, "noise")), "line 2: unknown label 'noise', allowed: "),
+    (lab((0, 10, "scored")) + "1 2 me\n", "line 2: expected 3 TAB-separated fields, got 1"),
+    (lab((0, 10, "scored"), (2, 2, "me")), "line 2: start 2.0 ≥ end 2.0"),
+    (lab((0, 10, "scored"), ("x", 2, "me")), "line 2: start/end are not numbers"),
+    (lab((0, 10, "scored"), ("nan", 2, "me")), "start/end are not numbers"),
+    (lab(("-inf", 10, "scored")), "start/end are not numbers"),
+    (lab((0, 10, "scored"), (9, 11, "me")), "line 2: label me \\[9.0, 11.0\\] goes outside scored"),
+    (lab((0, 10, "scored"), (5, 6, "me"), (20, 30, "scored")), "line 3: end 30.0 is past the source duration 25"),
 ])
 def test_labels_errors(text, needle):
     with pytest.raises(LabelsError, match=needle):
@@ -148,7 +148,7 @@ def test_labels_all_errors_in_one_list():
     with pytest.raises(LabelsError) as e:
         parse_labels(text)
     assert [ln.split(":")[0] for ln in str(e.value).splitlines()[1:]] == \
-        ["строка 2", "строка 3", "строка 4"]
+        ["line 2", "line 3", "line 4"]
     assert "scored, me, other_speech, vocals_music" in str(e.value)
 
 
@@ -166,16 +166,16 @@ def test_config_defaults_and_meta():
 
 
 @pytest.mark.parametrize("text, needle", [
-    (BASE + "treshold = 0.2\n", "неизвестный ключ 'treshold', возможно 'threshold'"),
-    ("threshold = 1.5\npad_ms = 250\nmerge_gap_ms = 300\n", r"threshold: ожидается число в \(0, 1\]"),
-    ("threshold = 0.5\npad_ms = 250.5\nmerge_gap_ms = 300\n", "pad_ms: ожидается целое"),
-    ("threshold = 0.5\npad_ms = -1\nmerge_gap_ms = 300\n", "pad_ms: ожидается целое"),
+    (BASE + "treshold = 0.2\n", "unknown key 'treshold', did you mean 'threshold'"),
+    ("threshold = 1.5\npad_ms = 250\nmerge_gap_ms = 300\n", r"threshold: expected a number in \(0, 1\], got 1.5"),
+    ("threshold = 0.5\npad_ms = 250.5\nmerge_gap_ms = 300\n", "pad_ms: expected an integer ≥ 0 \\(ms\\), got 250.5"),
+    ("threshold = 0.5\npad_ms = -1\nmerge_gap_ms = 300\n", "pad_ms: expected an integer ≥ 0 \\(ms\\), got -1"),
     ("threshold = true\npad_ms = 1\nmerge_gap_ms = 300\n", "threshold"),
-    ("threshold = 0.5\npad_ms = 250\n", "нет обязательного ключа 'merge_gap_ms'"),
-    (BASE + "neg_threshold = 0.5\n", "neg_threshold 0.5 больше threshold"),
+    ("threshold = 0.5\npad_ms = 250\n", "missing required key 'merge_gap_ms'"),
+    (BASE + "neg_threshold = 0.5\n", "neg_threshold 0.5 is greater than threshold 0.35"),
     (BASE + 'channel = "left"\n', "channel"),
-    ("threshold = \n", "не TOML"),
-    (BASE + 'meta = "x"\n', r"\[meta\]: ожидается таблица"),
+    ("threshold = \n", "config is not TOML: "),
+    (BASE + 'meta = "x"\n', r"\[meta\]: expected a table, got 'x'"),
 ])
 def test_config_errors(text, needle):
     with pytest.raises(ConfigError, match=needle):

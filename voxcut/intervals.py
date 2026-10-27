@@ -153,34 +153,34 @@ def parse_labels(text: str, duration_s: float | None = None) -> dict[str, list]:
             continue
         fields = line.split("\t")
         if len(fields) != 3:
-            errors.append(f"строка {no}: ожидается 3 поля через TAB, получено {len(fields)}")
+            errors.append(f"line {no}: expected 3 TAB-separated fields, got {len(fields)}")
             continue
         try:
             s, e = float(fields[0]), float(fields[1])
         except ValueError:
             s = e = math.nan
         if not (math.isfinite(s) and math.isfinite(e)):  # float() also accepts nan and inf
-            errors.append(f"строка {no}: start/end не числа: {fields[0]!r}, {fields[1]!r}")
+            errors.append(f"line {no}: start/end are not numbers: {fields[0]!r}, {fields[1]!r}")
             continue
         label = fields[2].strip().lower()
         if label not in LABELS:
-            errors.append(f"строка {no}: неизвестная метка {fields[2]!r}, допустимы: "
+            errors.append(f"line {no}: unknown label {fields[2]!r}, allowed: "
                           f"{', '.join(LABELS)}")
             continue
         if s >= e:
-            errors.append(f"строка {no}: start {s} ≥ end {e}")
+            errors.append(f"line {no}: start {s} ≥ end {e}")
             continue
         if duration_s is not None and e > duration_s:
-            errors.append(f"строка {no}: end {e} больше длительности источника {duration_s}")
+            errors.append(f"line {no}: end {e} is past the source duration {duration_s}")
         layers[label].append((s, e))
         lines[label].append((no, s, e))
     scored = union(layers["scored"])
     for label in LABELS[1:]:
         for no, s, e in lines[label]:
             if total(intersect([(s, e)], scored)) < e - s:
-                errors.append(f"строка {no}: метка {label} [{s}, {e}] выходит за scored")
+                errors.append(f"line {no}: label {label} [{s}, {e}] goes outside scored")
     if errors:
-        raise LabelsError("ошибки в разметке:\n" + "\n".join(errors))
+        raise LabelsError("errors in the labels:\n" + "\n".join(errors))
     return {k: union(v) for k, v in layers.items()}
 
 
@@ -214,14 +214,14 @@ class SegmentConfig:
 
 def _check(key: str, value, kind: str):
     if isinstance(value, bool):
-        return f"{key}: ожидается {kind}, получено {value!r}"
+        return f"{key}: expected {kind}, got {value!r}"
     if kind == "prob" and not (isinstance(value, int | float) and 0 < value <= 1):
-        return f"{key}: ожидается число в (0, 1], получено {value!r}"
+        return f"{key}: expected a number in (0, 1], got {value!r}"
     if kind == "ms" and not (isinstance(value, int) and value >= 0):
-        return f"{key}: ожидается целое ≥ 0 (мс), получено {value!r}"
+        return f"{key}: expected an integer ≥ 0 (ms), got {value!r}"
     if kind == "channel" and not (value in ("mono", "mix") or
                                   (isinstance(value, int) and value >= 0)):
-        return f'{key}: ожидается "mono", "mix" или индекс ≥ 0, получено {value!r}'
+        return f'{key}: expected "mono", "mix" or an index ≥ 0, got {value!r}'
     return None
 
 
@@ -234,23 +234,23 @@ def parse_config(text: str) -> tuple[SegmentConfig, dict]:
     try:
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
-        raise ConfigError(f"конфиг не TOML: {e}") from e
+        raise ConfigError(f"config is not TOML: {e}") from e
     meta = raw.pop("meta", {})
-    errors = [] if isinstance(meta, dict) else [f"[meta]: ожидается таблица, получено {meta!r}"]
+    errors = [] if isinstance(meta, dict) else [f"[meta]: expected a table, got {meta!r}"]
     for key, value in raw.items():
         if key not in _KINDS:
             hint = difflib.get_close_matches(key, _KINDS, n=1)
-            errors.append(f"неизвестный ключ {key!r}"
-                          + (f", возможно {hint[0]!r}" if hint else "")
-                          + f"; допустимы: {', '.join(_KINDS)}, [meta]")
+            errors.append(f"unknown key {key!r}"
+                          + (f", did you mean {hint[0]!r}" if hint else "")
+                          + f"; allowed: {', '.join(_KINDS)}, [meta]")
         elif msg := _check(key, value, _KINDS[key]):
             errors.append(msg)
     missing = [k for k in ("threshold", "pad_ms", "merge_gap_ms") if k not in raw]
-    errors += [f"нет обязательного ключа {k!r}" for k in missing]
+    errors += [f"missing required key {k!r}" for k in missing]
     if not errors and raw.get("neg_threshold", 0) > raw["threshold"]:
-        errors.append(f"neg_threshold {raw['neg_threshold']} больше threshold {raw['threshold']}")
+        errors.append(f"neg_threshold {raw['neg_threshold']} is greater than threshold {raw['threshold']}")
     if errors:
-        raise ConfigError("ошибки в конфиге:\n" + "\n".join(errors))
+        raise ConfigError("errors in the config:\n" + "\n".join(errors))
     for key in ("threshold", "neg_threshold"):
         if key in raw:
             raw[key] = float(raw[key])
@@ -501,11 +501,11 @@ def mtime_warnings(parts: list[tuple[str, datetime, int]], mtime_ends: list[date
     out = []
     by_name = sorted(range(len(parts)), key=lambda i: parts[i][1])
     if by_name != sorted(range(len(parts)), key=lambda i: mtime_ends[i]):
-        out.append("порядок файлов по mtime не совпадает с порядком по имени: "
-                   "возможно, часы диктофона сбрасывались")
+        out.append("file order by mtime differs from order by name: "
+                   "the recorder clock may have been reset")
     for (name, start, n), end in zip(parts, mtime_ends, strict=True):
         drift = (end - start).total_seconds() - n / sr
         if abs(drift) > MTIME_TOL_S:
-            out.append(f"{name}: mtime − время из имени расходится с длительностью "
-                       f"на {drift:+.1f} с")
+            out.append(f"{name}: mtime minus the time in the name differs from the duration "
+                       f"by {drift:+.1f} s")
     return out

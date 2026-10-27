@@ -223,9 +223,9 @@ def test_mtime_warnings():
     assert mtime_warnings(p, [e + timedelta(seconds=4.9) for e in ends], SR) == []
     swapped = [ends[1], ends[0], ends[2]]
     w = mtime_warnings(p, swapped, SR)
-    assert any("порядок" in x for x in w)
+    assert any(x.startswith("file order by mtime differs from order by name") for x in w)
     w = mtime_warnings(p, [ends[0], ends[1] + timedelta(seconds=5.1), ends[2]], SR)
-    assert len(w) == 1 and "f1" in w[0]
+    assert w == ["f1: mtime minus the time in the name differs from the duration by +5.1 s"]
 
 
 # --- assemble_session (audio.py) ---
@@ -440,7 +440,7 @@ def test_mtime_mismatch_warns_and_assembles(tmp_path):
     paths = make_folder(tmp_path / "in", chain_starts(2))
     os.utime(paths[0], (paths[1].stat().st_mtime + 100,) * 2)
     dst, _, logs = run_session(tmp_path)
-    assert "порядок файлов по mtime" in logs and dst.exists()
+    assert "file order by mtime" in logs and dst.exists()
 
 
 # --- probs / segment / export on a session (D25, D27) ---
