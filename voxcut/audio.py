@@ -604,7 +604,7 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
                       "before": parts[k][0], "gap_est_s": round(gap, 3)})
     inv = [f"inventory {src_dir}:"]  # one log entry, details indented under it (D115)
     for (name, t, n), end, off in zip(parts, mtime_ends, offsets, strict=True):
-        inv.append(f"  {name}: start by the name {t:%H:%M:%S}, by mtime minus the duration "
+        inv.append(f"  {name}: start from the name {t:%H:%M:%S}, from mtime minus the duration "
                    f"{end - timedelta(seconds=n / sr):%H:%M:%S}, {n / sr:.1f} s, offset {off}")
     for s in seams:
         inv.append(f"  seam {s['after']} → {s['before']}: estimated gap {s['gap_est_s']:+.2f} s")

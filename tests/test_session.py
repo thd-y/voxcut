@@ -339,6 +339,8 @@ def test_session_log_entries(tmp_path):  # D115: the inventory is one entry, war
     assert lines[0] == f"inventory {tmp_path / 'in'}:"
     assert len(lines) == 1 + 3 + 2 + 1 and all(ln.startswith("  ") for ln in lines[1:])
     assert lines[-1] == "  total 3 files, 6.0 s"
+    assert lines[2].startswith(f"  {paths[1].name}: start from the name 08:29:24, "
+                               "from mtime minus the duration 08:29:24, 2.0 s, offset 32000")
     warns = [m for lv, m in recs if lv == "WARNING"]
     assert "session time comes from the recorder clock; if it was wrong, re-run with --start" in warns
     assert any(m.startswith("file order by mtime differs from order by name") for m in warns)
@@ -403,7 +405,7 @@ def test_channels_identical(tmp_path, channels, data, expected):
     if expected is False:
         assert "antiphase" in logs and "--channel mix" not in logs
     if expected is None:
-        assert "channels " not in logs
+        assert "--channel" not in logs
 
 
 @pytest.mark.slow

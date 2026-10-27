@@ -89,7 +89,7 @@ def test_second_instance_gets_new_code(tmp_path, edge):
     assert not (tmp_path / ".run" / "ui.json").exists()
 
 
-def test_stale_socket_recovered(tmp_path, edge):
+def test_stale_socket_recovered(tmp_path, edge, capsys):
     run = tmp_path / ".run"
     run.mkdir(mode=0o700)
     s = socket.socket(socket.AF_UNIX)
@@ -102,6 +102,7 @@ def test_stale_socket_recovered(tmp_path, edge):
         p2 = FakePopen()
         assert launch.main(["--root", str(tmp_path)], popen=p2) == 0
         assert p2.opened()[0][0] == server.server_address[1]
+        assert capsys.readouterr().out.endswith("): opened another window\n")
     finally:
         stop(server, th)
 
@@ -171,7 +172,7 @@ def test_envcheck_probe_verdict(rc, control, ok, text):
     from voxcut.ui.envcheck import probe_verdict
 
     got_ok, got_text = probe_verdict(rc, control)
-    assert got_ok is ok and text in got_text
+    assert got_ok is ok and text in got_text and got_text.startswith("probe unit → 1.1.1.1:53: ")
 
 
 @pytest.mark.parametrize("exc, code", [

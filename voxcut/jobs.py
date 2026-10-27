@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from collections import deque
 from datetime import datetime
@@ -439,7 +440,7 @@ def main(argv: list[str]) -> int:
     p = job["params"]
     status = {"state": "running", "stage": None, "error": None, "started": _now()}
     _write(d / "status.json", status)
-    t0 = datetime.now()
+    t0 = time.monotonic()
     with open(d / "log.txt", "a", buffering=1) as logf:
         def log(msg: str, level: str = "INFO") -> None:
             logf.write(logfmt.line(level, msg, datetime.now()) + "\n")
@@ -450,12 +451,12 @@ def main(argv: list[str]) -> int:
             log(f"stage={name}")
 
         def took() -> str:
-            return logfmt.duration((datetime.now() - t0).total_seconds())
+            return logfmt.duration(time.monotonic() - t0)  # immune to wall-clock steps
 
-        key = START_PARAM.get(job["kind"])
-        log(f"job {d.name[:8]} {job['kind']} started"
-            + (f": {key[0]}={p.get(key[1])}" if key else ""))
-        try:
+        try:  # a broken job.json fails visibly from its start line on
+            key = START_PARAM.get(job["kind"])
+            log(f"job {d.name[:8]} {job['kind']} started"
+                + (f": {key[0]}={p.get(key[1])}" if key else ""))
             if job["kind"] == "import":
                 result = library.import_originals(lay, p["source"], p["chain"], p["start"], log,
                                                  files=p["files"])
@@ -475,9 +476,9 @@ def main(argv: list[str]) -> int:
             # D115: the cause is the last line; a multi-line text is in full in the traceback above
             text, name = str(exc), type(exc).__name__
             cause = text if isinstance(exc, Coded) else f"{name}: {text}" if text else name
-            log(f"job failed after {took()}: {cause.splitlines()[0]}", "ERROR")
             _write(d / "status.json", status | {"state": "failed", "error": _job_error(exc),
                                                 "finished": _now()})
+            log(f"job failed after {took()}: {(cause.splitlines() or [name])[0]}", "ERROR")
             return 1
         except SystemExit:  # SIGTERM, «Cancel»: status and cleanup as before
             log(f"job cancelled after {took()}", "ERROR")

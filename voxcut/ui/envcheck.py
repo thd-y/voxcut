@@ -28,7 +28,7 @@ def listeners(ss_text: str, pid: int) -> list[str]:
 def probe_verdict(rc: int | None, control: int | None) -> tuple[bool, str]:
     """D63: isolated only if the unit sees ENETUNREACH while the same unit without
     PrivateNetwork reaches the network; an offline host or a unit that never ran proves nothing."""
-    what = "probe job in a unit to 1.1.1.1:53"
+    what = "probe unit → 1.1.1.1:53"
     if rc == PROBE_BLOCKED:
         if control == 0:
             return True, f"{what}: network cut off (reachable without PrivateNetwork)"

@@ -1,4 +1,3 @@
-import ast
 import json
 import re
 from pathlib import Path
@@ -75,47 +74,16 @@ def test_descriptor_plain_exception():
     assert descriptor(KeyError("p")) == {"code": "internal_error", "params": {}}
 
 
-UI_MODULES = ["intervals", "audio", "cli", "library", "journal", "jobs", "ui/server"]
-EXEMPT = {"LabelsError", "ConfigError", "SystemExit"}
-INTERNAL = {("audio", "RuntimeError"),  # an invariant breach: internal_error in the UI
-            ("journal", "ValueError"),  # a bad line's reason, carried as detail of a warning
-            ("ui/server", "ValueError")}  # make_server before the server exists: console only
-CYR = re.compile("[а-яёА-ЯЁ]")
+def test_no_cyrillic_in_backend_strings():  # D114: comments may stay Russian, output may not
+    import tokenize
 
-
-def _russian_literal(node) -> bool:
-    if isinstance(node, ast.Constant):
-        return isinstance(node.value, str) and bool(CYR.search(node.value))
-    if isinstance(node, ast.JoinedStr):
-        return any(_russian_literal(v) for v in node.values)
-    return False
-
-
-def russian_raises() -> list[str]:
-    """`raise X("русский …")` in modules whose errors reach the UI, plus module-level Russian
-    string constants in jobs.py (DEAD is written into status.json)."""
-    root = Path(__file__).parent.parent / "voxcut"
     found = []
-    for mod in UI_MODULES:
-        path = root / f"{mod}.py"
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)
-                    and getattr(node.exc.func, "id", getattr(node.exc.func, "attr", None))
-                    not in EXEMPT
-                    and (mod, getattr(node.exc.func, "id", None)) not in INTERNAL
-                    and any(_russian_literal(x) for a in [*node.exc.args,
-                                                         *(k.value for k in node.exc.keywords)]
-                            for x in ast.walk(a))):
-                found.append(f"{mod}.py:{node.lineno}")
-        if mod == "jobs":
-            found += [f"{mod}.py:{n.lineno}" for n in tree.body
-                      if isinstance(n, ast.Assign) and _russian_literal(n.value)]
-    return found
-
-
-def test_no_russian_raise_literals():
-    assert russian_raises() == []
+    for path in sorted((Path(__file__).parent.parent / "voxcut").rglob("*.py")):
+        with open(path, encoding="utf-8") as f:
+            found += [f"{path.name}:{t.start[0]}" for t in tokenize.generate_tokens(f.readline)
+                      if t.type in (tokenize.STRING, tokenize.FSTRING_MIDDLE)
+                      and re.search("[а-яёА-ЯЁ]", t.string)]
+    assert found == []
 
 
 EN_TEXT = [

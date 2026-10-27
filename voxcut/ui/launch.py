@@ -64,7 +64,7 @@ def _ask_running(sock_path: Path, popen) -> int:
                 raise SystemExit("VoxCut is starting or hung: no answer from .run/ui.sock")
             time.sleep(0.2)  # the first launch is still starting its server
     _open_window(popen, reply["port"], reply["code"])
-    print(f"VoxCut is already running (127.0.0.1:{reply['port']}): opened one more window")
+    print(f"VoxCut is already running (127.0.0.1:{reply['port']}): opened another window")
     return 0
 
 

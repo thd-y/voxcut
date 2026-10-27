@@ -350,7 +350,7 @@ def _drop_empty_source(lay: Layout, source: str, log) -> None:
             except OSError:
                 names = []
             log(f"inbox/{source}/ still has files: {', '.join(names)}; "
-                f"the folder is hidden, delete it by hand", "WARNING")
+                f"the Library no longer shows the folder, delete it by hand", "WARNING")
 
 
 def _rollback_import(sdir: Path, moved: list[Path], failed: Path, exc: OSError) -> None:

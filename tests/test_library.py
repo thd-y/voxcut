@@ -261,7 +261,7 @@ def test_import_keeps_leftovers_and_warns(lay, no_check):
     assert {p.name: p.read_bytes() for p in (lay.inbox / "13_oct").iterdir()} == extra
     warn = [(lv, m) for lv, m in msgs if m.startswith("inbox/")]
     assert warn == [("WARNING", ("inbox/13_oct/ still has files: desktop.ini, "
-                                 "x.wav:Zone.Identifier; the folder is hidden, delete it by hand"))]
+                                 "x.wav:Zone.Identifier; the Library no longer shows the folder, delete it by hand"))]
     assert ("INFO", f"imported 2 files: session {list_sessions(lay)[0]['session_id']}") in msgs
 
 

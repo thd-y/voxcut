@@ -248,7 +248,8 @@ def parse_config(text: str) -> tuple[SegmentConfig, dict]:
     missing = [k for k in ("threshold", "pad_ms", "merge_gap_ms") if k not in raw]
     errors += [f"missing required key {k!r}" for k in missing]
     if not errors and raw.get("neg_threshold", 0) > raw["threshold"]:
-        errors.append(f"neg_threshold {raw['neg_threshold']} is greater than threshold {raw['threshold']}")
+        errors.append(f"neg_threshold {raw['neg_threshold']} is greater than threshold "
+                      f"{raw['threshold']}")
     if errors:
         raise ConfigError("errors in the config:\n" + "\n".join(errors))
     for key in ("threshold", "neg_threshold"):
@@ -339,7 +340,7 @@ class Metrics:
 
     @property
     def whole_file(self) -> bool:
-        return self.coverage > 0.9  # D20(d): "≈весь файл"
+        return self.coverage > 0.9  # D20(d): "≈whole file" in the report
 
 
 def evaluate_session(final_s, labels: dict, raw_s=None, event_cov: float = EVENT_COV,

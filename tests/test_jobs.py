@@ -843,3 +843,23 @@ def test_job_log_cancelled(lay, monkeypatch):
     assert rc == 143
     assert lines[-2:] == ["27.10.26 09:31 INFO  stage=probs",
                           "27.10.26 09:31 ERROR job cancelled after 0s"]
+
+
+def test_job_log_broken_job_json_fails_visibly(lay, monkeypatch):  # params not a dict: failed, not DEAD
+    rc, lines = _run_job(lay, monkeypatch, "import", 5)
+    assert rc == 1 and lines[-1].startswith("27.10.26 09:31 ERROR job failed after 0s: ")
+
+
+def test_job_log_coded_error_with_empty_text(lay, monkeypatch):
+    def process(*a):
+        raise RunError("legacy_error", detail="")
+
+    rc, lines = _run_job(lay, monkeypatch, "process", {"session_id": SID}, process)
+    assert rc == 1 and lines[-1] == "27.10.26 09:31 ERROR job failed after 0s: RunError"
+
+
+def test_job_log_duration_is_monotonic(lay, monkeypatch):  # a wall-clock step never shows up
+    ticks = iter([100.0, 2145.0])
+    monkeypatch.setattr(jobs.time, "monotonic", lambda: next(ticks))
+    rc, lines = _run_job(lay, monkeypatch, "backup", {"mode": "light"}, lambda *a, **kw: "x.tar")
+    assert rc == 0 and lines[-1] == "27.10.26 09:31 INFO  job done in 34m05s"
