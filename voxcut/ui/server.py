@@ -43,6 +43,7 @@ SECURITY_HEADERS = {
 BODY_MAX = 64 * 1024
 DRAIN_MAX = 1024 * 1024
 CODE_TTL_S = 30
+KEYS_MAX = 8
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -154,7 +155,7 @@ class App:
             if expires is None or self.clock() > expires:
                 raise HttpError(403, "http_bad_code")
             key = secrets.token_urlsafe(32)
-            self._keys.append(key)
+            self._keys = [*self._keys, key][-KEYS_MAX:]  # S-2: a stale window loses its key, not the server its memory
         return {"key": key}
 
     def _state(self, req: Request) -> dict:
@@ -363,6 +364,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "VoxCut"
     sys_version = ""
     protocol_version = "HTTP/1.1"
+    timeout = 30  # S-3: an idle or slow client doesn't pin a thread
     app: App
 
     # Every response, including send_error from the base class, carries the S5 headers.

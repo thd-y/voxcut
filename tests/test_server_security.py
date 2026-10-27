@@ -8,7 +8,7 @@ import threading
 import pytest
 
 from voxcut.library import Layout
-from voxcut.ui.server import CSP, make_server
+from voxcut.ui.server import CSP, KEYS_MAX, Handler, make_server
 
 SECURITY = {
     "Content-Security-Policy": CSP,
@@ -140,6 +140,27 @@ def test_two_windows_two_keys(served):
     assert k1 != k2
     assert c.req("GET", "/api/ping", key=k1)[0] == 200
     assert c.req("GET", "/api/ping", key=k2)[0] == 200
+
+
+def test_keys_bounded(served):
+    c, _ = served
+    keys = [c.key() for _ in range(20)]
+    assert len(c.app._keys) == KEYS_MAX == 8
+    assert c.req("GET", "/api/ping", key=keys[-1])[0] == 200
+    assert c.req("GET", "/api/ping", key=keys[0])[0] == 401
+
+
+def test_slow_client_is_dropped(served, monkeypatch):
+    c, _ = served
+    assert Handler.timeout == 30
+    monkeypatch.setattr(Handler, "timeout", 1)  # the behaviour, without a 30 s wait
+    s = socket.create_connection(("127.0.0.1", c.port))
+    s.sendall(b"POST /api/journal HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n" % c.port)  # no end of headers
+    s.settimeout(2)
+    try:
+        assert s.recv(1) == b""  # the server closed it
+    finally:
+        s.close()
 
 
 @pytest.mark.parametrize("auth", [None, "Bearer wrong", "Basic x", "Bearer "])
