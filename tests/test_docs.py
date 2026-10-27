@@ -8,8 +8,8 @@ import pytest
 ROOT = Path(__file__).parent.parent
 DOCS = sorted([*ROOT.glob("*.md"), *(ROOT / "docs").rglob("*.md")])
 LINK = re.compile(r"\]\(([^)\s]+)\)")
-# shortcut: written by a later plan task (how-it-was-built: Task 12); empty it then
-PENDING = {"docs/how-it-was-built.md", "docs/how-it-was-built.ru.md"}
+# A commit link from docs/ climbs out of blob/main/docs to the repository root on GitHub.
+COMMIT = re.compile(r"^\.\./\.\./\.\./commit/([0-9a-f]{40})$")
 
 
 def rel(p: Path) -> str:
@@ -20,18 +20,21 @@ def rel(p: Path) -> str:
 def test_relative_links_resolve(doc):
     missing = []
     for target in LINK.findall(doc.read_text()):
-        if re.match(r"[a-z]+:", target) or target.startswith("#"):
+        if re.match(r"[a-z]+:", target) or target.startswith("#") or COMMIT.match(target):
             continue
         path = target.split("#")[0]
-        if path and not (doc.parent / path).exists() and rel(doc.parent / path) not in PENDING:
+        if path and not (doc.parent / path).exists():
             missing.append(target)
     assert missing == []
 
 
-@pytest.mark.xfail(strict=True, reason="pending documents")
-@pytest.mark.parametrize("path", sorted(PENDING))
-def test_pending_documents_exist(path):
-    assert (ROOT / path).exists()
+@pytest.mark.parametrize("doc", DOCS, ids=rel)
+def test_commit_links_exist(doc):
+    for target in LINK.findall(doc.read_text()):
+        if m := COMMIT.match(target):
+            assert doc.parent.name == "docs", target
+            cmd = ["git", "-C", str(ROOT), "cat-file", "-e", m[1] + "^{commit}"]
+            assert subprocess.run(cmd, check=False).returncode == 0, target
 
 
 @pytest.mark.parametrize("ru", [d for d in DOCS if d.name.endswith(".ru.md")], ids=rel)
