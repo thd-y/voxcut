@@ -59,18 +59,18 @@ def test_rf64_short_ds64_refused(tmp_path):
     raw = p.read_bytes()
     off = raw.index(b"ds64") + 4
     p.write_bytes(raw[:off] + struct.pack("<I", 8) + raw[off + 4:])
-    with pytest.raises(SourceError, match="чанк b'ds64' короче 16 байт") as e:
+    with pytest.raises(SourceError, match="chunk b'ds64' is shorter than 16 bytes") as e:
         check_wav_structure(str(p))
     assert e.value.code == "source_wav_broken"
 
 
 @pytest.mark.parametrize("mutate, needle", [
     (lambda raw: lie_about_length(raw, SR),
-     "длина по заголовку 4000 сэмплов (0.5 с), по размеру файла 16000 сэмплов (2.0 с)"),
+     "length by the header 4000 samples (0.5 s), by the file size 16000 samples (2.0 s)"),
     (lambda raw: lie_about_length(raw, 0), "0x0"),
     (lambda raw: lie_about_length(raw, 0xFFFFFFFF), "0xffffffff"),
-    (lambda raw: lie_about_length(raw, SR * 4 * 2), "выходит за конец файла"),
-    (lambda raw: raw + b"\x01\x02\x03", "лишних байт"),
+    (lambda raw: lie_about_length(raw, SR * 4 * 2), "runs past the end of the file"),
+    (lambda raw: raw + b"\x01\x02\x03", "extra bytes at the end of the file"),
 ])
 def test_broken_wav_refused_with_lengths_and_command(tmp_path, mutate, needle):
     p = write_wav(tmp_path / "a.wav")
@@ -90,8 +90,8 @@ def short_fmt(raw: bytes) -> bytes:
 @pytest.mark.parametrize("mutate, needle, code", [
     (lambda raw: b"", "not a RIFF/RF64 WAVE", "source_not_riff"),  # диктофон создал файл и выключился
     (lambda raw: raw[:5], "not a RIFF/RF64 WAVE", "source_not_riff"),
-    (lambda raw: raw[:30], "выходит за конец файла", "source_wav_broken"),  # обрыв внутри fmt
-    (short_fmt, "чанк b'fmt ' короче 14 байт", "source_wav_broken"),
+    (lambda raw: raw[:30], "runs past the end of the file", "source_wav_broken"),  # обрыв внутри fmt
+    (short_fmt, "chunk b'fmt ' is shorter than 14 bytes", "source_wav_broken"),
 ])
 def test_truncated_wav_refused_not_crashed(tmp_path, mutate, needle, code):
     p = write_wav(tmp_path / "a.wav")
@@ -155,7 +155,7 @@ def test_check_source_ok(tmp_path, fmt, subtype, codec):
 def test_check_source_refuses_broken_wav(tmp_path):
     p = write_wav(tmp_path / "a.wav")
     p.write_bytes(lie_about_length(p.read_bytes(), SR * 2))
-    with pytest.raises(SourceError, match="по размеру файла") as e:
+    with pytest.raises(SourceError, match="by the file size") as e:
         check_source(str(p))
     assert e.value.code == "source_wav_broken"
 
@@ -209,7 +209,7 @@ def test_check_source_refuses_header_shorter_than_decode(tmp_path):
     raw[8 + 13] = (raw[8 + 13] & 0xF0) | (total >> 32)
     raw[8 + 14:8 + 18] = struct.pack(">I", total & 0xFFFFFFFF)
     p.write_bytes(bytes(raw))
-    with pytest.raises(SourceError, match=f"soundfile видит {total} сэмплов, ffmpeg декодирует") as e:
+    with pytest.raises(SourceError, match=f"soundfile sees {total} samples, ffmpeg decodes") as e:
         check_source(str(p))
     assert e.value.code == "source_frames_mismatch"
 
@@ -217,6 +217,6 @@ def test_check_source_refuses_header_shorter_than_decode(tmp_path):
 @pytest.mark.slow
 def test_check_source_refuses_non_pcm_codec(tmp_path):
     p = write_wav(tmp_path / "a.wav", subtype="IMA_ADPCM")
-    with pytest.raises(SourceError, match="кодек adpcm_ima_wav") as e:
+    with pytest.raises(SourceError, match="codec adpcm_ima_wav") as e:
         check_source(str(p))
     assert e.value.code == "source_codec"

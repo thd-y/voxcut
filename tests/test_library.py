@@ -212,7 +212,7 @@ def _shas(paths):
     return {p.name: sha256_file(str(p)) for p in paths}
 
 
-def _quiet(_msg):
+def _quiet(_msg, level="INFO"):
     pass
 
 

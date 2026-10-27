@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import struct
 from datetime import datetime, timedelta
@@ -263,7 +264,7 @@ def test_foreign_name_refused(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2))
     sf.write(tmp_path / "in" / "REC001.WAV", np.zeros((10, 2), np.int16), SR)
     with pytest.raises(SessionError, match="YYYYMMDDHHMMSS.wav.*REC001.WAV") as e:
-        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m, level="INFO": None)
     assert e.value.code == "session_foreign_names"
     assert e.value.params["files"] == ["REC001.WAV"]
     assert not (tmp_path / "out").exists()
@@ -276,7 +277,7 @@ def test_broken_wav_refused_before_chains(tmp_path, no_decode):
     raw[pos + 4:pos + 8] = struct.pack("<I", 0)
     paths[1].write_bytes(raw)
     with pytest.raises(SourceError, match=f"{paths[1].name}.*broken WAV structure") as e:
-        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m, level="INFO": None)
     assert e.value.code == "source_wav_broken"
 
 
@@ -285,27 +286,27 @@ def test_empty_wav_refused_not_crashed(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2))
     (tmp_path / "in" / f"{T0 + timedelta(hours=5):%Y%m%d%H%M%S}.wav").write_bytes(b"")
     with pytest.raises(SourceError, match="not a RIFF/RF64 WAVE") as e:
-        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m, level="INFO": None)
     assert e.value.code == "source_not_riff"
 
 
 def test_two_chains_refused_with_numbers(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
     with pytest.raises(SessionError, match="--chain N") as e:
-        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m, level="INFO": None)
     assert e.value.code == "session_chain_choose"
     assert "1: 20250301082921.WAV, 20250301082924.WAV" in str(e.value)
     assert "2: 20250301102921.WAV" in str(e.value)
     with pytest.raises(SessionError, match="out of range") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), chain=3,
-                         log=lambda m: None)
+                         log=lambda m, level="INFO": None)
     assert e.value.code == "session_chain_range"
 
 
 def test_pause_refused_in_folder(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2, gap=60))
     with pytest.raises(SessionError, match="joining across pauses") as e:
-        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m, level="INFO": None)
     assert e.value.code == "session_pause"
 
 
@@ -313,15 +314,42 @@ def test_riff_limit_refused_before_copy(tmp_path, no_decode, monkeypatch):
     make_folder(tmp_path / "in", chain_starts(2))
     monkeypatch.setattr(audio, "data_bytes_ok", lambda *a: False)
     with pytest.raises(SessionError, match="4 GiB") as e:
-        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
+        assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m, level="INFO": None)
     assert e.value.code == "session_too_long"
     assert not any((tmp_path / "out").glob("*")) if (tmp_path / "out").exists() else True
 
 
 def run_session(tmp_path, **kw):
-    logs = []
-    dst = assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=logs.append, **kw)
-    return dst, json.loads((dst / "session.json").read_text()), "\n".join(logs)
+    recs = []
+    dst = assemble_session(str(tmp_path / "in"), str(tmp_path / "out"),
+                           log=lambda m, level="INFO": recs.append((level, m)), **kw)
+    return dst, json.loads((dst / "session.json").read_text()), "\n".join(m for _, m in recs)
+
+
+@pytest.mark.slow
+def test_session_log_entries(tmp_path):  # D115: the inventory is one entry, warnings have a level
+    paths = make_folder(tmp_path / "in", chain_starts(3))
+    os.utime(paths[0], (paths[1].stat().st_mtime + 100,) * 2)
+    recs = []
+    assemble_session(str(tmp_path / "in"), str(tmp_path / "out"),
+                     log=lambda m, level="INFO": recs.append((level, m)))
+    inv = [(lv, m) for lv, m in recs if m.startswith("inventory ")]
+    assert len(inv) == 1 and inv[0][0] == "INFO"
+    lines = inv[0][1].splitlines()
+    assert lines[0] == f"inventory {tmp_path / 'in'}:"
+    assert len(lines) == 1 + 3 + 2 + 1 and all(ln.startswith("  ") for ln in lines[1:])
+    assert lines[-1] == "  total 3 files, 6.0 s"
+    warns = [m for lv, m in recs if lv == "WARNING"]
+    assert "session time comes from the recorder clock; if it was wrong, re-run with --start" in warns
+    assert any(m.startswith("file order by mtime differs from order by name") for m in warns)
+    assert any(m.startswith("channels differ: choose --channel 0 | 1 | mix") for m in warns)
+    assert {lv for lv, _ in recs} == {"INFO", "WARNING"}
+    assert not any("ВНИМАНИЕ" in m or "WARNING" in m for _, m in recs)
+
+
+def test_log_writes_a_line_to_stderr(capsys):  # D117
+    audio._log("x", "WARNING")
+    assert re.fullmatch(r"\d\d\.\d\d\.\d\d \d\d:\d\d WARNING x\n", capsys.readouterr().err)
 
 
 @pytest.mark.slow
@@ -342,7 +370,7 @@ def test_session_bit_exact(tmp_path):
     assert {x["kind"] for x in s["seams"]} == {"split"}
     assert s["seams"][0]["gap_est_s"] == pytest.approx(1.0)
     assert s["wallclock_source"] == "filename" and s["clock_offset_s"] == 0
-    assert "--start" in logs and "ВНИМАНИЕ" not in logs.replace("ВНИМАНИЕ: каналы", "")
+    assert "--start" in logs and "file order" not in logs and "mtime minus the time" not in logs
     run = json.loads((dst / "run.json").read_text())
     assert set(run["env"]) == set(audio.SESSION_ENV_KEYS) and "ffmpeg_version" in run
     assert not dst.with_name(dst.name + ".tmp").exists()
@@ -373,9 +401,9 @@ def test_channels_identical(tmp_path, channels, data, expected):
     _, s, logs = run_session(tmp_path)
     assert s["channels_identical"] is expected
     if expected is False:
-        assert "противофазе" in logs and "--channel mix" not in logs
+        assert "antiphase" in logs and "--channel mix" not in logs
     if expected is None:
-        assert "канал" not in logs
+        assert "channels " not in logs
 
 
 @pytest.mark.slow
@@ -386,7 +414,7 @@ def test_session_reuse_and_env(tmp_path, monkeypatch):
     monkeypatch.setattr(audio, "sha256_file", lambda p: pytest.fail("повтор читает данные"))
     dst2, _, logs = run_session(tmp_path)
     assert dst2 == dst and (dst / "session.json").stat().st_mtime_ns == mtime
-    assert "каналы различаются" in logs  # совет напечатан заново
+    assert "channels differ" in logs  # совет напечатан заново
     monkeypatch.undo()
     run = json.loads((dst / "run.json").read_text())
     (dst / "run.json").write_text(json.dumps(run | {"ffmpeg_version": "0.0"}))
@@ -429,7 +457,7 @@ def test_session_start_fix(tmp_path):
     assert s["files"][0]["recorder_time"] == "2025-03-01T08:29:21"
     assert s["files"][1]["start_local"] == "2026-10-20T11:30:24"
     assert s["clock_offset_s"] == (datetime(2026, 10, 20, 11, 30, 21) - T0).total_seconds()
-    assert "повторите с --start" not in logs
+    assert "re-run with --start" not in logs
     with pytest.raises(SessionError, match="2025-03-01 09:00") as e:
         run_session(tmp_path, start="20.10.2026 11:30")
     assert e.value.code == "session_bad_start"
@@ -487,7 +515,7 @@ def test_session_probs_segment_export(tmp_path):
 def test_session_lr_differ_needs_channel(tmp_path):
     make_folder(tmp_path / "in", chain_starts(2))
     sdir, s, _ = run_session(tmp_path)
-    with pytest.raises(SourceError, match="задайте channel") as e:
+    with pytest.raises(SourceError, match="set channel = an index") as e:
         compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
     assert e.value.code == "source_stereo"
 
@@ -510,7 +538,7 @@ def test_two_starts_same_minute_refused_on_reuse(tmp_path):
     b, sb, _ = run_session(tmp_path, start="2026-10-20 11:30:30")
     assert a != b and sa["name"] == sb["name"]
     compute_probs(str(a / sa["wav"]), str(tmp_path / "probs"))
-    with pytest.raises(RunError, match="(?s)блок session.*rm -rf") as e:
+    with pytest.raises(RunError, match="(?s)session block in probs.json.*rm -rf") as e:
         compute_probs(str(b / sb["wav"]), str(tmp_path / "probs"))
     assert e.value.code == "run_session_block"
 
@@ -524,7 +552,7 @@ def test_probs_without_seam_reset_refused_on_reuse(tmp_path):
     pj = json.loads((pdir / "probs.json").read_text())
     del pj["seam_reset_frames"]
     (pdir / "probs.json").write_text(json.dumps(pj))
-    with pytest.raises(RunError, match="(?s)сброс.*rm -rf") as e:
+    with pytest.raises(RunError, match="(?s)without a Silero reset at the seams.*rm -rf") as e:
         compute_probs(str(sdir / s["wav"]), str(tmp_path / "probs"))
     assert e.value.code == "run_no_seam_reset"
 
@@ -552,7 +580,7 @@ def test_cli_session_prints_dir(tmp_path, capsys):
     out, err = capsys.readouterr()
     dst = tmp_path / "out" / out.strip().split("/")[-1]
     assert dst.name.startswith("2026-10-20_11-30_0h00m.") and (dst / "session.json").exists()
-    assert "инвентарь" in err
+    assert re.search(r"^\d\d\.\d\d\.\d\d \d\d:\d\d INFO  inventory ", err, re.MULTILINE)
 
 
 # --- plan_session / list_chains (UI task 4): every D25 refusal before anything moves ---
@@ -616,5 +644,5 @@ def test_plan_matches_assemble(tmp_path, start):
     make_folder(tmp_path / "in", chain_starts(3))
     plan = audio.plan_session(str(tmp_path / "in"), start=start)
     dst = assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), start=start,
-                           log=lambda m: None)
+                           log=lambda m, level="INFO": None)
     assert plan.session_id + ".session" == dst.name

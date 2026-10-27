@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from voxcut import logfmt
 from voxcut.errors import Coded
 from voxcut.intervals import (
     FRAME_SAMPLES,
@@ -154,26 +155,26 @@ def check_wav_structure(src: str) -> None:
         pos = 12
         while pos < size:
             if size - pos < 8:
-                bad = f"{size - pos} лишних байт в конце файла"
+                bad = f"{size - pos} extra bytes at the end of the file"
                 break
             f.seek(pos)
             cid, csize = struct.unpack("<4sI", f.read(8))
             if not _printable(cid):
-                bad = f"мусор вместо чанка на смещении {pos}"
+                bad = f"garbage instead of a chunk at offset {pos}"
                 break
             if cid == b"data" and data_start is None:
                 if magic == b"RF64" and csize == 0xFFFFFFFF and ds64_data is not None:
                     csize = ds64_data
                 data_start, data_size = pos + 8, csize
                 if csize in (0, 0xFFFFFFFF):
-                    bad = f"размер data в заголовке = {csize:#x}"
+                    bad = f"data size in the header = {csize:#x}"
                     break
             end = pos + 8 + csize
             if end > size:
-                bad = f"чанк {cid!r} на смещении {pos} выходит за конец файла"
+                bad = f"chunk {cid!r} at offset {pos} runs past the end of the file"
                 break
             if csize < _CHUNK_MIN.get(cid, 0):
-                bad = f"чанк {cid!r} короче {_CHUNK_MIN[cid]} байт"
+                bad = f"chunk {cid!r} is shorter than {_CHUNK_MIN[cid]} bytes"
                 break
             if cid == b"ds64":
                 ds64_data = struct.unpack("<QQ", f.read(16))[1]
@@ -181,15 +182,15 @@ def check_wav_structure(src: str) -> None:
                 _, _, sr, _, block_align = struct.unpack("<HHIIH", f.read(14))
             pos = end + (csize & 1)
         if bad is None and (data_start is None or not block_align):
-            bad = "нет чанка fmt или data"
+            bad = "no fmt or data chunk"
     if bad is None:
         return
     lengths = ""
     if data_start is not None and block_align and sr:
         by_header = data_size // block_align
         by_file = (size - data_start) // block_align
-        lengths = (f"; длина по заголовку {by_header} сэмплов ({by_header / sr:.1f} с), "
-                   f"по размеру файла {by_file} сэмплов ({by_file / sr:.1f} с)")
+        lengths = (f"; length by the header {by_header} samples ({by_header / sr:.1f} s), "
+                   f"by the file size {by_file} samples ({by_file / sr:.1f} s)")
     raise SourceError("source_wav_broken", src=src, detail=f"{bad}{lengths}", fix=fix)
 
 
@@ -323,7 +324,7 @@ def current_env(af: str) -> dict:
 
 
 def check_env(stored: dict, current: dict, run_dir: Path) -> None:
-    diff = [f"{k}: было {stored.get(k)!r}, сейчас {v!r}" for k, v in current.items()
+    diff = [f"{k}: was {stored.get(k)!r}, now {v!r}" for k, v in current.items()
             if stored.get(k) != v]
     if diff:
         raise RunError("run_env_changed", dir=str(run_dir), detail="; ".join(diff),
@@ -393,7 +394,7 @@ def compute_probs(src: str, out_dir: str, channel: str | int | None = None) -> P
     tmp = fresh_tmp(dst)
     probs, n16k = vad_probs(src, af, reset_at=resets or (), reset_period=RESET_PERIOD_FRAMES)
     if len(probs) != n_frames(n16k):
-        raise RuntimeError(f"кадров {len(probs)}, ожидалось n_frames({n16k}) = {n_frames(n16k)}")
+        raise RuntimeError(f"{len(probs)} frames, expected n_frames({n16k}) = {n_frames(n16k)}")
     np.save(tmp / "probs.npy", probs)
     import torch
 
@@ -490,18 +491,19 @@ def session_env() -> dict:
             "libsndfile_version": sf.__libsndfile_version__}
 
 
-def channel_advice(identical: bool | None) -> list[str]:
-    """D25, D27: no automatic mix advice, mix cancels speech in antiphase."""
+def channel_advice(identical: bool | None) -> list[tuple[str, str]]:
+    """D25, D27: no automatic mix advice, mix cancels speech in antiphase. -> [(msg, level)]"""
     if identical is None:
         return []
     if identical:
-        return ["каналы совпадают бит в бит: probs возьмёт канал 0 сам (или --channel 0)"]
-    return [("ВНИМАНИЕ: каналы различаются. Выберите --channel 0 | 1 | mix; mix может гасить "
-             "речь при противофазе, проверьте каналы на слух")]
+        return [(("channels are identical bit for bit: probs takes channel 0 itself "
+                  "(or --channel 0)"), "INFO")]
+    return [(("channels differ: choose --channel 0 | 1 | mix; mix can cancel speech in "
+              "antiphase, listen to the channels first"), "WARNING")]
 
 
-def _log(msg: str) -> None:
-    print(msg, file=sys.stderr)
+def _log(msg: str, level: str = "INFO") -> None:
+    print(logfmt.line(level, msg, datetime.now()), file=sys.stderr)  # D117
 
 
 @dataclass
@@ -600,17 +602,19 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         gap = gap_s(prev, parts[k], sr)
         seams.append({"offset_samples": offsets[k], "kind": "split", "after": prev[0],
                       "before": parts[k][0], "gap_est_s": round(gap, 3)})
-    log(f"инвентарь {src_dir}:")
+    inv = [f"inventory {src_dir}:"]  # one log entry, details indented under it (D115)
     for (name, t, n), end, off in zip(parts, mtime_ends, offsets, strict=True):
-        log(f"  {name}: старт по имени {t:%H:%M:%S}, по mtime − длительность "
-            f"{end - timedelta(seconds=n / sr):%H:%M:%S}, {n / sr:.1f} с, смещение {off}")
+        inv.append(f"  {name}: start by the name {t:%H:%M:%S}, by mtime minus the duration "
+                   f"{end - timedelta(seconds=n / sr):%H:%M:%S}, {n / sr:.1f} s, offset {off}")
     for s in seams:
-        log(f"  стык {s['after']} → {s['before']}: разрыв по оценке {s['gap_est_s']:+.2f} с")
-    log(f"  итого {len(parts)} файлов, {n_total / sr:.1f} с")
+        inv.append(f"  seam {s['after']} → {s['before']}: estimated gap {s['gap_est_s']:+.2f} s")
+    inv.append(f"  total {len(parts)} files, {n_total / sr:.1f} s")
+    log("\n".join(inv))
     for w in mtime_warnings(parts, mtime_ends, sr):
-        log(f"ВНИМАНИЕ: {w}")
+        log(w, "WARNING")
     if start is None:
-        log("время сессии по часам диктофона; если часы были сбиты, повторите с --start")
+        log("session time comes from the recorder clock; if it was wrong, re-run with --start",
+            "WARNING")
     name = plan.name
     dst = Path(out_dir) / f"{plan.session_id}.session"
     wav_name = f"{name}.wav"
@@ -621,8 +625,8 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
         if not (dst / wav_name).exists() or sf.info(str(dst / wav_name)).frames != n_total:
             raise RunError("session_wav_mismatch", dir=str(dst), wav=wav_name, n=n_total,
                            rm=shlex.quote(str(dst)))
-        for line in channel_advice(meta["channels_identical"]):
-            log(line)
+        for msg, level in channel_advice(meta["channels_identical"]):
+            log(msg, level)
         return dst
     for p in files:
         check_source(str(p))  # D18: frames == n_ffmpeg for every file of the chain
@@ -671,6 +675,6 @@ def assemble_session(src_dir: str, out_dir: str, chain: int | None = None,
            "args": {"dir": str(Path(src_dir).resolve()), "chain": chain, "start": start}}
     (tmp / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=1))  # last
     os.replace(tmp, dst)
-    for line in channel_advice(identical):
-        log(line)
+    for msg, level in channel_advice(identical):
+        log(msg, level)
     return dst
