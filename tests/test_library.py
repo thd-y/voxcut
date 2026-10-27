@@ -216,6 +216,11 @@ def _quiet(_msg, level="INFO"):
     pass
 
 
+def _rec(out):
+    """A log callback that keeps (level, msg)."""
+    return lambda m, level="INFO": out.append((level, m))
+
+
 def test_import_moves_unchanged(lay, no_check):
     paths = make_folder(lay.inbox, chain_starts(3))
     before = _shas(paths)
@@ -252,11 +257,12 @@ def test_import_keeps_leftovers_and_warns(lay, no_check):
     for name, data in extra.items():
         (lay.inbox / "13_oct" / name).write_bytes(data)
     msgs = []
-    import_originals(lay, "13_oct", 1, None, msgs.append)
+    import_originals(lay, "13_oct", 1, None, _rec(msgs))
     assert {p.name: p.read_bytes() for p in (lay.inbox / "13_oct").iterdir()} == extra
-    warn = [m for m in msgs if m.startswith("в inbox/")]
-    assert warn == [("в inbox/13_oct/ остались файлы: desktop.ini, x.wav:Zone.Identifier; "
-                     "папка скрыта, удалите вручную")]
+    warn = [(lv, m) for lv, m in msgs if m.startswith("inbox/")]
+    assert warn == [("WARNING", ("inbox/13_oct/ still has files: desktop.ini, "
+                                 "x.wav:Zone.Identifier; the folder is hidden, delete it by hand"))]
+    assert ("INFO", f"imported 2 files: session {list_sessions(lay)[0]['session_id']}") in msgs
 
 
 def test_import_rmdir_race_is_not_failure(lay, no_check, monkeypatch):
@@ -267,18 +273,18 @@ def test_import_rmdir_race_is_not_failure(lay, no_check, monkeypatch):
 
     monkeypatch.setattr(os, "rmdir", busy)
     msgs = []
-    res = import_originals(lay, "13_oct", 1, None, msgs.append)
+    res = import_originals(lay, "13_oct", 1, None, _rec(msgs))
     assert res["existing"] is False
-    assert any(m.startswith("в inbox/13_oct/ остались файлы") for m in msgs)
+    assert any(m.startswith("inbox/13_oct/ still has files") for _, m in msgs)
 
 
 def test_import_second_chain_left_without_warning(lay, no_check):
     make_folder(lay.inbox / "13_oct", chain_starts(2) + chain_starts(1, T0 + timedelta(hours=2)))
     msgs = []
-    import_originals(lay, "13_oct", 1, None, msgs.append)
+    import_originals(lay, "13_oct", 1, None, _rec(msgs))
     left = sorted(p.name for p in (lay.inbox / "13_oct").iterdir())
     assert len(left) == 1 and left[0].lower().endswith(".wav")  # chain 2 is still there
-    assert not any(m.startswith("в inbox/") for m in msgs)  # never «удалите вручную» on a WAV
+    assert not any(m.startswith("inbox/") for _, m in msgs)  # never «delete it by hand» on a WAV
     assert [s["source"] for s in inbox_inventory(lay)["sources"]] == ["13_oct"]
 
 
@@ -383,10 +389,12 @@ def test_import_skips_broken_session_json(lay, no_check):
     (lay.sessions / "junk" / "import.json").write_text("{}")
     make_folder(lay.inbox, chain_starts(2))
     logged = []
-    got = import_originals(lay, "", 1, None, logged.append)
+    got = import_originals(lay, "", 1, None, _rec(logged))
     assert (lay.sessions / got["session_id"] / "import.json").is_file()
-    assert any(SID2 in m for m in logged)
-    assert not any("junk" in m for m in logged)
+    assert [(lv, m) for lv, m in logged if SID2 in m] == [
+        ("WARNING", (f"{SID2}: import.json is unreadable (JSONDecodeError), "
+                     "the re-import check skips it"))]
+    assert not any("junk" in m for _, m in logged)
 
 
 def test_import_partial_overlap_refused(lay, no_check):
@@ -686,9 +694,9 @@ def test_finish_removes_empty_source_folder(lay, no_check, monkeypatch, leftover
     if leftover:
         (lay.inbox / "rec" / "notes.txt").write_text("x")
     logged = []
-    finish_import(lay, list_sessions(lay)[0]["session_id"], logged.append)
+    finish_import(lay, list_sessions(lay)[0]["session_id"], _rec(logged))
     assert (lay.inbox / "rec").exists() is leftover
-    assert any("удалите вручную" in m for m in logged) is leftover
+    assert any(lv == "WARNING" and "delete it by hand" in m for lv, m in logged) is leftover
 
 
 def test_finish_failed_check_keeps_source_folder(lay, no_check, monkeypatch):
@@ -705,11 +713,11 @@ def test_finish_failed_check_keeps_source_folder(lay, no_check, monkeypatch):
     monkeypatch.setattr(audio, "plan_session", other_session)
     (lay.inbox / "rec" / "notes.txt").write_text("x")  # the old order logged «удалите» here
     logged = []
-    with pytest.raises(SessionError, match="expected") as e:
-        finish_import(lay, sid, logged.append)
+    with pytest.raises(SessionError, match="after the move the session is") as e:
+        finish_import(lay, sid, _rec(logged))
     assert e.value.code == "finish_session_mismatch"
     assert (lay.inbox / "rec").is_dir()
-    assert not any("удалите" in m for m in logged)
+    assert not any("delete it by hand" in m for _, m in logged)
 
 
 def test_finish_retry_after_interrupt_drops_folder(lay, no_check, monkeypatch):
@@ -726,10 +734,10 @@ def test_finish_retry_after_interrupt_drops_folder(lay, no_check, monkeypatch):
         finish_import(lay, sid, _quiet)
     monkeypatch.undo()
     logged = []
-    finish_import(lay, sid, logged.append)
+    finish_import(lay, sid, _rec(logged))
     assert (lay.sessions / sid / "import.json").is_file()
     assert not (lay.inbox / "rec").exists()
-    assert not any("удалите" in m for m in logged)
+    assert not any("delete it by hand" in m for _, m in logged)
 
 
 @pytest.mark.parametrize("source", ["../x", "/abs", ".hidden", "link"])
@@ -744,7 +752,7 @@ def test_drop_source_only_plain_inbox_folder(lay, tmp_path, source):
     if source == "link":
         (tmp_path / "real" / "notes.txt").write_text("x")
     logged = []
-    _drop_empty_source(lay, str(tmp_path / "abs") if source == "/abs" else source, logged.append)
+    _drop_empty_source(lay, str(tmp_path / "abs") if source == "/abs" else source, _rec(logged))
     assert not logged  # not even «удалите вручную» about what a link points to
     assert target.exists() or target.is_symlink()
     assert (tmp_path / "real").is_dir() or source != "link"
@@ -948,8 +956,10 @@ def test_delete_returns_originals_and_notes(lay, no_check):
     note(lay, sid, 3600.0, 3725.0, "a\nb")
     note(lay, sid, 60.0, 61.0, "")  # an emptied note is not a note
     note(lay, "other", 1.0, 2.0, "чужая")
-    res = delete_session(lay, sid, _quiet)
+    logged = []
+    res = delete_session(lay, sid, _rec(logged))
     assert res == {"session_id": sid, "files": 2, "notes": 2}
+    assert logged[-1] == ("INFO", f"session {sid} deleted: 2 files moved back to inbox/{sid}/")
     assert_deleted(lay, sid, shas)
     assert (lay.inbox / sid / "notes.txt").read_text() == (
         "00:00:05–00:00:07  вторая\n01:00:00–01:02:05  a\n    b\n")

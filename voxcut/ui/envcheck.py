@@ -28,19 +28,19 @@ def listeners(ss_text: str, pid: int) -> list[str]:
 def probe_verdict(rc: int | None, control: int | None) -> tuple[bool, str]:
     """D63: isolated only if the unit sees ENETUNREACH while the same unit without
     PrivateNetwork reaches the network; an offline host or a unit that never ran proves nothing."""
-    what = "задача-пробник в юните до 1.1.1.1:53"
+    what = "probe job in a unit to 1.1.1.1:53"
     if rc == PROBE_BLOCKED:
         if control == 0:
-            return True, f"{what}: сеть отрезана (без PrivateNetwork доходит)"
-        return False, (f"{what}: не проверено — без PrivateNetwork сети тоже нет "
-                       f"(код {control})")
+            return True, f"{what}: network cut off (reachable without PrivateNetwork)"
+        return False, (f"{what}: not verified: no network without PrivateNetwork either "
+                       f"(code {control})")
     if rc == PROBE_OTHER:
-        return False, f"{what}: другая ошибка сети, не ENETUNREACH — изоляция не проверена"
+        return False, f"{what}: another network error, not ENETUNREACH: isolation not verified"
     if rc == 0:
-        return False, f"{what}: есть сеть (PrivateNetwork не работает)"
+        return False, f"{what}: network reachable (PrivateNetwork does not work)"
     if rc is None:
-        return False, f"{what}: таймаут, юнит не ответил"
-    return False, f"{what}: пробник не запустился (код {rc}), изоляция не проверена"
+        return False, f"{what}: timeout, the unit did not answer"
+    return False, f"{what}: the probe did not start (code {rc}), isolation not verified"
 
 
 def run_probe(root: Path, isolated: bool) -> int | None:
@@ -64,22 +64,22 @@ def run_checks(root: Path) -> list[tuple[bool, str]]:
 
     ss = subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True, check=False).stdout
     got = listeners(ss, pid)
-    out.append((got == [f"127.0.0.1:{port}"], f"слушатели процесса {pid}: {got}"))
+    out.append((got == [f"127.0.0.1:{port}"], f"process {pid} listens on: {got}"))
 
     addrs = subprocess.run(["hostname", "-I"], capture_output=True, text=True,
                            check=False).stdout.split()
     for addr in addrs:
         try:
             with socket.create_connection((addr, port), 2):
-                out.append((False, f"{addr}:{port} принимает соединение"))
+                out.append((False, f"{addr}:{port} accepts connections"))
         except OSError as exc:
-            out.append((True, f"{addr}:{port} недоступен ({type(exc).__name__})"))
+            out.append((True, f"{addr}:{port} unreachable ({type(exc).__name__})"))
     if not addrs:
-        out.append((False, "hostname -I не вернул адресов: проверка LAN не выполнена"))
+        out.append((False, "hostname -I returned no addresses: the LAN check was not done"))
 
-    argv = edge_argv(edge_path(), port, "<скрыт>")
+    argv = edge_argv(edge_path(), port, "<hidden>")
     ok = "--inprivate" in argv and argv[-1].startswith("--app=http://127.0.0.1:")
-    out.append((ok, "строка запуска Edge: " + " ".join(argv)))
+    out.append((ok, "Edge command line: " + " ".join(argv)))
 
     try:
         ensure_slice(subprocess.run)
@@ -94,13 +94,13 @@ def run_checks(root: Path) -> list[tuple[bool, str]]:
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT
     if not (root / ".run" / "ui.json").is_file():
-        print("FAIL нет .run/ui.json: сначала запустите make ui")
+        print("FAIL no .run/ui.json: run make ui first")
         return 1
     results = run_checks(root)
     for ok, text in results:
         print(f"{'OK  ' if ok else 'FAIL'} {text}")
-    print("ВРУЧНУЮ: в окне Edge откройте edge://extensions и убедитесь, что ни у одного "
-          "расширения не включено «Разрешить в режиме InPrivate»")
+    print("MANUAL: in the Edge window open edge://extensions and make sure no extension has "
+          "\"Allow in InPrivate\" turned on")
     return 0 if all(ok for ok, _ in results) else 1
 
 

@@ -159,11 +159,11 @@ def test_closing_console_stops_server(tmp_path, edge):
 
 
 @pytest.mark.parametrize("rc, control, ok, text", [
-    (3, 0, True, "сеть отрезана"),
-    (3, 3, False, "не проверено"), (3, 1, False, "не проверено"), (3, None, False, "не проверено"),
-    (0, 0, False, "есть сеть"), (4, 0, False, "другая ошибка"),
-    (1, 0, False, "пробник не запустился"), (127, 0, False, "пробник не запустился"),
-    (None, 0, False, "таймаут"),
+    (3, 0, True, "network cut off"),
+    (3, 3, False, "not verified"), (3, 1, False, "not verified"), (3, None, False, "not verified"),
+    (0, 0, False, "network reachable"), (4, 0, False, "another network error"),
+    (1, 0, False, "the probe did not start"), (127, 0, False, "the probe did not start"),
+    (None, 0, False, "timeout"),
 ])
 def test_envcheck_probe_verdict(rc, control, ok, text):
     """D63: isolated only if the unit sees ENETUNREACH and the same unit without

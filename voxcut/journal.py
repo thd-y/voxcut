@@ -36,10 +36,10 @@ def _parse(data: bytes, where: str) -> tuple[list[dict], list[dict], int]:
         nl = data.find(b"\n", pos)
         try:
             if nl < 0:
-                raise ValueError("нет конца строки")
+                raise ValueError("no end of line")
             e = json.loads(data[pos:nl])
             if not isinstance(e, dict) or not isinstance(e.get("event_id"), str):
-                raise ValueError("не событие")  # noqa: TRY004 - one except path for all bad lines
+                raise ValueError("not an event")  # noqa: TRY004 - one except path for all bad lines
         except ValueError as exc:
             if nl >= 0 and nl + 1 < len(data):
                 raise JournalError("journal_broken_middle", where=where, pos=pos) from exc

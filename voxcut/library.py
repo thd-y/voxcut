@@ -296,13 +296,13 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
         try:
             known = {f["sha256"]: f["name"] for f in load_json(other)["files"]}
         except (OSError, ValueError, KeyError, TypeError) as exc:  # as list_sessions: one bad dir
-            log(f"{other.parent.name}: import.json не читается ({type(exc).__name__}), "
-                f"проверка повторного импорта для неё пропущена")
+            log(f"{other.parent.name}: import.json is unreadable ({type(exc).__name__}), "
+                f"the re-import check skips it", "WARNING")
             continue
         if other.name == "import.pending.json" and shas & set(known):  # D65
             raise SessionError("import_unfinished_elsewhere", session=other.parent.name)
         if set(known) == shas:
-            log(f"эти файлы уже импортированы: сессия {other.parent.name}")
+            log(f"these files are already imported: session {other.parent.name}")
             return {"session_id": other.parent.name, "existing": True}
         if shas & set(known):
             same = sorted(n for n, s in before.items() if s in known)
@@ -349,8 +349,8 @@ def _drop_empty_source(lay: Layout, source: str, log) -> None:
                 names = sorted(p.name for p in src.iterdir())
             except OSError:
                 names = []
-            log(f"в inbox/{source}/ остались файлы: {', '.join(names)}; "
-                f"папка скрыта, удалите вручную")
+            log(f"inbox/{source}/ still has files: {', '.join(names)}; "
+                f"the folder is hidden, delete it by hand", "WARNING")
 
 
 def _rollback_import(sdir: Path, moved: list[Path], failed: Path, exc: OSError) -> None:
@@ -434,7 +434,7 @@ def finish_import(lay: Layout, sid: str, log) -> None:
     _write_json(sdir / "import.json", meta | {
         "imported_at": datetime.now().astimezone().isoformat(timespec="seconds")})
     pending.unlink()  # our own bookkeeping file; import.json now holds the same facts
-    log(f"импортировано {len(before)} файлов: сессия {sid}")
+    log(f"imported {len(before)} files: session {sid}")
     hint = lay.inbox / str(meta.get("source")) / START_HINT
     if meta.get("source") and Path(str(meta["source"])).name == meta["source"] \
             and not hint.is_symlink() and hint.is_file():
@@ -495,7 +495,7 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
                 _erase(gone, log)
             os.replace(sdir, gone)
             _erase(gone, log)
-            log(f"сессия {sid} удалена: записей в ней не было (light)")
+            log(f"session {sid} deleted: it had no recordings (light)")
             return {"session_id": sid, "files": 0, "notes": 0}
         if present != set(files):
             raise SessionError("delete_incomplete", session=sid)
@@ -550,7 +550,7 @@ def delete_session(lay: Layout, sid: str, log) -> dict:
         _erase(gone, log)
     os.replace(sdir, gone)
     _erase(gone, log)
-    log(f"сессия {sid} удалена: {len(files)} файлов возвращены в inbox/{sid}/")
+    log(f"session {sid} deleted: {len(files)} files moved back to inbox/{sid}/")
     return {"session_id": sid, "files": len(files), "notes": meta["notes"]}
 
 
