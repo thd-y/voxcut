@@ -75,7 +75,7 @@ def test_backup_full_light_contents(lay):
     assert f"data/sessions/{SID}/{SID}.session/x.wav" not in lnames
     assert f"data/sessions/{SID}/{SID}.session/session.json" in lnames
     assert not list(lay.backups.glob("*.tmp"))
-    with pytest.raises(RunError, match="уже есть") as e:
+    with pytest.raises(RunError, match="already exists") as e:
         make_backup(lay, "full", NOW)
     assert e.value.code == "backup_exists"
 
@@ -144,7 +144,7 @@ def _evil_tar(lay, kind):
 def test_restore_refuses_evil_members(lay, kind):
     name = _evil_tar(lay, kind)
     before = tree(lay.root)
-    with pytest.raises(RunError, match="член") as e:
+    with pytest.raises(RunError, match="invalid archive member") as e:
         restore_backup(lay, name, lay.run / "journal.in")
     assert e.value.code == "restore_bad_member"
     assert tree(lay.root) == before
@@ -154,7 +154,7 @@ def test_restore_refuses_evil_members(lay, kind):
 def test_restore_unknown_name_refused(lay):
     (lay.backups / "voxcut-backup_x_full.tar").write_bytes(b"")
     for name in ("../backups/voxcut-backup_x_full.tar", "voxcut-backup_x_full.tar", "x.tar"):
-        with pytest.raises(RunError, match="нет архива") as e:
+        with pytest.raises(RunError, match="no archive") as e:
             restore_backup(lay, name, lay.run / "journal.in")
         assert e.value.code == "restore_no_archive"
 
@@ -277,7 +277,7 @@ def test_unrestorable_backup_not_published(lay):
     make_data(lay)
     clips = lay.sessions / SID / "x.c0.raw" / "seg-aaaaaaaa" / "clips"
     os.link(clips / "0000.wav", clips / "0001.wav")  # tar writes the 2nd as a hard link
-    with pytest.raises(RunError, match="член") as e:
+    with pytest.raises(RunError, match="invalid archive member") as e:
         make_backup(lay, "full", NOW)
     assert e.value.code == "restore_bad_member"
     assert list(lay.backups.iterdir()) == []

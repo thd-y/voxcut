@@ -85,7 +85,7 @@ def test_unit_argv_exact(tmp_path):
 
 def test_ensure_slice_refuses_when_not_applied(lay):
     run = FakeRun(show="MemoryMax=infinity\nMemorySwapMax=infinity\n")
-    with pytest.raises(JobError, match="лимит") as e:
+    with pytest.raises(JobError, match="memory limit") as e:
         ensure_slice(run)
     assert e.value.code == "job_slice_limit"
     j = Jobs(lay, run=run)
@@ -305,7 +305,7 @@ def test_validate_process_needs_can_process(lay):
     d = lay.sessions / SID
     d.mkdir()
     (d / "import.json").write_text("{}")  # light: no originals, no WAV
-    with pytest.raises(ValueError, match="обработ") as e:
+    with pytest.raises(ValueError, match="cannot be processed") as e:
         validate("process", {"session_id": SID}, lay)
     assert e.value.code == "job_cannot_process"
 

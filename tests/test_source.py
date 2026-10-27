@@ -88,8 +88,8 @@ def short_fmt(raw: bytes) -> bytes:
 
 
 @pytest.mark.parametrize("mutate, needle, code", [
-    (lambda raw: b"", "не RIFF/RF64 WAVE", "source_not_riff"),  # диктофон создал файл и выключился
-    (lambda raw: raw[:5], "не RIFF/RF64 WAVE", "source_not_riff"),
+    (lambda raw: b"", "not a RIFF/RF64 WAVE", "source_not_riff"),  # диктофон создал файл и выключился
+    (lambda raw: raw[:5], "not a RIFF/RF64 WAVE", "source_not_riff"),
     (lambda raw: raw[:30], "выходит за конец файла", "source_wav_broken"),  # обрыв внутри fmt
     (short_fmt, "чанк b'fmt ' короче 14 байт", "source_wav_broken"),
 ])

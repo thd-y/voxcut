@@ -68,7 +68,7 @@ def test_existing_clips_refused(tmp_path, monkeypatch):
         raise AssertionError("отказ должен прийти до чтения часов аудио")
 
     monkeypatch.setattr(audio, "sha256_file", no_hash)
-    with pytest.raises(RunError, match="уже существует") as e:
+    with pytest.raises(RunError, match="already exists") as e:
         export_clips(seg)
     assert e.value.code == "clips_exist"
 

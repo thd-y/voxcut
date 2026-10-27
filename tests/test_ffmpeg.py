@@ -34,7 +34,7 @@ def consume_and_publish(tmp_path, args):
 
 def test_missing_ffmpeg_message(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
-    msg = "ffmpeg не найден, установите: sudo apt install ffmpeg"
+    msg = "ffmpeg not found, install it: sudo apt install ffmpeg"
     with pytest.raises(FFmpegError, match=msg) as e:
         find_ffmpeg()
     assert e.value.code == "ffmpeg_missing"

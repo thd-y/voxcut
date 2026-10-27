@@ -90,7 +90,7 @@ def test_replaced_probs_refused(tmp_path):
     d = make_probs_dir(tmp_path, SPEECH)
     segment(d, cfg())
     np.save(d / "probs.npy", np.asarray(SPEECH[::-1], dtype=np.float32))
-    with pytest.raises(RunError, match="подменён") as e:
+    with pytest.raises(RunError, match="was replaced") as e:
         segment(d, cfg())
     assert e.value.code == "seg_probs_replaced"
 
@@ -107,8 +107,8 @@ def test_rm_hint_quotes_path_with_space(tmp_path):
 
 
 @pytest.mark.parametrize("damage, needle, code", [
-    (lambda d: (d / "probs.json").unlink(), "нет .*probs.json", "run_missing"),
-    (lambda d: np.save(d / "probs.npy", np.zeros(5, dtype=np.float32)), "5 кадров",
+    (lambda d: (d / "probs.json").unlink(), "probs.json is missing", "run_missing"),
+    (lambda d: np.save(d / "probs.npy", np.zeros(5, dtype=np.float32)), "5 frames",
      "probs_frames_mismatch"),
     (lambda d: (d / "probs.json").write_text(json.dumps(  # null in our own file: its error, not TypeError
         json.loads((d / "probs.json").read_text()) | {"n_frames": None})), "None", "probs_frames_mismatch"),

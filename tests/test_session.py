@@ -96,7 +96,7 @@ def test_split_one_chain(gap):
 
 @pytest.mark.parametrize("gap", [5.01, 600, 1800])
 def test_pause_refused(gap):
-    with pytest.raises(SessionError, match="склейка пауз пока не поддерживается") as e:
+    with pytest.raises(SessionError, match="joining across pauses is not supported yet") as e:
         split_chains(parts(1.0, gap), SR)
     assert e.value.code == "session_pause"
     assert "f1" in str(e.value) and "f2" in str(e.value)
@@ -107,7 +107,7 @@ def test_long_gap_gives_separate_chains():
 
 
 def test_overlap_refused():
-    with pytest.raises(SessionError, match="перекрываются") as e:
+    with pytest.raises(SessionError, match="overlap in time") as e:
         split_chains(parts(-2.01), SR)
     assert e.value.code == "session_overlap"
 
@@ -126,7 +126,7 @@ def test_pick_chain():
     assert e.value.code == "session_chain_choose"
     assert e.value.params["lines"] == ["  1: a", "  2: b, c"]
     for bad in (0, 3):
-        with pytest.raises(SessionError, match="вне диапазона") as e:
+        with pytest.raises(SessionError, match="out of range") as e:
             pick_chain([[0], [1, 2]], bad, names)
         assert e.value.code == "session_chain_range"
 
@@ -275,7 +275,7 @@ def test_broken_wav_refused_before_chains(tmp_path, no_decode):
     pos = raw.index(b"data")
     raw[pos + 4:pos + 8] = struct.pack("<I", 0)
     paths[1].write_bytes(raw)
-    with pytest.raises(SourceError, match=f"{paths[1].name}.*битая структура") as e:
+    with pytest.raises(SourceError, match=f"{paths[1].name}.*broken WAV structure") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
     assert e.value.code == "source_wav_broken"
 
@@ -284,7 +284,7 @@ def test_empty_wav_refused_not_crashed(tmp_path, no_decode):
     """A recorder that died right after creating a file leaves 0 bytes."""
     make_folder(tmp_path / "in", chain_starts(2))
     (tmp_path / "in" / f"{T0 + timedelta(hours=5):%Y%m%d%H%M%S}.wav").write_bytes(b"")
-    with pytest.raises(SourceError, match="не RIFF/RF64 WAVE") as e:
+    with pytest.raises(SourceError, match="not a RIFF/RF64 WAVE") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
     assert e.value.code == "source_not_riff"
 
@@ -296,7 +296,7 @@ def test_two_chains_refused_with_numbers(tmp_path, no_decode):
     assert e.value.code == "session_chain_choose"
     assert "1: 20250301082921.WAV, 20250301082924.WAV" in str(e.value)
     assert "2: 20250301102921.WAV" in str(e.value)
-    with pytest.raises(SessionError, match="вне диапазона") as e:
+    with pytest.raises(SessionError, match="out of range") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), chain=3,
                          log=lambda m: None)
     assert e.value.code == "session_chain_range"
@@ -304,7 +304,7 @@ def test_two_chains_refused_with_numbers(tmp_path, no_decode):
 
 def test_pause_refused_in_folder(tmp_path, no_decode):
     make_folder(tmp_path / "in", chain_starts(2, gap=60))
-    with pytest.raises(SessionError, match="склейка пауз") as e:
+    with pytest.raises(SessionError, match="joining across pauses") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
     assert e.value.code == "session_pause"
 
@@ -312,7 +312,7 @@ def test_pause_refused_in_folder(tmp_path, no_decode):
 def test_riff_limit_refused_before_copy(tmp_path, no_decode, monkeypatch):
     make_folder(tmp_path / "in", chain_starts(2))
     monkeypatch.setattr(audio, "data_bytes_ok", lambda *a: False)
-    with pytest.raises(SessionError, match="4 ГиБ") as e:
+    with pytest.raises(SessionError, match="4 GiB") as e:
         assemble_session(str(tmp_path / "in"), str(tmp_path / "out"), log=lambda m: None)
     assert e.value.code == "session_too_long"
     assert not any((tmp_path / "out").glob("*")) if (tmp_path / "out").exists() else True
@@ -567,10 +567,10 @@ def _refuse_plan(src, match, **kw):
 @pytest.mark.parametrize("case, match", [
     ("foreign", "YYYYMMDDHHMMSS.wav"),
     ("two_chains", "--chain N"),
-    ("pause", "склейка пауз"),
-    ("riff", "4 ГиБ"),
-    ("sr", "первый файл цепочки"),
-    ("subtype", "PCM или FLOAT"),
+    ("pause", "joining across pauses"),
+    ("riff", "4 GiB"),
+    ("sr", "first file of the chain"),
+    ("subtype", "PCM or FLOAT"),
 ])
 def test_plan_refuses_without_decode(tmp_path, no_decode, monkeypatch, case, match):
     src = tmp_path / "in"

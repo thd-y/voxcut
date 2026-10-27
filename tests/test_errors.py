@@ -25,7 +25,7 @@ def test_render_rules(monkeypatch):
     assert render("t_lines", {"lines": ["  1: a", "  2: b"]}) == "цепочки:\n  1: a\n  2: b"
     cause = {"code": "t_list", "params": {"files": ["x"]}}
     assert render("t_cause", {"cause": cause}) == "после: нет: x"
-    assert render("internal_error", {}) == "внутренняя ошибка сервера"
+    assert render("internal_error", {}) == "internal server error"
 
 
 class E(Coded, ValueError):
@@ -118,60 +118,61 @@ def test_no_russian_raise_literals():
     assert russian_raises() == []
 
 
-RU_TEXT = [
+EN_TEXT = [
     ("session_overlap", {"a": "1.wav", "b": "2.wav", "gap": "0.50", "tol": "0.1"},
-     "файлы 1.wav и 2.wav перекрываются по времени на 0.50 с (допуск 0.1 с)"),
+     "files 1.wav and 2.wav overlap in time by 0.50 s (tolerance 0.1 s)"),
     ("session_pause", {"minutes": "3.0", "a": "1.wav", "b": "2.wav"},
-     "между частями пауза 3.0 мин (1.wav → 2.wav); склейка пауз пока не поддерживается"),
+     "a 3.0 min pause between parts (1.wav → 2.wav); joining across pauses is not supported yet"),
     ("session_chain_range", {"n": 3, "total": 2, "lines": ["  1: a.wav, b.wav", "  2: c.wav"]},
-     "--chain 3 вне диапазона 1..2:\n  1: a.wav, b.wav\n  2: c.wav"),
-    ("source_not_riff", {"src": "/x/a.wav"}, "/x/a.wav: не RIFF/RF64 WAVE"),
+     "--chain 3 is out of range 1..2:\n  1: a.wav, b.wav\n  2: c.wav"),
+    ("source_not_riff", {"src": "/x/a.wav"}, "/x/a.wav: not a RIFF/RF64 WAVE"),
     ("source_codec", {"src": "a.wav", "codec": "adpcm_ima_wav", "fix": "ffmpeg -i a.wav b.flac"},
-     ("a.wav: кодек adpcm_ima_wav, сэмпл-точность не гарантирована.\n"
-     "Конвертируйте: ffmpeg -i a.wav b.flac\nдальше источник — этот файл")),
+     ("a.wav: codec adpcm_ima_wav, sample-accurate decoding is not guaranteed.\n"
+     "Convert it: ffmpeg -i a.wav b.flac\nthen use that file as the source")),
     ("import_move_stuck", {"file": "b.WAV", "detail": "[Errno 18] x", "files": ["a.WAV", "b.WAV"],
                            "dir": "/d/originals.tmp"},
-     ("b.WAV: перенос не удался ([Errno 18] x); вернуть не удалось: a.WAV, b.WAV — они в "
-     "/d/originals.tmp, не удаляйте их: это единственные копии; остальные файлы во входящих")),
+     ("b.WAV: move failed ([Errno 18] x); could not move back: a.WAV, b.WAV; they are in "
+     "/d/originals.tmp. Do not delete them: they are the only copies; the other files are in the inbox")),
     ("import_unfinished_elsewhere", {"session": "s1"},
-     ("часть файлов уже в сессии s1 (незавершённый импорт): нажмите у неё «Обработать»; "
-     "импорт отменён, файлы на месте")),
+     ("some files are already in session s1 (unfinished import): press “Process” on it; "
+     "import cancelled, files left in place")),
     ("backup_full_refused", {"files": ["sessions/s/originals.tmp/a.WAV"]},
-     ("full-бэкап отменён: записи вне originals/ или ссылки — sessions/s/originals.tmp/a.WAV "
-     "(originals.tmp — незавершённый импорт, обычно его доделывает «Обработать»)")),
+     ("full backup cancelled: entries outside originals/ or links: sessions/s/originals.tmp/a.WAV "
+     "(originals.tmp is an unfinished import, “Process” usually finishes it)")),
     ("restore_conflicts", {"lines": ["  data/a", "  data/b"]},
-     "в data/ уже есть другие версии файлов, ничего не изменено:\n  data/a\n  data/b"),
-    ("journal_value_too_long", {"limit": 500}, "текст длиннее 500 символов"),  # D73
-    ("http_no_code", {}, "нет кода запуска"),  # D72
+     "data/ already has other versions of the files, nothing changed:\n  data/a\n  data/b"),
+    ("journal_value_too_long", {"limit": 500}, "text longer than 500 characters"),  # D73
+    ("http_no_code", {}, "no launch code"),  # D72
     ("run_no_reset_period", {"dir": "/r/p", "rm": "/r/p"},
-     ("/r/p: probs посчитаны без второго прохода Silero (D31).\n"
-     "Удалите каталог и запустите заново: rm -rf /r/p")),
+     ("/r/p: probs were computed without Silero's second pass (D31).\n"
+     "Delete the folder and run again: rm -rf /r/p")),
 ]
 
 
-@pytest.mark.parametrize(("code", "params", "text"), RU_TEXT)
-def test_ru_text_unchanged(code, params, text):
+@pytest.mark.parametrize(("code", "params", "text"), EN_TEXT)
+def test_en_text(code, params, text):
     assert str(E(code, **params)) == text
 
 
 RU_JS = Path(__file__).parent.parent / "voxcut" / "ui" / "static" / "i18n" / "ru.js"
 FRONT_ONLY = {"unknown", "offline", "not_saved", "http_status"}
+EN_JS = RU_JS.with_name("en.js")
 
 
-def test_ru_catalog_matches_registry():
-    """D66: the frontend's err.* templates are the registry's, byte for byte (cycle 2: ru catalog)."""
-    text = RU_JS.read_text()
-    found = {m[1]: json.loads(m[2]) for m in re.finditer(r'"err\.(\w+)":\s*("(?:[^"\\]|\\.)*")', text)}
+def _catalog(path):
+    return {m[1]: json.loads(m[2])
+            for m in re.finditer(r'"err\.(\w+)":\s*("(?:[^"\\]|\\.)*")', path.read_text())}
+
+
+def test_en_catalog_matches_registry():
+    """D66, D114: the registry's templates are en.js's, byte for byte."""
+    found = _catalog(EN_JS)
     assert set(found) == set(CODES) | FRONT_ONLY
     assert {c: found[c] for c in CODES} == {c: t for c, (_, t) in CODES.items()}
 
 
-EN_JS = RU_JS.with_name("en.js")
-
-
-def test_en_catalog_covers_registry():
-    """D67: every registry code has an English template with the registry's parameters."""
-    text = EN_JS.read_text()
-    found = {m[1]: json.loads(m[2]) for m in re.finditer(r'"err\.(\w+)":\s*("(?:[^"\\]|\\.)*")', text)}
+def test_ru_catalog_covers_registry():
+    """D67: every registry code has a Russian template with the registry's parameters."""
+    found = _catalog(RU_JS)
     assert set(found) == set(CODES) | FRONT_ONLY
     assert {c: set(FIELD.findall(found[c])) for c in CODES} == {c: set(n) for c, (n, _) in CODES.items()}
