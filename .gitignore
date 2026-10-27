@@ -8,7 +8,7 @@ __pycache__/
 build/
 dist/
 
-# Аудио и артефакты прогонов владельца — никогда в git
+# Audio and run artifacts of real recordings: never in git
 *.wav
 *.flac
 *.mp3

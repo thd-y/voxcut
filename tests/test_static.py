@@ -20,7 +20,7 @@ LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mi
                 "audio-waveform", "ellipsis", "notebook-pen", "lightbulb", "pencil", "folder-open",
                 "folder-input", "cog", "archive", "x", "maximize-2"]  # D55, D58
 MULISH_SHA256 = "00f1105796291a2fdda117a0fc7f25d8e68f8010cdbb34a411f60b3bd57717ac"  # google/fonts e7db6ca, D77
-LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt", "vendor/OFL-mulish.txt"}
+LICENSES = {"vendor/LICENSE.md", "vendor/LICENSE-lucide.txt", "vendor/LICENSE-tailwindcss.txt", "vendor/OFL-mulish.txt"}
 
 
 SVG_NS = 'xmlns="http://www.w3.org/2000/svg"'  # a standalone SVG needs it; not a request

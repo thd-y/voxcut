@@ -55,7 +55,7 @@ def test_claude_settings_not_tracked():
 def test_license_and_notices():
     assert (ROOT / "LICENSE").read_text().startswith("MIT License")
     notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
-    for name in ("Silero", "Basecoat", "Lucide", "Mulish"):
+    for name in ("Silero", "Basecoat", "Tailwind", "Lucide", "Mulish", "favicon.svg"):
         assert name in notices
 
 
