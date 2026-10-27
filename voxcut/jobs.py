@@ -13,7 +13,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from voxcut import library
+from voxcut import library, logfmt
 from voxcut.errors import Coded, descriptor
 from voxcut.intervals import parse_start
 
@@ -419,6 +419,12 @@ class Jobs:
                 "result": st.get("result"), "log_tail": tail}
 
 
+# D115: the start line names the job's subject: (log name, job param)
+START_PARAM = {"import": ("source", "source"), "process": ("session", "session_id"),
+               "delete": ("session", "session_id"), "backup": ("mode", "mode"),
+               "restore": ("name", "name")}
+
+
 def _exit_on_sigterm() -> None:
     """systemctl stop sends SIGTERM; exiting via SystemExit runs cleanup (e.g. *.tar.tmp)."""
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -433,15 +439,22 @@ def main(argv: list[str]) -> int:
     p = job["params"]
     status = {"state": "running", "stage": None, "error": None, "started": _now()}
     _write(d / "status.json", status)
+    t0 = datetime.now()
     with open(d / "log.txt", "a", buffering=1) as logf:
-        def log(msg: str) -> None:
-            logf.write(f"{msg}\n")
+        def log(msg: str, level: str = "INFO") -> None:
+            logf.write(logfmt.line(level, msg, datetime.now()) + "\n")
 
         def stage(name: str) -> None:
             status["stage"] = name
             _write(d / "status.json", status)
-            log(f"== {name}")
+            log(f"stage={name}")
 
+        def took() -> str:
+            return logfmt.duration((datetime.now() - t0).total_seconds())
+
+        key = START_PARAM.get(job["kind"])
+        log(f"job {d.name[:8]} {job['kind']} started"
+            + (f": {key[0]}={p.get(key[1])}" if key else ""))
         try:
             if job["kind"] == "import":
                 result = library.import_originals(lay, p["source"], p["chain"], p["start"], log,
@@ -458,10 +471,18 @@ def main(argv: list[str]) -> int:
             else:
                 raise JobError("job_unit_unknown_kind", kind=repr(job["kind"]))
         except Exception as exc:  # noqa: BLE001 - every failure becomes a visible status
-            log(traceback.format_exc())
+            logf.write(traceback.format_exc())
+            # D115: the cause is the last line; a multi-line text is in full in the traceback above
+            text, name = str(exc), type(exc).__name__
+            cause = text if isinstance(exc, Coded) else f"{name}: {text}" if text else name
+            log(f"job failed after {took()}: {cause.splitlines()[0]}", "ERROR")
             _write(d / "status.json", status | {"state": "failed", "error": _job_error(exc),
                                                 "finished": _now()})
             return 1
+        except SystemExit:  # SIGTERM, «Cancel»: status and cleanup as before
+            log(f"job cancelled after {took()}", "ERROR")
+            raise
+        log(f"job done in {took()}")
     _write(d / "status.json", status | {"state": "done", "result": result, "finished": _now()})
     return 0
 

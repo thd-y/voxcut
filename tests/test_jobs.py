@@ -1,12 +1,15 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
+from datetime import datetime
 
 import pytest
 
 from voxcut import jobs
+from voxcut.audio import RunError
 from voxcut.jobs import LIST_MAX, JobError, JobParamsError, Jobs, ensure_slice, unit_argv, validate
 from voxcut.library import Layout
 
@@ -749,3 +752,94 @@ def test_when_idle_runs_under_the_jobs_lock(lay):
     with pytest.raises(JobParamsError) as e:
         j.when_idle(SID, lambda: pytest.fail("ran on a busy session"))
     assert e.value.code == "job_session_busy"
+
+
+# --- D115: the job log ---
+
+W = datetime(2026, 10, 27, 9, 31, 12)
+PREFIX = re.compile(r"^\d\d\.\d\d\.\d\d \d\d:\d\d ")
+
+
+class FixedClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return W if tz is None else W.astimezone(tz)
+
+
+def _run_job(lay, monkeypatch, kind, params, fake=None):
+    """jobs.main on a job of `kind` whose library call is `fake`; -> (rc, log lines)."""
+    monkeypatch.setattr(jobs, "datetime", FixedClock)
+    a = "abcdef12" + jid()[8:]
+    Jobs(lay, run=FakeRun()).submit(a, "backup", {"mode": "light"})
+    job = json.loads((lay.jobs / a / "job.json").read_text())
+    job["kind"], job["params"] = kind, params
+    (lay.jobs / a / "job.json").write_text(json.dumps(job))
+    if fake:
+        name = {"process": "process_session", "import": "import_originals",
+                "backup": "make_backup", "restore": "restore_backup", "delete": "delete_session"}
+        monkeypatch.setattr(jobs.library, name[kind], fake)
+    try:
+        rc = jobs.main([str(lay.jobs / a)])
+    except SystemExit as e:
+        rc = e.code
+    return rc, (lay.jobs / a / "log.txt").read_text().splitlines()
+
+
+def test_job_log_done(lay, monkeypatch):
+    def process(lay_, sid, stage, log):
+        stage("assemble")
+        log("inventory x:\n  total 1 files, 1.0 s")
+        log("w", "WARNING")
+        return lay_.root / "seg"
+
+    rc, lines = _run_job(lay, monkeypatch, "process", {"session_id": SID}, process)
+    assert rc == 0
+    assert lines == [f"27.10.26 09:31 INFO  job abcdef12 process started: session={SID}",
+                     "27.10.26 09:31 INFO  stage=assemble",
+                     "27.10.26 09:31 INFO  inventory x:", "  total 1 files, 1.0 s",
+                     "27.10.26 09:31 WARNING w",
+                     "27.10.26 09:31 INFO  job done in 0s"]
+
+
+@pytest.mark.parametrize("kind, params, want", [
+    ("import", {"source": "13_oct", "chain": 1, "start": None, "files": ["a.WAV"]},
+     "source=13_oct"),
+    ("delete", {"session_id": SID}, f"session={SID}"),
+    ("backup", {"mode": "light"}, "mode=light"),
+    ("restore", {"name": "voxcut-backup_x_full.tar"}, "name=voxcut-backup_x_full.tar"),
+])
+def test_job_log_start_line_per_kind(lay, monkeypatch, kind, params, want):
+    rc, lines = _run_job(lay, monkeypatch, kind, params, lambda *a, **kw: {})
+    assert rc == 0 and lines[0] == f"27.10.26 09:31 INFO  job abcdef12 {kind} started: {want}"
+
+
+def test_job_log_failure_ends_with_first_line_of_cause(lay, monkeypatch):
+    def process(*a):
+        raise RunError("ffmpeg_failed", rc=1, detail="boom", cmd="ffmpeg -i a.wav")
+
+    rc, lines = _run_job(lay, monkeypatch, "process", {"session_id": SID}, process)
+    assert rc == 1
+    assert lines[-1] == "27.10.26 09:31 ERROR job failed after 0s: ffmpeg exited with code 1: boom"
+    assert lines[-2] == "command: ffmpeg -i a.wav"  # the traceback's end, above
+    assert "Traceback (most recent call last):" in lines
+    assert all(re.match(r"^\d\d\.\d\d\.\d\d \d\d:\d\d (INFO |WARNING|ERROR) ", ln)
+               for ln in lines if PREFIX.match(ln))
+
+
+def test_job_log_failure_with_empty_text_names_the_class(lay, monkeypatch):
+    def process(*a):
+        raise KeyError
+
+    rc, lines = _run_job(lay, monkeypatch, "process", {"session_id": SID}, process)
+    assert rc == 1 and lines[-1] == "27.10.26 09:31 ERROR job failed after 0s: KeyError"
+
+
+def test_job_log_cancelled(lay, monkeypatch):
+    def process(lay_, sid, stage, log):
+        stage("probs")
+        raise SystemExit(143)  # SIGTERM via _exit_on_sigterm
+
+    rc, lines = _run_job(lay, monkeypatch, "process", {"session_id": SID}, process)
+    assert rc == 143
+    assert lines[-2:] == ["27.10.26 09:31 INFO  stage=probs",
+                          "27.10.26 09:31 ERROR job cancelled after 0s"]
