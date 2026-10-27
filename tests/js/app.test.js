@@ -399,10 +399,11 @@ test("sessionJobMark", () => {  // D85: a queued or running process outranks an 
   assert.equal(app.sessionJobMark([{ ...job("backup", "running"), subject: { session_id: SID } }], SID), null);
 });
 
-test("logLines", () => {  // D80: stage lines stand out; a failed job's last non-empty line is red
-  assert.deepEqual(app.logLines(["== probs", "x", "Traceback", ""], true).map((l) => l.cls), ["stage", "", "error", ""]);
-  assert.deepEqual(app.logLines(["== probs", "x"], false).map((l) => l.cls), ["stage", ""]);
-  assert.deepEqual(app.logLines([], true), []);
+test("logLines", () => {  // D116: stage= lines stand out, ERROR lines are red; old logs stay plain
+  const t = ["27.10.26 08:57 INFO  stage=probs", "27.10.26 08:57 INFO  assembled", "Traceback (most recent call last):",
+    "27.10.26 09:31 ERROR job failed after 34m05s: x", "== probs", "x ERROR y stage=z"];
+  assert.deepEqual(app.logLines(t).map((l) => l.cls), ["stage", "", "", "error", "", ""]);
+  assert.deepEqual(app.logLines([]), []);
 });
 
 test("errDesc", () => {  // a thrown null or a body without a descriptor still gives a descriptor

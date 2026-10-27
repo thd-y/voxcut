@@ -237,11 +237,10 @@ function sessionJobMark(jobs, sessionId) {
   return failed ? { kind: "failed", job: failed } : null;
 }
 
-// D80: «== stage» lines stand out; a failed job's last non-empty line is the error
-function logLines(tail, failed) {
-  let last = -1;
-  if (failed) tail.forEach((t, i) => { if (t.trim()) last = i; });
-  return tail.map((text, i) => ({ text, cls: text.startsWith("== ") ? "stage" : i === last ? "error" : "" }));
+// D116: «INFO  stage=» lines stand out, ERROR lines are red; logs from before D115 stay plain
+const LOG_STAGE = /^\d\d\.\d\d\.\d\d \d\d:\d\d INFO  stage=/, LOG_ERROR = /^\d\d\.\d\d\.\d\d \d\d:\d\d ERROR /;
+function logLines(tail) {
+  return tail.map((text) => ({ text, cls: LOG_STAGE.test(text) ? "stage" : LOG_ERROR.test(text) ? "error" : "" }));
 }
 
 function nextUndecided(clips, from) {
@@ -1445,7 +1444,7 @@ function jobEl(j, st) {
     pre.tabIndex = 0;  // a scrollable region is reachable by keyboard
     pre.setAttribute("aria-label", tr("jobs.log_aria", { kind: label(ui.lang, "job.kind.", j.kind),
       subject: jobSubject(j, st.sessions, ui.lang) }));
-    for (const l of logLines(j.log_tail, j.state === "failed")) pre.append(el("span", l.text, l.cls || null), "\n");
+    for (const l of logLines(j.log_tail)) pre.append(el("span", l.text, l.cls || null), "\n");
     pre.addEventListener("scroll", () => {
       ui.logPinned.set(id, pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 2);
       ui.logScroll.set(id, pre.scrollTop);
