@@ -190,6 +190,17 @@ def test_hooks_refuse_without_values_file(repo, tmp_path, mode):
     assert leakcheck.main([*args, "--values", str(tmp_path / "none.txt")]) == 2
 
 
+@pytest.mark.parametrize("mode", ["staged", "range"])
+def test_hooks_refuse_with_empty_values_file(repo, tmp_path, mode):
+    """Final review I1: a values file with only comments is as good as none."""
+    r, _ = repo
+    stage(r, "b.py", "x = 1\n")
+    empty = tmp_path / "empty.txt"
+    empty.write_text("# no values yet\n\n")
+    args = [mode] + (["HEAD~0..HEAD"] if mode == "range" else [])
+    assert leakcheck.main([*args, "--values", str(empty)]) == 2
+
+
 @pytest.mark.parametrize("text", [
     "cd /home" + "/alice", '"/home' + '/alice"', "\\\\wsl.localhost\\Ubuntu\\home" + "\\alice\\x",
     '"C:\\\\Users' + '\\\\Alice"', "c:\\users" + "\\alice", "/mnt/c/users" + "/alice", "C:/Users" + "/Alice",

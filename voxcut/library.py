@@ -725,6 +725,9 @@ def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
         raise RunError("restore_no_archive", name=repr(name))
     with tarfile.open(lay.inbox / name) as tar:
         files = _verified_files(tar, name)
+        tmp = lay.run / "restore.tmp"
+        if tmp.exists():
+            shutil.rmtree(tmp)  # our own temp dir from an interrupted restore: not used space
         need, free = sum(m.size for m in tar.getmembers()), shutil.disk_usage(lay.run).free
         if need > free:  # S-4
             raise RunError("restore_no_space", name=name, need=-(-need // 2**20),
@@ -736,10 +739,11 @@ def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
                 parent = parent.parent
             if not parent.resolve().is_relative_to(data):
                 raise RunError("restore_bad_target", path=rel)
-        tmp = lay.run / "restore.tmp"
-        if tmp.exists():
-            shutil.rmtree(tmp)  # our own temp dir from an interrupted restore
-        tar.extractall(tmp, filter="data")
+        try:
+            tar.extractall(tmp, filter="data")
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)  # a partial unpack would eat the next one's space
+            raise
     try:
         rels = sorted((k for k in files if k != JOURNAL_MEMBER and not k.startswith(
             "data/journal/")), key=lambda k: (Path(k).name in LAST_ON_RESTORE, k))

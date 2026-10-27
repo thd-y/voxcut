@@ -171,14 +171,12 @@ def main(argv: list[str] | None = None) -> int:
         vpath = Path(env) if env else (
             Path(git("rev-parse", "--show-toplevel").strip()).parent / "leak-values.txt")
     mode, *rest = argv
-    values = []
-    if vpath.is_file():
-        values = [s.strip() for s in _lines(vpath)]
-    elif mode == "tree":  # CI has no private values: the general patterns alone
-        print(f"leakcheck: no values file {vpath}; general patterns only", file=sys.stderr)
-    else:  # a hook without the values would pass every real leak
-        print(f"leakcheck: no values file {vpath}; set VOXCUT_LEAK_VALUES", file=sys.stderr)
+    values = [s.strip() for s in _lines(vpath)] if vpath.is_file() else []
+    if not values and mode != "tree":  # a hook without the values would pass every real leak
+        print(f"leakcheck: no values in {vpath}; set VOXCUT_LEAK_VALUES", file=sys.stderr)
         return 2
+    if not values:  # CI has no private values: the general patterns alone
+        print(f"leakcheck: no values in {vpath}; general patterns only", file=sys.stderr)
     hits = scan(mode, rest, values, load_patterns())
     for path, line, rule in hits:
         print(f"{path}:{line}: {rule}", file=sys.stderr)

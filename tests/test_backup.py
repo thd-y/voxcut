@@ -4,6 +4,7 @@ import os
 import shutil
 import tarfile
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -324,3 +325,34 @@ def test_restore_refuses_dangling_symlink_in_data(lay, lay2, tmp_path):
         restore_backup(lay2, name, lay2.run / "journal.in")
     assert e.value.code == "restore_bad_target"
     assert not (tmp_path / "gone").exists() and not (lay2.data / "pilot").exists()
+
+
+def test_restore_drops_a_stale_tmp_before_measuring_free_space(lay, lay2, monkeypatch):
+    """Final review I2: a leftover .run/restore.tmp must not count as used space."""
+    make_data(lay)
+    name = make_backup(lay, "full", NOW)
+    to_inbox(lay2, lay, name)
+    stale = lay2.run / "restore.tmp"
+    stale.mkdir(parents=True)
+    (stale / "junk").write_bytes(b"x")
+    real = shutil.disk_usage
+    monkeypatch.setattr(shutil, "disk_usage",
+                        lambda p: real(p)._replace(free=0 if stale.exists() else real(p).free))
+    restore_backup(lay2, name, lay2.run / "journal.in")
+    assert (lay2.sessions / SID).exists()
+
+
+def test_restore_failed_unpack_leaves_no_tmp(lay, lay2, monkeypatch):
+    """Final review I2: an unpack that fails midway leaves no partial restore.tmp behind."""
+    make_data(lay)
+    name = make_backup(lay, "full", NOW)
+    to_inbox(lay2, lay, name)
+
+    def partial(self, path, **kw):
+        Path(path).mkdir(parents=True)
+        (Path(path) / "half").write_bytes(b"x")
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(tarfile.TarFile, "extractall", partial)
+    with pytest.raises(OSError):
+        restore_backup(lay2, name, lay2.run / "journal.in")
+    assert not (lay2.run / "restore.tmp").exists()
