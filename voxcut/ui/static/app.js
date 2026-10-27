@@ -79,7 +79,7 @@ function playFailText(err, lang) {
   return (err && (err.message || err.name)) || translate(lang, "toast.error");
 }
 
-// The header counter (D106: «✓ готово» once nothing is left undecided).
+// The header counter (D106, D109: «✓ разобрано» once nothing is left undecided).
 function progressText(c, lang) {
   if (!c || !c.all) return "";
   return c.undecided === 0 ? translate(lang, "top.done") : translate(lang, "top.progress", { done: c.all - c.undecided, all: c.all });
