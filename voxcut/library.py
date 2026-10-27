@@ -272,7 +272,7 @@ def import_originals(lay: Layout, source: str, chain: int, start: str | None, lo
                      files: list[str] | None = None) -> dict:
     """U4, D39: inbox/ -> data/sessions/<id>/originals/, unchanged; every refusal before the move.
 
-    `files` pins the chain the owner clicked: numbers shift once an earlier chain leaves inbox/."""
+    `files` pins the chain the user clicked: numbers shift once an earlier chain leaves inbox/."""
     src = _source_dir(lay, source)
     if files is not None:
         chains = audio.list_chains(str(src))
@@ -438,7 +438,7 @@ def finish_import(lay: Layout, sid: str, log) -> None:
     hint = lay.inbox / str(meta.get("source")) / START_HINT
     if meta.get("source") and Path(str(meta["source"])).name == meta["source"] \
             and not hint.is_symlink() and hint.is_file():
-        hint.unlink()  # D94: used up; notes.txt is the owner's text and stays
+        hint.unlink()  # D94: used up; notes.txt is the user's text and stays
     _drop_empty_source(lay, meta.get("source"), log)  # also after a retry that moved nothing
 
 

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voxcut"
 version = "0.0.0"
-description = "Cut the owner's speech from long microphone recordings with measured recall (Silero VAD)"
+description = "Cut the user's speech from long microphone recordings with measured recall (Silero VAD)"
 requires-python = ">=3.12"
 # torch: CPU-сборку ставит `make setup` через --index-url до установки пакета (C6).
 dependencies = [
@@ -30,8 +30,8 @@ packages = ["voxcut", "voxcut.ui"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "slow: требует ffmpeg/torch; не входит в make check",
-    "host: запускает настоящие юниты systemd --user; вне CI (D63)",
+    "slow: needs ffmpeg/torch; not part of make check",
+    "host: runs real systemd --user units; not in CI (D63)",
 ]
 
 [tool.ruff]

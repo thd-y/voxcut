@@ -13,7 +13,7 @@ from voxcut.ui.server import STATIC, STATIC_DIR, make_server
 FORBIDDEN = ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(",
              "new Function", 'setAttribute("style"', "setAttribute('style'", "localStorage",
              "sessionStorage", "document.cookie", "http://", "https://", "localhost",
-             "navigator.language", "Accept-Language"]  # D69: the UI language is the owner's choice only
+             "navigator.language", "Accept-Language"]  # D69: the UI language is the user's choice only
 BASECOAT_SHA256 = "744bb04803c3480d1e79b3cfd38ecb6b103075400774cb89bf57b5e27e6d15a2"
 LUCIDE_SHA256 = "eeeb8ec76ade50ef1e41547941836815006d4976366b33b7e1ab796ea38ccf24"  # lucide-static 1.52.0, D55/D58
 LUCIDE_ICONS = ["play", "pause", "sun-moon", "keyboard", "library", "check", "mic-vocal", "music",

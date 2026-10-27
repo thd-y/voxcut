@@ -728,7 +728,7 @@ def test_order_survives_offset_change(lay):
 
 
 def test_failed_delete_moot_once_session_restored(lay):
-    """Final review: the owner kept the session (Restore): its failed delete is no longer an alarm."""
+    """Final review: the user kept the session (Restore): its failed delete is no longer an alarm."""
     a_session(lay)
     old = as_job(lay, "delete", {"session_id": SID}, "failed")
     shown = Jobs(lay, run=FakeRun(), hidden=lambda s: False).list()

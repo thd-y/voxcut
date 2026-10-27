@@ -1,1 +1,1 @@
-"""VoxCut: cut the owner's speech from long microphone recordings with measured recall."""
+"""VoxCut: cut the user's speech from long microphone recordings with measured recall."""

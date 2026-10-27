@@ -1086,7 +1086,7 @@ def test_reimport_after_delete_same_session_id(lay, no_check):
     again = import_originals(lay, sid, 1, chain["start_hint"], _quiet)
     assert again == {"session_id": sid, "existing": False}
     assert not (lay.inbox / sid / "start.txt").exists()
-    assert (lay.inbox / sid / "notes.txt").is_file()  # the owner's text: never touched
+    assert (lay.inbox / sid / "notes.txt").is_file()  # the user's text: never touched
     assert _shas((lay.sessions / sid / "originals").iterdir()) == shas
 
 
@@ -1118,7 +1118,7 @@ def test_delete_replaces_stale_empty_gone_dir(lay, no_check):
 
 
 def test_second_delete_keeps_earlier_notes(lay, no_check):
-    """Final review: a folder left with only the owner's notes does not block the next delete."""
+    """Final review: a folder left with only the user's notes does not block the next delete."""
     sid, shas = imported(lay)
     note(lay, sid, 5.0, 7.5, "первая")
     delete_session(lay, sid, _quiet)

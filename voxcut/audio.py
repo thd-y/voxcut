@@ -308,7 +308,7 @@ class RunError(Coded, RuntimeError):
 def fresh_tmp(dst: Path) -> Path:
     """Empty <dst>.tmp to publish from; an orphan of an interrupted run is removed (D19).
 
-    Only our own name: other *.tmp dirs may be the owner's or a parallel run's.
+    Only our own name: other *.tmp dirs may be the user's or a parallel run's.
     """
     tmp = dst.with_name(dst.name + ".tmp")
     if tmp.exists():

@@ -91,7 +91,7 @@ def test_restore_into_empty_root(lay, lay2):
     assert {k: v for k, v in tree(lay2.data).items() if not k.startswith("journal/")} == want
     assert (lay2.run / "journal.in").read_bytes() == lay.journal.read_bytes()
     assert not (lay2.run / "restore.tmp").exists()
-    assert (lay2.inbox / name).exists()  # the owner's archive is never removed
+    assert (lay2.inbox / name).exists()  # the user's archive is never removed
 
 
 def test_restore_interrupted_never_publishes_probs_json_alone(lay, lay2, monkeypatch):

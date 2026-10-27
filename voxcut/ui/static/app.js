@@ -595,7 +595,7 @@ function autoOpenTarget(all, tried) {
   return id === tried ? null : id;
 }
 
-// D94: the start a delete left in start.txt fills the field; what the owner typed, even "", wins
+// D94: the start a delete left in start.txt fills the field; what the user typed, even "", wins
 const startValue = (typed, key, hint) => (typed.has(key) ? typed.get(key) : hint || "");
 
 // A failed session open: the open session stays; without one, a server error explains itself
@@ -1805,7 +1805,7 @@ function journal(kind, value, clip) {
 
 // Optimistic: the clip shows the new decision at once; a failed write puts the old one back.
 function setMark(clip, value) {
-  const [at, atRun] = [sid, runId];  // the owner may be elsewhere when the write fails (D101)
+  const [at, atRun] = [sid, runId];  // the user may be elsewhere when the write fails (D101)
   const before = { own_mark: clip.own_mark, marks: clip.marks.slice(), heard: clip.heard };
   const others = clip.marks.filter((m) => !(before.own_mark && m === before.own_mark));
   clip.own_mark = value;
@@ -2062,7 +2062,7 @@ function escape(target) {
     const inCancel = ui.cancelAsk && $("jobs").contains(document.activeElement);
     const order = [ui.deleteAsk && (() => askDelete(null)), ui.cancelAsk && (() => askCancel(null))];
     for (const close of inCancel ? order : order.reverse()) if (close) close();  // one Esc closes both,
-    return;  // the question the owner was in goes last and keeps the focus
+    return;  // the question the user was in goes last and keeps the focus
   }
   // The idea question takes Esc only when nothing else is open over it.
   if (ui.ideaDelete && !ui.ideaDeleting && ui.screen === "library"
@@ -2209,7 +2209,7 @@ function bind() {
     const mid = (c) => Math.abs((c.start_s + c.end_s) / 2 - t);
     const best = list.reduce((a, c) => (mid(c) < mid(a) ? c : a));
     if (!shown().includes(best)) ui.filter = "all";
-    select(best.clip_id, { play: false });  // D53, owner: the timeline only moves to a clip
+    select(best.clip_id, { play: false });  // D53, user: the timeline only moves to a clip
   });
   const p = $("player");
   for (const ev of ["timeupdate", "play", "pause", "loadedmetadata"]) p.addEventListener(ev, renderPlayer);

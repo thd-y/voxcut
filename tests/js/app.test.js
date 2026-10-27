@@ -249,7 +249,7 @@ test("afterOpenError", () => {  // the state keeps the descriptor, the screen re
 
 test("retryAfter", () => {
   assert.equal(app.retryAfter({ offline: true }, false), true);  // nothing on screen: retry on the next good poll
-  assert.equal(app.retryAfter({ offline: true }, true), false);  // the open session stays, the owner clicks again
+  assert.equal(app.retryAfter({ offline: true }, true), false);  // the open session stays, the user clicks again
   assert.equal(app.retryAfter({ offline: true, stale: true }, false), false);  // a newer open replaced it
   assert.equal(app.retryAfter({}, false), false);  // a server error: «Сессия не открылась», no hammering
 });
@@ -435,7 +435,7 @@ test("autoOpenTarget skips hidden sessions", () => {  // D91
   assert.equal(app.autoOpenTarget([s("a", "clips", true)], null), null);
 });
 
-test("startValue", () => {  // D94: the start a delete left; what the owner typed (even "") wins
+test("startValue", () => {  // D94: the start a delete left; what the user typed (even "") wins
   assert.equal(app.startValue(new Map(), "k", "2025-03-01 09:00"), "2025-03-01 09:00");
   assert.equal(app.startValue(new Map([["k", ""]]), "k", "2025-03-01 09:00"), "");
   assert.equal(app.startValue(new Map([["k", "x"]]), "k", null), "x");

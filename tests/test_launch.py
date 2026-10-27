@@ -153,7 +153,7 @@ def test_closing_console_stops_server(tmp_path, edge):
     deadline = time.monotonic() + 10
     while not (tmp_path / ".run" / "ui.json").exists() and time.monotonic() < deadline:
         time.sleep(0.05)
-    os.close(master)  # the owner closes the VoxCut.cmd window
+    os.close(master)  # the user closes the VoxCut.cmd window
     th.join(10)
     assert done == [0]
     assert not (tmp_path / ".run" / "ui.json").exists()
