@@ -7,3 +7,6 @@ voxcut/ui/static/app.js	.toLocaleLowerCase("ru").replaceAll("ё", "е");
 voxcut/ui/static/app.js	const DECISION_ICONS = { "моё": "check"
 # The anchor config is pinned with its tests (D22).
 configs/v1.toml	note = "D32 + D37 (запас 3 с)"
+# The language switch on the first line of a bilingual document (D119).
+README.md	English | [Русский](README.ru.md)
+docs/how-it-was-built.md	English | [Русский](how-it-was-built.ru.md)
