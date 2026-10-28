@@ -298,3 +298,7 @@ A design critique found the Jobs card clipped its content without scrolling: at 
 **D130 — Security fixes before publishing.** API keys are capped (the oldest falls out), idle connections time out after 30 s, restore checks free space before unpacking and refuses a target that leads outside `data/` through a link, and CI actions are pinned by commit SHA with read-only token permissions. A known limit stays and is documented: the one-time launch code is visible on Edge's command line for up to 30 seconds. *Why:* each was a concrete local weakness; changing the launch scheme is a separate decision.
 
 **D131 — Wording.** Code and comments say "user" for the person running the product; the recorder model is not named, only its file-name format `YYYYMMDDHHMMSS.WAV`. *Why:* the product is about any user with such a recorder.
+
+## Releases (2026-10-28): D136
+
+**D136 — Release tags.** A release is a version in `pyproject.toml`, a tag `vX.Y.Z` pushed to GitHub and a GitHub Release with notes; the first is v0.1.0. Release tags are pushed only after the maintainer's explicit yes; plan tags (`plan/<name>-start`) stay local. *Why:* a release needs a tag; plan tags are a working tool, not history.

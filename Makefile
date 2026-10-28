@@ -11,7 +11,7 @@ setup:
 lint:
 	$(PY) -m ruff check .
 
-# Определение готовности любой задачи. pytest exit 5 = «тестов ещё нет», это не ошибка.
+# The definition of done for every task. pytest exit 5 means "no tests yet", not an error.
 check: lint
 	$(PY) -m pytest -q -m "not slow"; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ]
 	@if command -v node >/dev/null 2>&1; then node --test tests/js/*.test.js; \
@@ -23,15 +23,15 @@ test-slow:
 test:
 	$(PY) -m pytest -q; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ]
 
-# CI (D63): всё, кроме тестов с настоящими юнитами systemd --user.
+# CI (D63): everything except tests with real systemd --user units.
 test-ci:
 	$(PY) -m pytest -q -m "not host"; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ]
 
-# Интерфейс (U1): один сервер на продукт, окно Edge InPrivate; повторный запуск открывает ещё окно.
+# The interface (U1): one server per product, an Edge InPrivate window; a second launch opens another window.
 ui:
 	$(PY) -m voxcut.ui.launch
 
-# S9: проверки окружения при работающем make ui (вне make check).
+# S9: environment checks while make ui is running (outside make check).
 ui-envcheck:
 	$(PY) -m voxcut.ui.envcheck
 

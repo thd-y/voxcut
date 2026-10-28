@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voxcut"
-version = "0.0.0"
+version = "0.1.0"
 description = "Cut the user's speech from long microphone recordings with measured recall (Silero VAD)"
 requires-python = ">=3.12"
-# torch: CPU-сборку ставит `make setup` через --index-url до установки пакета (C6).
+# torch: `make setup` installs the CPU build via --index-url before the package (C6).
 dependencies = [
     "torch==2.14.1",
     "silero-vad==6.2.3",

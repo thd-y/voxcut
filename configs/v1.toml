@@ -1,10 +1,10 @@
-# D32, D37: конфиг v1 (пилот T8); neg_threshold не задан — по D3 это 0.01
+# D32, D37: config v1 (pilot T8); neg_threshold is unset, so per D3 it is 0.01
 threshold = 0.1
 min_speech_ms = 0
 min_silence_ms = 2000
-pad_ms = 3000  # D37: края шёпота Silero не слышит
+pad_ms = 3000  # D37: Silero misses the edges of whispers
 merge_gap_ms = 10000
 
 [meta]
 name = "v1"
-note = "D32 + D37 (запас 3 с)"
+note = "D32 + D37 (3 s padding)"
