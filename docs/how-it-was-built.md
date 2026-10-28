@@ -18,7 +18,7 @@ VoxCut was built in two weeks (14–27 October 2026) by a human and an AI coding
 
 **Measured acceptance.** "Don't lose the voice" was turned into numbers before any tuning: recall by time, recall by phrase, phrases missed entirely, and a budget for minutes of clips per hour. The labeling protocol, including a random audit of the audio outside the candidates, was fixed before listening.
 
-**Numbers.** over 360 commits in this repository; 133 decisions and 7 corrections; 23 plans and 7 design specs (kept outside this repository); about 4,100 lines of Python and 2,300 of JavaScript; about 1,000 tests (some 950 Python cases, 62 JavaScript).
+**Numbers.** over 360 commits in this repository; 136 decisions and 7 corrections; 23 plans and 7 design specs (kept outside this repository); about 4,100 lines of Python and 2,300 of JavaScript; about 1,000 tests (some 950 Python cases, 62 JavaScript).
 
 ## Episodes
 

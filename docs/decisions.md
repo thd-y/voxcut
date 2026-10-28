@@ -287,7 +287,7 @@ A design critique found the Jobs card clipped its content without scrolling: at 
 
 **D117 — CLI output.** Progress and warnings go to stderr in the D115 format (without the job's first and last lines); results to stdout without a prefix; a fatal error prints `voxcut: <text>` and exits with code 2. *Why:* pipes get clean results.
 
-## Publishing (2026-10-27): D118–D133
+## Publishing (2026-10-27): D118–D135
 
 **D118–D127, D132–D133: repository publishing.** How this repository was prepared for publication: what the README shows, languages, this log, how the history was cleaned, the demo, and the working setup afterwards. Not product decisions.
 
@@ -298,6 +298,10 @@ A design critique found the Jobs card clipped its content without scrolling: at 
 **D130 — Security fixes before publishing.** API keys are capped (the oldest falls out), idle connections time out after 30 s, restore checks free space before unpacking and refuses a target that leads outside `data/` through a link, and CI actions are pinned by commit SHA with read-only token permissions. A known limit stays and is documented: the one-time launch code is visible on Edge's command line for up to 30 seconds. *Why:* each was a concrete local weakness; changing the launch scheme is a separate decision.
 
 **D131 — Wording.** Code and comments say "user" for the person running the product; the recorder model is not named, only its file-name format `YYYYMMDDHHMMSS.WAV`. *Why:* the product is about any user with such a recorder.
+
+**D134 — CI badge.** The README badge URL may name the account; the leak check allows it only there.
+
+**D135 — Private values outside git.** The leak check's private values live in no repository.
 
 ## Releases (2026-10-28): D136
 

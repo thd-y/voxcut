@@ -67,7 +67,7 @@ The UI server binds only to 127.0.0.1, checks Host and Origin, and requires a pe
 
 - [Architecture](docs/architecture.md): a diagram of the modules and the stack.
 - [How it was built](docs/how-it-was-built.md): the method, and what went wrong along the way.
-- [Decision log](docs/decisions.md): every design decision, D1–D133.
+- [Decision log](docs/decisions.md): every design decision, D1–D136.
 - Not included: speech recognition (the clips are its input), other operating systems and browsers for the UI.
 - Built with an AI coding agent. A human set the requirements and made the decisions; the agent wrote the code, tests and documents under that review.
 - License: [MIT](LICENSE). Third-party: [notices](THIRD_PARTY_NOTICES.md).

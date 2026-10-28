@@ -75,5 +75,5 @@ def test_decision_numbers_parse_singles_and_ranges():
 
 def test_decision_log_covers_every_number_once():
     got = decision_numbers((ROOT / "docs" / "decisions.md").read_text())
-    want = [f"D{n}" for n in range(1, 134)] + ["D136"] + [f"C{n}" for n in range(1, 8)]
+    want = [f"D{n}" for n in range(1, 137)] + [f"C{n}" for n in range(1, 8)]
     assert sorted(got) == sorted(want)
