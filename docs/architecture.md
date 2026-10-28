@@ -3,30 +3,23 @@
 VoxCut is one Python package with two front doors: a CLI and a browser UI. Both use the same modules; only the job runner loads the model.
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph win["Windows"]
-        edge["Edge app window<br/>static/ (vanilla JS, no build)"]
+        edge["Edge app window<br/>static/: vanilla JS, no build"]
     end
 
     subgraph wsl["WSL2 (Linux)"]
-        launch["ui/launch.py<br/>make ui"]
-        server["ui/server.py<br/>stdlib HTTP, 127.0.0.1<br/>no torch"]
+        server["ui/server.py<br/>stdlib HTTP on 127.0.0.1, no torch"]
         lib["library.py<br/>folders, sessions, clips,<br/>backup and restore"]
         jr["journal.py<br/>append-only marks and notes"]
-        jobs["jobs.py<br/>systemd-run --user<br/>voxcut.slice, MemoryMax"]
-        cli["cli.py<br/>voxcut probs | segment | detect |<br/>export | evaluate | sweep | session"]
-        audio["audio.py<br/>ffmpeg, soundfile,<br/>Silero VAD (torch)"]
+        jobs["jobs.py<br/>systemd-run --user, MemoryMax"]
+        cli["cli.py<br/>voxcut probs, segment, detect,<br/>export, evaluate, sweep, session"]
+        audio["audio.py<br/>ffmpeg, soundfile, Silero VAD"]
         iv["intervals.py<br/>pure logic: hysteresis,<br/>padding, labels, metrics"]
     end
 
-    subgraph disk["Product folder"]
-        inbox[("inbox/<br/>hourly WAVs")]
-        data[("data/sessions/…<br/>originals, immutable runs,<br/>clips + manifest.jsonl")]
-        journal[("data/journal/<br/>journal.jsonl")]
-        backups[("backups/")]
-    end
+    disk[("Product folder<br/>inbox/: hourly WAVs<br/>data/sessions/: originals, runs, clips<br/>data/journal/journal.jsonl<br/>backups/")]
 
-    launch -- "one-time code" --> edge
     edge -- "HTTP + per-window key" --> server
     server --> lib
     server --> jr
@@ -35,11 +28,11 @@ flowchart LR
     jobs --> audio
     cli --> audio
     audio --> iv
-    lib --> inbox
-    lib --> data
-    lib --> backups
-    jr --> journal
+    lib --> disk
+    jr --> disk
 ```
+
+`make ui` (`ui/launch.py`) starts the server and opens the Edge window with a one-time code, which the page exchanges for its per-window key.
 
 ## Data flow
 
