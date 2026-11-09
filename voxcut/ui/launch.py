@@ -39,7 +39,7 @@ def edge_argv(edge: str, port: int, code: str) -> list[str]:
 
 
 def _open_window(popen, port: int, code: str) -> None:
-    popen(edge_argv(edge_path(), port, code), stdin=subprocess.DEVNULL,
+    popen(edge_argv(edge_path(), port, code), cwd="/", stdin=subprocess.DEVNULL,
           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 

@@ -229,3 +229,10 @@ def test_long_root_and_independent_products(tmp_path, edge):
     finally:
         for server, th in servers:
             stop(server, th)
+
+
+def test_edge_process_does_not_retain_product_directory(tmp_path, monkeypatch, edge):
+    calls = []
+    monkeypatch.chdir(tmp_path)
+    launch._open_window(lambda argv, **kw: calls.append(kw), 4321, 'CODE')
+    assert launch.Path(calls[0].get('cwd', '.')).resolve() != tmp_path

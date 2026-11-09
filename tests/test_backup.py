@@ -356,3 +356,51 @@ def test_restore_failed_unpack_leaves_no_tmp(lay, lay2, monkeypatch):
     with pytest.raises(OSError):
         restore_backup(lay2, name, lay2.run / "journal.in")
     assert not (lay2.run / "restore.tmp").exists()
+
+
+def test_restore_rechecks_staging_before_publishing(lay, lay2, monkeypatch):
+    make_data(lay)
+    name = make_backup(lay, 'full', NOW)
+    to_inbox(lay2, lay, name)
+    original = tarfile.TarFile.extractall
+
+    def extract(tar, path, **kw):
+        original(tar, path, **kw)
+        (Path(path) / 'data/pilot/labels.txt').write_bytes(b'changed after archive verification')
+
+    monkeypatch.setattr(tarfile.TarFile, 'extractall', extract)
+    with pytest.raises(RunError) as exc:
+        restore_backup(lay2, name, lay2.run / 'journal.in')
+    assert exc.value.code == 'restore_mismatch'
+    assert tree(lay2.data) == {}
+    assert not (lay2.run / 'restore.tmp').exists()
+
+
+@pytest.mark.parametrize('same_content', [False, True])
+def test_restore_case_aliases_respect_destination_filesystem(lay, same_content):
+    import hashlib
+
+    probe = lay.root / 'CaseProbe'
+    probe.touch()
+    sensitive = not (lay.root / 'caseprobe').exists()
+    probe.unlink()
+    contents = {'data/pilot/A.txt': b'first original',
+                'data/pilot/a.txt': b'first original' if same_content else b'second original'}
+    name = 'voxcut-backup_2026-10-21_10-00_full.tar'
+    files = {rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()}
+    with tarfile.open(lay.inbox / name, 'w') as tar:
+        for rel, data in [*contents.items(), ('backup.json', json.dumps({'files': files}).encode())]:
+            member = tarfile.TarInfo(rel)
+            member.size = len(data)
+            tar.addfile(member, io.BytesIO(data))
+    if sensitive:
+        restore_backup(lay, name, lay.run / 'journal.in')
+        assert {rel: (lay.root / rel).read_bytes() for rel in contents} == contents
+    else:
+        with pytest.raises(RunError) as exc:
+            restore_backup(lay, name, lay.run / 'journal.in')
+        assert exc.value.code == 'restore_mismatch'
+        assert tree(lay.data) == {}
+        assert not (lay.run / 'journal.in').exists()
+    assert (lay.inbox / name).is_file()
+    assert not (lay.run / 'restore.tmp').exists()

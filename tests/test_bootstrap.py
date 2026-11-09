@@ -160,3 +160,32 @@ def test_successful_setup_must_leave_a_working_cpu_environment(boot):
     assert bootstrap.main(root) != 0
     assert state['exec'] == []
     assert not (root / '.venv/.voxcut-root').exists()
+
+
+def test_environment_stamp_accepts_an_alias_of_the_same_product(boot):
+    root, state = boot
+    python = root / '.venv/bin/python'
+    python.parent.mkdir(parents=True)
+    python.touch()
+    alias = root.parent / 'alias'
+    alias.symlink_to(root, target_is_directory=True)
+    (root / '.venv/.voxcut-root').write_text(str(alias))
+    state['ready'] = True
+    with pytest.raises(Executed):
+        bootstrap.main(root)
+    assert not any(a == ['make', 'setup'] for a, kw in state['calls'])
+
+
+@pytest.mark.parametrize('copies', [False, True])
+def test_make_setup_preserves_existing_venv(tmp_path, copies):
+    root = tmp_path / 'product'
+    root.mkdir()
+    subprocess.run(['python3', '-m', 'venv', '--without-pip',
+                    *(['--copies'] if copies else []), str(root / '.venv')], check=True)
+    sentinel = root / '.venv/retained'
+    sentinel.write_text('keep')
+    makefile = Path(__file__).resolve().parents[1] / 'Makefile'
+    result = subprocess.run(['make', '-f', str(makefile), 'PY=/bin/true', 'setup'], cwd=root,
+                            capture_output=True, text=True, check=False, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sentinel.read_text() == 'keep'

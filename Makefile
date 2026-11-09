@@ -4,7 +4,7 @@ TORCH_CPU := https://download.pytorch.org/whl/cpu
 .PHONY: setup check lint test test-ci test-slow ui ui-envcheck hooks
 
 setup:
-	python3 -m venv --copies .venv
+	python3 -m venv .venv
 	$(PY) -m pip install -q --index-url $(TORCH_CPU) torch==2.14.1+cpu
 	$(PY) -m pip install -q -e '.[dev]'
 

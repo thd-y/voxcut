@@ -78,7 +78,8 @@ def test_list_never_hides_running_job(lay):
 
 def test_unit_argv_exact(tmp_path):
     assert unit_argv("voxcut-job-x", ["py", "-m", "voxcut.jobs", "d"], tmp_path) == [
-        "systemd-run", "--user", "--quiet", "--collect", "--unit=voxcut-job-x",
+        "systemd-run", "--user", "--expand-environment=no", "--quiet", "--collect",
+        "--unit=voxcut-job-x",
         "--slice=voxcut.slice",
         "-p", "MemoryMax=5G", "-p", "MemorySwapMax=0", "-p", "PrivateNetwork=yes",
         "-p", "UnsetEnvironment=HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy",
@@ -863,3 +864,20 @@ def test_job_log_duration_is_monotonic(lay, monkeypatch):  # a wall-clock step n
     monkeypatch.setattr(jobs.time, "monotonic", lambda: next(ticks))
     rc, lines = _run_job(lay, monkeypatch, "backup", {"mode": "light"}, lambda *a, **kw: "x.tar")
     assert rc == 0 and lines[-1] == "27.10.26 09:31 INFO  job done in 34m05s"
+
+
+@pytest.mark.slow
+@pytest.mark.host
+def test_real_unit_preserves_literal_path_arguments(tmp_path):
+    import sys
+
+    root = tmp_path / ('with ${VOXCUT_UNSET_' + uuid.uuid4().hex + '}')
+    root.mkdir()
+    ensure_slice(subprocess.run)
+    cmd = [sys.executable, '-c',
+           'import json, os, sys; print(json.dumps([sys.argv[1], os.getcwd()]))', str(root)]
+    argv = unit_argv('voxcut-argv-' + uuid.uuid4().hex[:8], cmd, root)
+    result = subprocess.run([argv[0], '--wait', '--pipe', *argv[1:]], capture_output=True,
+                            text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [str(root), str(root)]

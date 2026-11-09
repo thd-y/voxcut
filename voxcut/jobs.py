@@ -111,7 +111,8 @@ def validate(kind: str, params: dict, lay: library.Layout, hidden=None) -> dict:
 
 def unit_argv(unit: str, cmd: list[str], root: Path) -> list[str]:
     return [
-        "systemd-run", "--user", "--quiet", "--collect", f"--unit={unit}", f"--slice={SLICE}",
+        "systemd-run", "--user", "--expand-environment=no", "--quiet", "--collect",
+        f"--unit={unit}", f"--slice={SLICE}",
         "-p", "MemoryMax=5G", "-p", "MemorySwapMax=0", "-p", "PrivateNetwork=yes",
         "-p", "UnsetEnvironment=HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy",
         "--setenv=HF_HUB_OFFLINE=1", "--setenv=TRANSFORMERS_OFFLINE=1",

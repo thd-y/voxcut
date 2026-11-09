@@ -745,6 +745,16 @@ def restore_backup(lay: Layout, name: str, journal_out: Path) -> dict:
             shutil.rmtree(tmp, ignore_errors=True)  # a partial unpack would eat the next one's space
             raise
     try:
+        seen, bad = set(), []
+        for rel, expected in files.items():
+            path = tmp / rel
+            info = path.stat()
+            identity = (info.st_dev, info.st_ino)
+            if identity in seen or audio.sha256_file(str(path)) != expected:
+                bad.append(rel)
+            seen.add(identity)
+        if bad:
+            raise RunError("restore_mismatch", name=name, files=bad[:10])
         rels = sorted((k for k in files if k != JOURNAL_MEMBER and not k.startswith(
             "data/journal/")), key=lambda k: (Path(k).name in LAST_ON_RESTORE, k))
         conflicts, new = [], []

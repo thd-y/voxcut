@@ -45,7 +45,12 @@ def main(root: Path = ROOT) -> int:
     with (runtime_dir(root) / 'setup.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         ready = _ready(python, root)
-        moved = stamp.exists() and stamp.read_text() != str(root)
+        moved = False
+        if stamp.exists():
+            try:
+                moved = not Path(stamp.read_text()).samefile(root)
+            except OSError:
+                moved = True
         if not ready or moved:
             print('Preparing the local Python environment (CPU torch); proxy settings are '
                   'inherited. This may take a few minutes.', flush=True)
