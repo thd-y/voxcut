@@ -306,3 +306,8 @@ A design critique found the Jobs card clipped its content without scrolling: at 
 ## Releases (2026-10-28): D136
 
 **D136 — Release tags.** A release is a version in `pyproject.toml`, a tag `vX.Y.Z` pushed to GitHub and a GitHub Release with notes; the first is v0.1.0. Release tags are pushed only after the maintainer's explicit yes; plan tags (`plan/<name>-start`) stay local. *Why:* a release needs a tag; plan tags are a working tool, not history.
+
+
+## Development workflow (2026-11-09): D137
+
+**D137 — Codex project instructions.** Private development instructions use `AGENTS.md`. A local, untracked bootstrap loads them before work and reports missing instructions; it is excluded from the public repository. The main agent implements plans, with independent review at planned critical checkpoints and a final review of the entire change. Publication approval and data protection rules remain in force. *Why:* preserve the two-repository workflow when changing development agents.
