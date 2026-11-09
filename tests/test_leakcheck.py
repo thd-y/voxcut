@@ -75,6 +75,27 @@ def test_staged(repo, path, text, refused):
     assert run(values, "staged") == int(refused)
 
 
+@pytest.mark.parametrize("symlink", [False, True])
+def test_private_instructions_refused_in_index_and_push_history(repo, symlink):
+    r, values = repo
+    base = git(r, "rev-parse", "HEAD").strip()
+    (r / ".git/info/exclude").write_text("/AGENTS.md\n")
+    p = r / "AGENTS.md"
+    if symlink:
+        p.symlink_to("../AGENTS.md")
+    else:
+        p.write_text("Safe looking instructions\n")
+    git(r, "add", "-f", "AGENTS.md")
+    assert ("AGENTS.md", 0, "path:private-instructions") in leakcheck.scan(
+        "staged", [], [VALUE], [])
+    assert run(values, "staged") == 1
+    git(r, "commit", "-qm", "add instructions")
+    git(r, "rm", "AGENTS.md")
+    git(r, "commit", "-qm", "remove instructions")
+    assert run(values, "range", f"{base}..HEAD") == 1
+    assert run(values, "history") == 1
+
+
 def test_hit_names_rule_not_value(repo, capsys):
     r, values = repo
     stage(r, "b.py", f"\n\nx = '{VALUE}'\n")

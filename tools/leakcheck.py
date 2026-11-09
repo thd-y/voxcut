@@ -83,6 +83,8 @@ def style_hits(text: str, path: str, prose: bool) -> list:
 
 def path_hits(path: str, values: list[str], patterns: list[re.Pattern]) -> list:
     hits = [(path, 0, rule) for _, _, rule in scan_text(path, path, values, patterns)]
+    if path == "AGENTS.md":
+        hits.append((path, 0, "path:private-instructions"))
     if path.startswith(FORBIDDEN):
         hits.append((path, 0, "path:docs/superpowers"))
     if AUDIO.search(path):
