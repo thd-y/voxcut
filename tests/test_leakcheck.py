@@ -79,7 +79,7 @@ def test_staged(repo, path, text, refused):
 def test_private_instructions_refused_in_index_and_push_history(repo, symlink):
     r, values = repo
     base = git(r, "rev-parse", "HEAD").strip()
-    (r / ".git/info/exclude").write_text("/AGENTS.md\n")
+    (r / ".gitignore").write_text("/AGENTS.md\n")
     p = r / "AGENTS.md"
     if symlink:
         p.symlink_to("../AGENTS.md")

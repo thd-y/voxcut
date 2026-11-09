@@ -34,3 +34,6 @@ backups/
 
 # Claude Code: личные настройки (разрешения, локальные пути) — только локально
 .claude/settings.local.json
+
+# Private project instructions are loaded through a local symbolic link.
+/AGENTS.md
