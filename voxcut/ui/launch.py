@@ -1,6 +1,6 @@
 """`make ui` / VoxCut.cmd: one server per product, an Edge InPrivate app window per launch (U1, S1, S2).
 
-The first launch holds .run/ui.lock and serves; a later launch asks it over .run/ui.sock for a
+The first launch holds a private runtime lock and serves; a later launch asks it over a Unix socket for a
 fresh one-time code and only opens another window. Jobs run in systemd units and outlive this.
 """
 
@@ -17,6 +17,7 @@ from pathlib import Path
 
 from voxcut.jobs import Jobs
 from voxcut.library import Layout
+from voxcut.runtime import runtime_dir
 from voxcut.ui.server import HOST, make_server
 
 EDGE_CANDIDATES = (
@@ -61,7 +62,7 @@ def _ask_running(sock_path: Path, popen) -> int:
             break
         except (OSError, ValueError):
             if time.monotonic() > deadline:
-                raise SystemExit("VoxCut is starting or hung: no answer from .run/ui.sock")
+                raise SystemExit("VoxCut is starting or hung: no answer from the UI socket")
             time.sleep(0.2)  # the first launch is still starting its server
     _open_window(popen, reply["port"], reply["code"])
     print(f"VoxCut is already running (127.0.0.1:{reply['port']}): opened another window")
@@ -100,13 +101,14 @@ def main(argv: list[str] | None = None, popen=subprocess.Popen, on_ready=None,
     ap.add_argument("--root", default=str(ROOT))
     lay = Layout(Path(ap.parse_args(argv).root).resolve())
     lay.ensure()
-    lock_fd = os.open(lay.run / "ui.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    run = runtime_dir(lay.root)
+    lock_fd = os.open(run / "ui.lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         os.close(lock_fd)
-        return _ask_running(lay.run / "ui.sock", popen)
-    sock_path, meta_path = lay.run / "ui.sock", lay.run / "ui.json"
+        return _ask_running(run / "ui.sock", popen)
+    sock_path, meta_path = run / "ui.sock", run / "ui.json"
     try:
         sock_path.unlink(missing_ok=True)  # we hold the lock: a leftover socket is stale
         jobs = Jobs(lay)

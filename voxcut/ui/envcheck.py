@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 from voxcut.jobs import JobError, ensure_slice, unit_argv
+from voxcut.runtime import runtime_dir
 from voxcut.ui.launch import ROOT, edge_argv, edge_path
 
 PROBE_BLOCKED = 3  # ENETUNREACH: an empty network namespace has no route at all
@@ -59,7 +60,7 @@ def run_probe(root: Path, isolated: bool) -> int | None:
 
 def run_checks(root: Path) -> list[tuple[bool, str]]:
     out = []
-    meta = json.loads((root / ".run" / "ui.json").read_text())
+    meta = json.loads((runtime_dir(root) / "ui.json").read_text())
     pid, port = meta["pid"], meta["port"]
 
     ss = subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True, check=False).stdout
@@ -93,8 +94,8 @@ def run_checks(root: Path) -> list[tuple[bool, str]]:
 
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT
-    if not (root / ".run" / "ui.json").is_file():
-        print("FAIL no .run/ui.json: run make ui first")
+    if not (runtime_dir(root) / "ui.json").is_file():
+        print("FAIL no UI runtime metadata: run make ui first")
         return 1
     results = run_checks(root)
     for ok, text in results:

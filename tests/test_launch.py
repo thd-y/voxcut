@@ -1,6 +1,7 @@
 import json
 import os
 import socket
+import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
@@ -8,6 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 from test_server_security import Client
 
+from voxcut import runtime
 from voxcut.ui import launch
 
 
@@ -25,6 +27,13 @@ class FakePopen:
             url = urlsplit(argv[-1].removeprefix("--app="))
             out.append((url.port, url.fragment))
         return out
+
+
+@pytest.fixture(autouse=True)
+def runtime_base(monkeypatch):
+    with tempfile.TemporaryDirectory(prefix="voxcut-test-") as d:
+        monkeypatch.setattr(runtime, "BASE", launch.Path(d) / "ipc")
+        yield
 
 
 @pytest.fixture
@@ -85,13 +94,12 @@ def test_second_instance_gets_new_code(tmp_path, edge):
         assert c.req("POST", "/api/exchange", {"code": code2})[0] == 200
     finally:
         stop(server, th)
-    assert not (tmp_path / ".run" / "ui.sock").exists()
-    assert not (tmp_path / ".run" / "ui.json").exists()
+    assert not (runtime.runtime_dir(tmp_path) / "ui.sock").exists()
+    assert not (runtime.runtime_dir(tmp_path) / "ui.json").exists()
 
 
 def test_stale_socket_recovered(tmp_path, edge, capsys):
-    run = tmp_path / ".run"
-    run.mkdir(mode=0o700)
+    run = runtime.runtime_dir(tmp_path)
     s = socket.socket(socket.AF_UNIX)
     s.bind(str(run / "ui.sock"))
     s.close()  # the file stays, nobody listens: a crashed server
@@ -111,7 +119,7 @@ def test_ui_json_no_secrets(tmp_path, edge):
     p = FakePopen()
     server, th = start_first(tmp_path, p)
     try:
-        run = tmp_path / ".run"
+        run = runtime.runtime_dir(tmp_path)
         meta = json.loads((run / "ui.json").read_text())
         assert meta == {"pid": os.getpid(), "port": server.server_address[1]}
         assert p.opened()[0][1] not in (run / "ui.json").read_text()
@@ -126,7 +134,7 @@ def test_socket_rejects_other_commands(tmp_path, edge):
     server, th = start_first(tmp_path, FakePopen())
     try:
         with socket.socket(socket.AF_UNIX) as s:
-            s.connect(str(tmp_path / ".run" / "ui.sock"))
+            s.connect(str(runtime.runtime_dir(tmp_path) / "ui.sock"))
             s.sendall(b"shell rm -rf\n")
             assert s.recv(4096) == b""
     finally:
@@ -151,12 +159,12 @@ def test_closing_console_stops_server(tmp_path, edge):
         ["--root", str(tmp_path)], popen=FakePopen(), console=console)), daemon=True)
     th.start()
     deadline = time.monotonic() + 10
-    while not (tmp_path / ".run" / "ui.json").exists() and time.monotonic() < deadline:
+    while not (runtime.runtime_dir(tmp_path) / "ui.json").exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     os.close(master)  # the user closes the VoxCut.cmd window
     th.join(10)
     assert done == [0]
-    assert not (tmp_path / ".run" / "ui.json").exists()
+    assert not (runtime.runtime_dir(tmp_path) / "ui.json").exists()
 
 
 @pytest.mark.parametrize("rc, control, ok, text", [
@@ -205,3 +213,19 @@ def test_envcheck_run_probe_timeout(monkeypatch, tmp_path):
 
     monkeypatch.setattr(envcheck.subprocess, "run", hang)
     assert envcheck.run_probe(tmp_path, True) is None
+
+
+def test_long_root_and_independent_products(tmp_path, edge):
+    roots = [tmp_path / ("a" * 120), tmp_path / "second"]
+    servers = []
+    try:
+        for root in roots:
+            p = FakePopen()
+            server, th = start_first(root, p)
+            servers.append((server, th))
+            assert runtime.runtime_dir(root).parent != root
+            assert not (root / ".run" / "ui.sock").exists()
+        assert servers[0][0].server_address != servers[1][0].server_address
+    finally:
+        for server, th in servers:
+            stop(server, th)
