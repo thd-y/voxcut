@@ -4,6 +4,10 @@ English | [Русский](running.ru.md)
 
 VoxCut has a Linux command line and a Windows interface. Processing stays local. The interface runs in WSL2 and opens Microsoft Edge; it does not require a native Windows Python installation.
 
+- [Ubuntu: command line](#ubuntu-command-line)
+- [WSL: prepare once](#wsl-prepare-once)
+- [Windows: clone and double-click](#windows-clone-and-double-click)
+
 ## Prerequisites
 
 - **Ubuntu CLI:** Ubuntu 24.04 or another Linux with Python 3.12+, `make`, ffmpeg and libsndfile.
