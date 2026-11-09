@@ -5,7 +5,7 @@ TORCH_CPU := https://download.pytorch.org/whl/cpu
 
 setup:
 	python3 -m venv --copies .venv
-	$(PY) -m pip install -q --index-url $(TORCH_CPU) torch==2.14.1
+	$(PY) -m pip install -q --index-url $(TORCH_CPU) torch==2.14.1+cpu
 	$(PY) -m pip install -q -e '.[dev]'
 
 lint:

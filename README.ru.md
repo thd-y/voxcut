@@ -39,6 +39,8 @@
 
 ## Быстрый старт
 
+[Полная инструкция установки и запуска: Ubuntu, WSL и Windows](docs/running.ru.md).
+
 ```sh
 sudo apt install ffmpeg libsndfile1 python3.12-venv
 make setup    # .venv с CPU-сборкой torch

@@ -1,4 +1,6 @@
 import os
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -6,11 +8,15 @@ from voxcut import runtime
 
 
 @pytest.fixture(autouse=True)
-def runtime_base(tmp_path, monkeypatch):
-    monkeypatch.setattr(runtime, 'BASE', tmp_path / 'runtime')
+def runtime_base(monkeypatch):
+    with tempfile.TemporaryDirectory(prefix='voxcut-runtime-', dir='/tmp') as d:
+        monkeypatch.setattr(runtime, 'BASE', Path(d) / 'private')
+        yield
 
 
 def test_private_and_distinct_product_directories(tmp_path):
+    (tmp_path / 'one').mkdir()
+    (tmp_path / 'two').mkdir()
     a = runtime.runtime_dir(tmp_path / 'one')
     b = runtime.runtime_dir(tmp_path / 'two')
     assert a != b
@@ -42,3 +48,12 @@ def test_unsafe_product_runtime_refused(tmp_path):
     path.symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(SystemExit, match='Unsafe runtime directory'):
         runtime.runtime_dir(tmp_path)
+
+
+def test_same_product_with_an_alias_shares_runtime(tmp_path):
+    root = tmp_path / 'CaseProduct'
+    root.mkdir()
+    alias = tmp_path / 'caseproduct'
+    if not alias.exists():
+        alias.symlink_to(root, target_is_directory=True)
+    assert runtime.runtime_dir(root) == runtime.runtime_dir(alias)

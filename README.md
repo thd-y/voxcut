@@ -39,6 +39,8 @@ One multi-hour session was labeled by hand: every candidate in full, plus a rand
 
 ## Quick start
 
+[Full installation and launch guide: Ubuntu, WSL and Windows](docs/running.md).
+
 ```sh
 sudo apt install ffmpeg libsndfile1 python3.12-venv
 make setup    # .venv with the CPU build of torch

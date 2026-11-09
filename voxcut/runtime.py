@@ -10,7 +10,9 @@ BASE = _USER_RUNTIME / 'voxcut' if _USER_RUNTIME.is_dir() else Path(f'/tmp/voxcu
 
 
 def runtime_dir(root: Path) -> Path:
-    name = hashlib.sha256(os.fsencode(root.resolve())).hexdigest()[:24]
+    info = root.resolve().stat()
+    identity = f'{info.st_dev}:{info.st_ino}'.encode()
+    name = hashlib.sha256(identity).hexdigest()[:24]
     for path in (BASE, BASE / name):
         path.mkdir(mode=0o700, exist_ok=True)
         info = path.lstat()

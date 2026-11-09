@@ -15,6 +15,15 @@ CHECK = ("import voxcut.ui.launch; from importlib.metadata import version; "
          "assert version('torch').endswith('+cpu'); version('silero-vad')")
 
 
+def _ready(python: Path, root: Path) -> bool:
+    try:
+        return python.is_file() and subprocess.run(
+            [str(python), '-c', CHECK], cwd=root, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False).returncode == 0
+    except OSError:
+        return False
+
+
 def main(root: Path = ROOT) -> int:
     if sys.version_info < (3, 12):  # noqa: UP036 - bootstrap runs in the system Python
         print('VoxCut requires Python 3.12 or newer in WSL. See docs/running.md.', file=sys.stderr)
@@ -35,12 +44,7 @@ def main(root: Path = ROOT) -> int:
     stamp = root / '.venv' / '.voxcut-root'
     with (runtime_dir(root) / 'setup.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
-            ready = python.is_file() and subprocess.run(
-                [str(python), '-c', CHECK], cwd=root, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, check=False).returncode == 0
-        except OSError:
-            ready = False
+        ready = _ready(python, root)
         moved = stamp.exists() and stamp.read_text() != str(root)
         if not ready or moved:
             print('Preparing the local Python environment (CPU torch); proxy settings are '
@@ -50,6 +54,10 @@ def main(root: Path = ROOT) -> int:
                 print('Environment setup failed. See docs/running.md; keep your proxy enabled.',
                       file=sys.stderr)
                 return result.returncode
+            if not _ready(python, root):
+                print('The CPU environment is incomplete after setup. See docs/running.md.',
+                      file=sys.stderr)
+                return 1
         stamp.write_text(str(root))
     os.chdir(root)
     os.execv(str(python), [str(python), '-m', 'voxcut.ui.launch', '--root', str(root)])

@@ -19,7 +19,7 @@ def boot(tmp_path, monkeypatch):
     monkeypatch.setattr(bootstrap.shutil, 'which', lambda name: '/usr/bin/' + name)
     monkeypatch.setattr(bootstrap.ctypes.util, 'find_library', lambda name: 'libsndfile.so.1')
     monkeypatch.chdir(tmp_path)
-    state = {'ready': False, 'setup_rc': 0, 'calls': [], 'exec': []}
+    state = {'ready': False, 'setup_rc': 0, 'setup_ready': True, 'calls': [], 'exec': []}
 
     def run(argv, **kw):
         state['calls'].append((argv, kw))
@@ -28,7 +28,7 @@ def boot(tmp_path, monkeypatch):
                 python = root / '.venv/bin/python'
                 python.parent.mkdir(parents=True, exist_ok=True)
                 python.touch()
-                state['ready'] = True
+                state['ready'] = state['setup_ready']
             return subprocess.CompletedProcess(argv, state['setup_rc'])
         if argv[0].endswith('/python'):
             return subprocess.CompletedProcess(argv, 0 if state['ready'] else 1)
@@ -152,3 +152,11 @@ bootstrap.main(Path({str(root)!r}))
         stdout, stderr = process.communicate(timeout=10)
         assert process.returncode == 0, (stdout, stderr)
     assert (root / 'events').read_text().splitlines() == ['start', 'end']
+
+
+def test_successful_setup_must_leave_a_working_cpu_environment(boot):
+    root, state = boot
+    state['setup_ready'] = False
+    assert bootstrap.main(root) != 0
+    assert state['exec'] == []
+    assert not (root / '.venv/.voxcut-root').exists()
